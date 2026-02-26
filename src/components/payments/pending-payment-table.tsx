@@ -60,7 +60,12 @@ const columns = [
   { key: "receipt", label: "Receipt", width: "70px", align: "center" as const },
   { key: "phone", label: "Phone", width: "110px" },
   { key: "status", label: "Status", width: "80px", align: "center" as const },
-  { key: "actions", label: "Actions", width: "120px", align: "center" as const },
+  {
+    key: "actions",
+    label: "Actions",
+    width: "120px",
+    align: "center" as const,
+  },
 ];
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -71,7 +76,12 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-export function PendingPaymentTable({ initialData, students = [], courses = [], packages = [] }: PendingPaymentTableProps) {
+export function PendingPaymentTable({
+  initialData,
+  students = [],
+  courses = [],
+  packages = [],
+}: PendingPaymentTableProps) {
   const [data, setData] = useState<PendingPaymentRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -79,7 +89,8 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<PaymentModalMode>("edit");
-  const [selectedRecord, setSelectedRecord] = useState<PendingPaymentRow | null>(null);
+  const [selectedRecord, setSelectedRecord] =
+    useState<PendingPaymentRow | null>(null);
 
   // Filter data based on search
   const filteredData = useMemo(() => {
@@ -93,7 +104,7 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
         row.branchName.toLowerCase().includes(query) ||
         (row.courseName?.toLowerCase().includes(query) ?? false) ||
         (row.packageName?.toLowerCase().includes(query) ?? false) ||
-        row.status.toLowerCase().includes(query)
+        row.status.toLowerCase().includes(query),
     );
   }, [data, searchQuery]);
 
@@ -111,7 +122,10 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
   };
 
   // Open modal with specific mode
-  const openModal = (mode: PaymentModalMode, record: PendingPaymentRow | null) => {
+  const openModal = (
+    mode: PaymentModalMode,
+    record: PendingPaymentRow | null,
+  ) => {
     setModalMode(mode);
     setSelectedRecord(record);
     setModalOpen(true);
@@ -162,7 +176,7 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
         throw new Error(result.error);
       }
     },
-    [students, courses, packages]
+    [students, courses, packages],
   );
 
   // Handle update
@@ -198,15 +212,15 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                   paidAt: formData.paidAt,
                   receiptPhoto: formData.receiptPhoto,
                 }
-              : item
-          )
+              : item,
+          ),
         );
       } else {
         console.error("Failed to update:", result.error);
         throw new Error(result.error);
       }
     },
-    [selectedRecord, courses, packages]
+    [selectedRecord, courses, packages],
   );
 
   // Handle approve from modal
@@ -258,7 +272,7 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
       <span
         className={cn(
           "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
-          styles[status] ?? "bg-gray-100 text-gray-700"
+          styles[status] ?? "bg-gray-100 text-gray-700",
         )}
       >
         {status}
@@ -312,7 +326,7 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                 onChange={(e) => handleSearchChange(e.target.value)}
                 className={cn(
                   "pr-20 py-6 border-muted-foreground/30",
-                  searchQuery && "font-semibold"
+                  searchQuery && "font-semibold",
                 )}
               />
 
@@ -337,7 +351,7 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
           {/* Table */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1400px] w-full table-fixed border-separate border-spacing-0">
+            <table className="min-w-[1700px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
                   {columns.map((col, idx) => (
@@ -348,7 +362,7 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.align === "right" && "text-right"
+                        col.align === "right" && "text-right",
                       )}
                       style={{
                         width: col.width,
@@ -364,7 +378,7 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
             </table>
 
             {/* Body Table */}
-            <table className="min-w-[1400px] w-full table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="min-w-[1700px] w-full table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
@@ -382,11 +396,14 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                       className={cn(
                         "transition hover:bg-[#f0f6ff]",
                         rowIdx === paginatedData.length - 1 &&
-                          "rounded-bl-lg rounded-br-lg"
+                          "rounded-bl-lg rounded-br-lg",
                       )}
                     >
                       {/* Parent Name */}
-                      <td className="px-4 py-3" style={{ width: columns[0].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[0].width }}
+                      >
                         <TruncatedText text={row.parentName} maxLength={12} />
                       </td>
 
@@ -399,17 +416,26 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                       </td>
 
                       {/* Branch */}
-                      <td className="px-4 py-3" style={{ width: columns[2].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[2].width }}
+                      >
                         <TruncatedText text={row.branchName} maxLength={10} />
                       </td>
 
                       {/* Program */}
-                      <td className="px-4 py-3 font-bold" style={{ width: columns[3].width }}>
+                      <td
+                        className="px-4 py-3 font-bold"
+                        style={{ width: columns[3].width }}
+                      >
                         <TruncatedText text={row.courseName} maxLength={12} />
                       </td>
 
                       {/* Package */}
-                      <td className="px-4 py-3" style={{ width: columns[4].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[4].width }}
+                      >
                         <TruncatedText text={row.packageName} maxLength={10} />
                       </td>
 
@@ -422,19 +448,29 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                       </td>
 
                       {/* Pay Method */}
-                      <td className="px-4 py-3" style={{ width: columns[6].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[6].width }}
+                      >
                         {row.paymentMethod
-                          ? PAYMENT_METHOD_LABELS[row.paymentMethod] ?? row.paymentMethod
+                          ? (PAYMENT_METHOD_LABELS[row.paymentMethod] ??
+                            row.paymentMethod)
                           : "-"}
                       </td>
 
                       {/* Created On */}
-                      <td className="px-4 py-3" style={{ width: columns[7].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[7].width }}
+                      >
                         {formatDate(row.createdAt)}
                       </td>
 
                       {/* Paid On */}
-                      <td className="px-4 py-3" style={{ width: columns[8].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[8].width }}
+                      >
                         {formatDate(row.paidAt)}
                       </td>
 
@@ -470,7 +506,10 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                       </td>
 
                       {/* Phone */}
-                      <td className="px-4 py-3" style={{ width: columns[10].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[10].width }}
+                      >
                         {row.parentPhone ?? row.studentPhone ?? "-"}
                       </td>
 
@@ -483,7 +522,10 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                       </td>
 
                       {/* Actions */}
-                      <td className="px-4 py-3" style={{ width: columns[12].width }}>
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[12].width }}
+                      >
                         <div className="flex items-center justify-center gap-2">
                           {/* Edit Button */}
                           <button
@@ -505,10 +547,14 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                               "rounded-lg border p-2 transition",
                               canApprove(row)
                                 ? "border-muted-foreground/30 text-muted-foreground hover:border-transparent hover:bg-green-500 hover:text-white"
-                                : "border-muted-foreground/20 text-muted-foreground/30 cursor-not-allowed"
+                                : "border-muted-foreground/20 text-muted-foreground/30 cursor-not-allowed",
                             )}
                             aria-label="Approve payment"
-                            title={canApprove(row) ? "Approve" : "Upload receipt and set paid date to approve"}
+                            title={
+                              canApprove(row)
+                                ? "Approve"
+                                : "Upload receipt and set paid date to approve"
+                            }
                           >
                             <Check className="h-5 w-5" />
                           </button>
@@ -555,7 +601,9 @@ export function PendingPaymentTable({ initialData, students = [], courses = [], 
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(totalPages, p + 1))
+                  }
                   disabled={currentPage === totalPages}
                 >
                   <ChevronRight className="h-4 w-4" />

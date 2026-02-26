@@ -51,6 +51,11 @@ const navigationItems = [
     href: "/trial",
   },
   {
+    title: "Student",
+    icon: FlaskConical,
+    href: "/student",
+  },
+  {
     title: "Mark Attendance",
     icon: CalendarCheck,
     href: "/attendance",
