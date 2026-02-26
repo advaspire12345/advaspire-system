@@ -42,8 +42,8 @@ export function HexagonAvatar({
     if (!ctx) return;
 
     // Get theme colors
-    const primaryColor = getComputedColor("--chart-1");
-    const secondaryColor = getComputedColor("--chart-2");
+    const primaryColor = getComputedColor("--primary-button-color");
+    const secondaryColor = getComputedColor("--secondary-button-color");
     const backgroundColor = getComputedColor("--background");
     const mutedColor = getComputedColor("--muted");
 
@@ -91,7 +91,13 @@ export function HexagonAvatar({
       while (i <= len) {
         p1 = p2;
         p2 = path[++i % len];
-        ctx!.arcTo(p1.x, p1.y, (p1.x + p2.x) / 2, (p1.y + p2.y) / 2, cornerRadius);
+        ctx!.arcTo(
+          p1.x,
+          p1.y,
+          (p1.x + p2.x) / 2,
+          (p1.y + p2.y) / 2,
+          cornerRadius,
+        );
       }
     }
 

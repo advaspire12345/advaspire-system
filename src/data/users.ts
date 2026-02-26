@@ -58,26 +58,6 @@ export async function getUserByAuthId(authId: string): Promise<User | null> {
   return data;
 }
 
-/**
- * Get user by Clerk ID (legacy - will be deprecated)
- * @deprecated Use getUserByAuthId instead
- */
-export async function getUserByClerkId(clerkId: string): Promise<User | null> {
-  const { data, error } = await supabaseAdmin
-    .from('users')
-    .select('*')
-    .eq('clerk_id', clerkId)
-    .is('deleted_at', null)
-    .single();
-
-  if (error) {
-    console.error('Error fetching user by clerk_id:', error);
-    return null;
-  }
-
-  return data;
-}
-
 export async function getUsersByBranchId(branchId: string): Promise<User[]> {
   const { data, error } = await supabaseAdmin
     .from('users')

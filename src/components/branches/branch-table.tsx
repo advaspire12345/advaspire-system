@@ -45,7 +45,9 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit" | "delete">("add");
-  const [selectedRecord, setSelectedRecord] = useState<BranchEntry | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<BranchEntry | null>(
+    null,
+  );
 
   // Filter data based on search
   const filteredData = useMemo(() => {
@@ -56,7 +58,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
       (row) =>
         row.branchName.toLowerCase().includes(query) ||
         row.branchCompany.toLowerCase().includes(query) ||
-        row.adminName?.toLowerCase().includes(query)
+        row.adminName?.toLowerCase().includes(query),
     );
   }, [data, searchQuery]);
 
@@ -169,7 +171,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
           {/* Table */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1240px] w-full table-fixed border-separate border-spacing-0">
+            <table className="min-w-[1390px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
                   {columns.map((col, idx) => (
@@ -179,7 +181,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
                         "bg-transparent px-4 py-3 text-left text-base font-bold text-foreground",
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
-                        col.align === "center" && "text-center"
+                        col.align === "center" && "text-center",
                       )}
                       style={{
                         width: col.width,
@@ -195,7 +197,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
             </table>
 
             {/* Body Table */}
-            <table className="min-w-[1240px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="min-w-[1390px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
@@ -213,7 +215,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
                       className={cn(
                         "transition hover:bg-[#f0f6ff]",
                         rowIdx === paginatedData.length - 1 &&
-                          "rounded-bl-lg rounded-br-lg"
+                          "rounded-bl-lg rounded-br-lg",
                       )}
                     >
                       {/* Name */}

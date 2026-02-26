@@ -32,11 +32,19 @@ const columns = [
   { key: "level", label: "Level", width: "80px", align: "center" as const },
   { key: "adstar", label: "Adstar", width: "80px", align: "center" as const },
   { key: "adcoin", label: "Adcoin", width: "100px", align: "right" as const },
-  { key: "achievement", label: "Achievement", width: "140px", align: "center" as const },
+  {
+    key: "achievement",
+    label: "Achievement",
+    width: "140px",
+    align: "center" as const,
+  },
   { key: "action", label: "Action", width: "100px", align: "center" as const },
 ];
 
-export function LeaderboardTable({ initialData, participants }: LeaderboardTableProps) {
+export function LeaderboardTable({
+  initialData,
+  participants,
+}: LeaderboardTableProps) {
   const [data] = useState<LeaderboardEntry[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -44,7 +52,7 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedRecipientId, setSelectedRecipientId] = useState<string | null>(
-    null
+    null,
   );
 
   // Filter data based on search
@@ -56,7 +64,7 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
       (row) =>
         row.studentName.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query) ||
-        (row.program?.toLowerCase().includes(query) ?? false)
+        (row.program?.toLowerCase().includes(query) ?? false),
     );
   }, [data, searchQuery]);
 
@@ -145,9 +153,9 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto min-w-[1040px]">
             {/* Header Table */}
-            <table className="min-w-[1140px] w-full table-fixed border-separate border-spacing-0">
+            <table className="w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
                   {columns.map((col, idx) => (
@@ -158,7 +166,7 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.align === "right" && "text-right"
+                        col.align === "right" && "text-right",
                       )}
                       style={{
                         width: col.width,
@@ -174,7 +182,7 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
             </table>
 
             {/* Body Table */}
-            <table className="min-w-[1140px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="w-full table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
@@ -192,7 +200,7 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
                       className={cn(
                         "transition hover:bg-[#f0f6ff]",
                         rowIdx === paginatedData.length - 1 &&
-                          "rounded-bl-lg rounded-br-lg"
+                          "rounded-bl-lg rounded-br-lg",
                       )}
                     >
                       {/* Rank */}
@@ -204,7 +212,7 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
                           <span
                             className={cn(
                               "flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold",
-                              getRankStyle(row.rank)
+                              getRankStyle(row.rank),
                             )}
                           >
                             {row.rank}
@@ -296,7 +304,9 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
                           {row.achievements.slice(0, 4).map((achievement) => (
                             <img
                               key={achievement.id}
-                              src={achievement.icon_url || "/badges/default.png"}
+                              src={
+                                achievement.icon_url || "/badges/default.png"
+                              }
                               alt={achievement.name}
                               title={achievement.name}
                               className="h-6 w-6 rounded-full object-cover border border-muted-foreground/20"
@@ -308,7 +318,9 @@ export function LeaderboardTable({ initialData, participants }: LeaderboardTable
                             </span>
                           )}
                           {row.achievements.length === 0 && (
-                            <span className="text-xs text-muted-foreground">-</span>
+                            <span className="text-xs text-muted-foreground">
+                              -
+                            </span>
                           )}
                         </div>
                       </td>

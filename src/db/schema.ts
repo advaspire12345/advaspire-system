@@ -42,7 +42,6 @@ export type TrialStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 
 export interface User {
   id: string;
   auth_id: string | null;
-  clerk_id: string | null; // Legacy
   email: string;
   name: string;
   role: UserRole;
@@ -71,6 +70,8 @@ export interface Branch {
   deleted_at: string | null;
 }
 
+export type Gender = 'male' | 'female' | 'other';
+
 /**
  * Student - Enrolled learner
  */
@@ -80,6 +81,10 @@ export interface Student {
   email: string | null;
   phone: string | null;
   photo: string | null;
+  date_of_birth: string | null;
+  gender: Gender | null;
+  school_name: string | null;
+  cover_photo: string | null;
   branch_id: string;
   adcoin_balance: number;
   created_at: string;
@@ -93,10 +98,12 @@ export interface Student {
 export interface Parent {
   id: string;
   auth_id: string | null;
-  clerk_id: string | null; // Legacy
   name: string;
   email: string;
   phone: string | null;
+  address: string | null;
+  postcode: string | null;
+  city: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -414,6 +421,10 @@ export interface StudentInsert {
   email?: string | null;
   phone?: string | null;
   photo?: string | null;
+  date_of_birth?: string | null;
+  gender?: Gender | null;
+  school_name?: string | null;
+  cover_photo?: string | null;
   branch_id: string;
   adcoin_balance?: number;
 }
@@ -422,6 +433,9 @@ export interface ParentInsert {
   name: string;
   email: string;
   phone?: string | null;
+  address?: string | null;
+  postcode?: string | null;
+  city?: string | null;
   auth_id?: string | null;
 }
 
@@ -567,6 +581,10 @@ export interface StudentUpdate {
   email?: string | null;
   phone?: string | null;
   photo?: string | null;
+  date_of_birth?: string | null;
+  gender?: Gender | null;
+  school_name?: string | null;
+  cover_photo?: string | null;
   branch_id?: string;
   adcoin_balance?: number;
 }
@@ -575,6 +593,9 @@ export interface ParentUpdate {
   name?: string;
   email?: string;
   phone?: string | null;
+  address?: string | null;
+  postcode?: string | null;
+  city?: string | null;
 }
 
 export interface CourseUpdate {

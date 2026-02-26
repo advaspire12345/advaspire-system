@@ -116,7 +116,7 @@ export function RecentActivity({ activities, branches }: RecentActivityProps) {
                       {item.branchName}
                     </span>
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {item.timeAgo}
                   </p>
                 </div>

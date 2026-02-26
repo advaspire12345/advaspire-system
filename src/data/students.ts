@@ -6,6 +6,8 @@ import type {
   StudentWithBranch,
   StudentWithEnrollments,
   StudentFull,
+  EnrollmentStatus,
+  EnrollmentInsert,
 } from "@/db/schema";
 
 // ============================================
@@ -366,6 +368,143 @@ export async function unlinkParentFromStudent(parentId: string, studentId: strin
 
   if (error) {
     console.error('Error unlinking parent from student:', error);
+    return false;
+  }
+
+  return true;
+}
+
+// ============================================
+// TABLE VIEW OPERATIONS
+// ============================================
+
+export interface StudentTableRow {
+  id: string;
+  photo: string | null;
+  name: string;
+  email: string | null;
+  branchId: string;
+  branchName: string;
+  programName: string | null;
+  courseId: string | null;
+  scheduleDays: string[];
+  scheduleTime: string | null;
+  enrollDate: string;
+  expiredDate: string | null;
+  enrollmentStatus: EnrollmentStatus | null;
+  adcoinBalance: number;
+}
+
+/**
+ * Optimized query for student table view
+ * Uses valid Supabase query syntax matching actual database schema
+ */
+export async function getStudentsForTable(
+  userEmail: string,
+  branchId?: string
+): Promise<StudentTableRow[]> {
+  // Get user's branch access
+  const { getUserBranchIdByEmail } = await import("./users");
+  const userBranchId = await getUserBranchIdByEmail(userEmail);
+
+  // Build base query with actual database columns
+  let query = supabaseAdmin
+    .from('students')
+    .select(`
+      id,
+      photo,
+      name,
+      email,
+      branch_id,
+      adcoin_balance,
+      created_at,
+      branch:branches(name),
+      enrollments(
+        id,
+        status,
+        enrolled_at,
+        sessions_remaining,
+        day_of_week,
+        start_time,
+        end_time,
+        course:courses(id, name)
+      )
+    `)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false });
+
+  // Apply branch filter
+  const effectiveBranchId = branchId || userBranchId;
+  if (effectiveBranchId) {
+    query = query.eq('branch_id', effectiveBranchId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching students for table:', error);
+    return [];
+  }
+
+  // Process results with defensive typing
+  return (data ?? []).map((student: any) => {
+    // Get most relevant active enrollment
+    const activeEnrollment = student.enrollments
+      ?.filter((e: any) => e.status === 'active')
+      .sort((a: any, b: any) =>
+        new Date(b.enrolled_at || 0).getTime() - new Date(a.enrolled_at || 0).getTime()
+      )[0] || null;
+
+    // Parse schedule from enrollment
+    let scheduleDays: string[] = [];
+    let scheduleTime: string | null = null;
+
+    if (activeEnrollment?.day_of_week) {
+      // day_of_week might be comma-separated like "Mon,Wed" or JSON array
+      try {
+        const parsed = JSON.parse(activeEnrollment.day_of_week);
+        scheduleDays = Array.isArray(parsed) ? parsed : [activeEnrollment.day_of_week];
+      } catch {
+        scheduleDays = activeEnrollment.day_of_week.split(',').map((d: string) => d.trim());
+      }
+    }
+
+    if (activeEnrollment?.start_time && activeEnrollment?.end_time) {
+      scheduleTime = `${activeEnrollment.start_time}-${activeEnrollment.end_time}`;
+    } else if (activeEnrollment?.start_time) {
+      scheduleTime = activeEnrollment.start_time;
+    }
+
+    return {
+      id: student.id,
+      photo: student.photo || null,
+      name: student.name,
+      email: student.email || null,
+      branchId: student.branch_id,
+      branchName: student.branch?.name || 'N/A',
+      programName: activeEnrollment?.course?.name || null,
+      courseId: activeEnrollment?.course?.id || null,
+      scheduleDays,
+      scheduleTime,
+      enrollDate: student.created_at,
+      expiredDate: null, // Can be calculated from sessions_remaining if needed
+      enrollmentStatus: activeEnrollment?.status || null,
+      adcoinBalance: student.adcoin_balance || 0,
+    };
+  });
+}
+
+// ============================================
+// ENROLLMENT OPERATIONS
+// ============================================
+
+export async function createEnrollment(enrollmentData: EnrollmentInsert): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('enrollments')
+    .insert(enrollmentData);
+
+  if (error) {
+    console.error('Error creating enrollment:', error);
     return false;
   }
 
