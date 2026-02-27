@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { updatePayment, deletePayment, approvePayment, createPayment } from "@/data/payments";
 import type { PaymentMethod, Payment } from "@/db/schema";
 
@@ -42,6 +42,7 @@ export async function updatePendingPaymentAction(
     }
 
     revalidatePath("/pending-payments");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error updating payment:", error);
@@ -63,6 +64,7 @@ export async function approvePaymentAction(
     }
 
     revalidatePath("/pending-payments");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error approving payment:", error);
@@ -84,6 +86,7 @@ export async function deletePendingPaymentAction(
     }
 
     revalidatePath("/pending-payments");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error deleting payment:", error);
@@ -112,6 +115,7 @@ export async function addPendingPaymentAction(
     }
 
     revalidatePath("/pending-payments");
+    revalidateTag("dashboard", "max");
     return { success: true, payment: result };
   } catch (error) {
     console.error("Error creating payment:", error);

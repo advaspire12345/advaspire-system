@@ -1,5 +1,15 @@
 import { supabaseAdmin, withRetry } from "@/db";
 import { isSuperAdmin, getUserBranchIdByEmail, getUserByEmail } from "./users";
+import { unstable_cache } from "next/cache";
+
+// Helper function to group array items by a key
+function groupBy<T>(array: T[], key: keyof T): Record<string, T[]> {
+  return array.reduce((acc, item) => {
+    const k = String(item[key]);
+    (acc[k] = acc[k] || []).push(item);
+    return acc;
+  }, {} as Record<string, T[]>);
+}
 
 export interface DashboardStats {
   totalAttendance: number;
@@ -76,24 +86,28 @@ export interface BranchOption {
   name: string;
 }
 
-export async function getBranches(userEmail: string): Promise<BranchOption[]> {
-  return withRetry(async () => {
-    const userBranchId = await getUserBranchIdByEmail(userEmail);
+export const getBranches = unstable_cache(
+  async (userEmail: string): Promise<BranchOption[]> => {
+    return withRetry(async () => {
+      const userBranchId = await getUserBranchIdByEmail(userEmail);
 
-    let query = supabaseAdmin
-      .from('branches')
-      .select('id, name')
-      .is('deleted_at', null)
-      .order('name');
+      let query = supabaseAdmin
+        .from('branches')
+        .select('id, name')
+        .is('deleted_at', null)
+        .order('name');
 
-    if (userBranchId) {
-      query = query.eq('id', userBranchId);
-    }
+      if (userBranchId) {
+        query = query.eq('id', userBranchId);
+      }
 
-    const { data } = await query;
-    return (data ?? []).map((b) => ({ id: b.id, name: b.name }));
-  });
-}
+      const { data } = await query;
+      return (data ?? []).map((b) => ({ id: b.id, name: b.name }));
+    });
+  },
+  ["branches"],
+  { revalidate: 60, tags: ["dashboard", "branches"] }
+);
 
 // Get the date 30 days ago for comparison
 function getLastMonthDate(): string {
@@ -109,262 +123,262 @@ function getPreviousMonthDate(): string {
   return date.toISOString();
 }
 
-export async function getDashboardStats(
-  userEmail: string
-): Promise<DashboardStats> {
-  return withRetry(async () => {
-    const user = await getUserByEmail(userEmail);
-    const branchId = user ? await getUserBranchIdByEmail(userEmail) : null;
-    const lastMonth = getLastMonthDate();
-    const previousMonth = getPreviousMonthDate();
+export const getDashboardStats = unstable_cache(
+  async (userEmail: string): Promise<DashboardStats> => {
+    return withRetry(async () => {
+      const user = await getUserByEmail(userEmail);
+      const branchId = user ? await getUserBranchIdByEmail(userEmail) : null;
+      const lastMonth = getLastMonthDate();
+      const previousMonth = getPreviousMonthDate();
 
-    // Total attendance this month
-    let attendanceQuery = supabaseAdmin
-      .from('attendance')
-      .select('id, enrollments!inner(student_id, students!inner(branch_id))', { count: 'exact', head: true })
-      .gte('created_at', lastMonth);
+      // Build all queries (without awaiting)
+      let attendanceQuery = supabaseAdmin
+        .from('attendance')
+        .select('id, enrollments!inner(student_id, students!inner(branch_id))', { count: 'exact', head: true })
+        .gte('created_at', lastMonth);
 
-    if (branchId) {
-      attendanceQuery = attendanceQuery.eq('enrollments.students.branch_id', branchId);
-    }
+      if (branchId) {
+        attendanceQuery = attendanceQuery.eq('enrollments.students.branch_id', branchId);
+      }
 
-    const { count: attendanceThisMonth } = await attendanceQuery;
+      let attendanceLastQuery = supabaseAdmin
+        .from('attendance')
+        .select('id, enrollments!inner(student_id, students!inner(branch_id))', { count: 'exact', head: true })
+        .gte('created_at', previousMonth)
+        .lt('created_at', lastMonth);
 
-    // Total attendance last month
-    let attendanceLastQuery = supabaseAdmin
-      .from('attendance')
-      .select('id, enrollments!inner(student_id, students!inner(branch_id))', { count: 'exact', head: true })
-      .gte('created_at', previousMonth)
-      .lt('created_at', lastMonth);
+      if (branchId) {
+        attendanceLastQuery = attendanceLastQuery.eq('enrollments.students.branch_id', branchId);
+      }
 
-    if (branchId) {
-      attendanceLastQuery = attendanceLastQuery.eq('enrollments.students.branch_id', branchId);
-    }
+      let paymentsQuery = supabaseAdmin
+        .from('payments')
+        .select('amount, students!inner(branch_id)')
+        .gte('created_at', lastMonth)
+        .eq('status', 'paid');
 
-    const { count: attendanceLastMonth } = await attendanceLastQuery;
+      if (branchId) {
+        paymentsQuery = paymentsQuery.eq('students.branch_id', branchId);
+      }
 
-    // Total payments this month
-    let paymentsQuery = supabaseAdmin
-      .from('payments')
-      .select('amount, students!inner(branch_id)')
-      .gte('created_at', lastMonth)
-      .eq('status', 'paid');
+      let paymentsLastQuery = supabaseAdmin
+        .from('payments')
+        .select('amount, students!inner(branch_id)')
+        .gte('created_at', previousMonth)
+        .lt('created_at', lastMonth)
+        .eq('status', 'paid');
 
-    if (branchId) {
-      paymentsQuery = paymentsQuery.eq('students.branch_id', branchId);
-    }
+      if (branchId) {
+        paymentsLastQuery = paymentsLastQuery.eq('students.branch_id', branchId);
+      }
 
-    const { data: paymentsThisMonthData } = await paymentsQuery;
-    const paymentsThisMonth = paymentsThisMonthData?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+      let adcoinQuery = supabaseAdmin
+        .from('students')
+        .select('adcoin_balance');
 
-    // Total payments last month
-    let paymentsLastQuery = supabaseAdmin
-      .from('payments')
-      .select('amount, students!inner(branch_id)')
-      .gte('created_at', previousMonth)
-      .lt('created_at', lastMonth)
-      .eq('status', 'paid');
+      if (branchId) {
+        adcoinQuery = adcoinQuery.eq('branch_id', branchId);
+      }
 
-    if (branchId) {
-      paymentsLastQuery = paymentsLastQuery.eq('students.branch_id', branchId);
-    }
+      let adcoinThisQuery = supabaseAdmin
+        .from('adcoin_transactions')
+        .select('amount, type, students!inner(branch_id)')
+        .gte('created_at', lastMonth);
 
-    const { data: paymentsLastMonthData } = await paymentsLastQuery;
-    const paymentsLastMonth = paymentsLastMonthData?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+      if (branchId) {
+        adcoinThisQuery = adcoinThisQuery.eq('students.branch_id', branchId);
+      }
 
-    // Active branches count
-    let branchesCount: number;
-    if (user && isSuperAdmin(user.email)) {
-      const { count } = await supabaseAdmin
-        .from('branches')
-        .select('id', { count: 'exact', head: true });
-      branchesCount = count ?? 0;
-    } else {
-      branchesCount = branchId ? 1 : 0;
-    }
+      let adcoinLastQuery = supabaseAdmin
+        .from('adcoin_transactions')
+        .select('amount, type, students!inner(branch_id)')
+        .gte('created_at', previousMonth)
+        .lt('created_at', lastMonth);
 
-    // Total adcoin balance
-    let adcoinQuery = supabaseAdmin
-      .from('students')
-      .select('adcoin_balance');
+      if (branchId) {
+        adcoinLastQuery = adcoinLastQuery.eq('students.branch_id', branchId);
+      }
 
-    if (branchId) {
-      adcoinQuery = adcoinQuery.eq('branch_id', branchId);
-    }
+      // Execute all 8 queries in parallel
+      const [
+        { count: attendanceThisMonth },
+        { count: attendanceLastMonth },
+        { data: paymentsThisMonthData },
+        { data: paymentsLastMonthData },
+        branchesResult,
+        { data: adcoinData },
+        { data: adcoinThisData },
+        { data: adcoinLastData },
+      ] = await Promise.all([
+        attendanceQuery,
+        attendanceLastQuery,
+        paymentsQuery,
+        paymentsLastQuery,
+        user && isSuperAdmin(user.email)
+          ? supabaseAdmin.from('branches').select('id', { count: 'exact', head: true })
+          : Promise.resolve({ count: branchId ? 1 : 0 }),
+        adcoinQuery,
+        adcoinThisQuery,
+        adcoinLastQuery,
+      ]);
 
-    const { data: adcoinData } = await adcoinQuery;
-    const totalAdcoinBalance = adcoinData?.reduce((sum, s) => sum + (s.adcoin_balance ?? 0), 0) ?? 0;
+      // Process results
+      const paymentsThisMonth = paymentsThisMonthData?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+      const paymentsLastMonth = paymentsLastMonthData?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+      const branchesCount = branchesResult.count ?? 0;
+      const totalAdcoinBalance = adcoinData?.reduce((sum, s) => sum + (s.adcoin_balance ?? 0), 0) ?? 0;
+      const adcoinThisMonth = adcoinThisData?.reduce((sum, t) => {
+        return sum + (t.type === 'earned' ? t.amount : -t.amount);
+      }, 0) ?? 0;
+      const adcoinLastMonth = adcoinLastData?.reduce((sum, t) => {
+        return sum + (t.type === 'earned' ? t.amount : -t.amount);
+      }, 0) ?? 0;
 
-    // Adcoin transactions this month
-    let adcoinThisQuery = supabaseAdmin
-      .from('adcoin_transactions')
-      .select('amount, type, students!inner(branch_id)')
-      .gte('created_at', lastMonth);
+      const currentAttendance = attendanceThisMonth ?? 0;
+      const prevAttendance = attendanceLastMonth ?? 0;
 
-    if (branchId) {
-      adcoinThisQuery = adcoinThisQuery.eq('students.branch_id', branchId);
-    }
+      return {
+        totalAttendance: currentAttendance,
+        attendanceChange: prevAttendance
+          ? ((currentAttendance - prevAttendance) / prevAttendance) * 100
+          : 0,
+        totalPayments: paymentsThisMonth,
+        paymentsChange: paymentsLastMonth
+          ? ((paymentsThisMonth - paymentsLastMonth) / paymentsLastMonth) * 100
+          : 0,
+        activeBranches: branchesCount,
+        branchesChange: 0,
+        totalAdcoinBalance,
+        adcoinChange: adcoinLastMonth
+          ? ((adcoinThisMonth - adcoinLastMonth) / adcoinLastMonth) * 100
+          : 0,
+      };
+    });
+  },
+  ["dashboard-stats"],
+  { revalidate: 60, tags: ["dashboard", "dashboard-stats"] }
+);
 
-    const { data: adcoinThisData } = await adcoinThisQuery;
-    const adcoinThisMonth = adcoinThisData?.reduce((sum, t) => {
-      return sum + (t.type === 'earned' ? t.amount : -t.amount);
-    }, 0) ?? 0;
+export const getRecentActivity = unstable_cache(
+  async (userEmail: string, limit = 10): Promise<RecentActivity[]> => {
+    return withRetry(async () => {
+      const branchId = await getUserBranchIdByEmail(userEmail);
 
-    // Adcoin transactions last month
-    let adcoinLastQuery = supabaseAdmin
-      .from('adcoin_transactions')
-      .select('amount, type, students!inner(branch_id)')
-      .gte('created_at', previousMonth)
-      .lt('created_at', lastMonth);
-
-    if (branchId) {
-      adcoinLastQuery = adcoinLastQuery.eq('students.branch_id', branchId);
-    }
-
-    const { data: adcoinLastData } = await adcoinLastQuery;
-    const adcoinLastMonth = adcoinLastData?.reduce((sum, t) => {
-      return sum + (t.type === 'earned' ? t.amount : -t.amount);
-    }, 0) ?? 0;
-
-    const currentAttendance = attendanceThisMonth ?? 0;
-    const prevAttendance = attendanceLastMonth ?? 0;
-
-    return {
-      totalAttendance: currentAttendance,
-      attendanceChange: prevAttendance
-        ? ((currentAttendance - prevAttendance) / prevAttendance) * 100
-        : 0,
-      totalPayments: paymentsThisMonth,
-      paymentsChange: paymentsLastMonth
-        ? ((paymentsThisMonth - paymentsLastMonth) / paymentsLastMonth) * 100
-        : 0,
-      activeBranches: branchesCount,
-      branchesChange: 0,
-      totalAdcoinBalance,
-      adcoinChange: adcoinLastMonth
-        ? ((adcoinThisMonth - adcoinLastMonth) / adcoinLastMonth) * 100
-        : 0,
-    };
-  });
-}
-
-export async function getRecentActivity(
-  userEmail: string,
-  limit = 10
-): Promise<RecentActivity[]> {
-  return withRetry(async () => {
-    const branchId = await getUserBranchIdByEmail(userEmail);
-
-    // Get recent attendance
-    let attendanceQuery = supabaseAdmin
-      .from('attendance')
-      .select(`
-        id,
-        created_at,
-        enrollments!inner(
-          students!inner(
-            name,
-            photo,
-            adcoin_balance,
-            branch_id,
-            branches!inner(id, name)
+      // Get recent attendance
+      let attendanceQuery = supabaseAdmin
+        .from('attendance')
+        .select(`
+          id,
+          created_at,
+          enrollments!inner(
+            students!inner(
+              name,
+              photo,
+              adcoin_balance,
+              branch_id,
+              branches!inner(id, name)
+            )
           )
-        )
-      `)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    if (branchId) {
-      attendanceQuery = attendanceQuery.eq('enrollments.students.branch_id', branchId);
-    }
+      if (branchId) {
+        attendanceQuery = attendanceQuery.eq('enrollments.students.branch_id', branchId);
+      }
 
-    const { data: attendanceData } = await attendanceQuery;
+      const { data: attendanceData } = await attendanceQuery;
 
-    const activities: RecentActivity[] = (attendanceData ?? []).map((a: any, index: number) => ({
-      id: a.id,
-      userName: a.enrollments?.students?.name ?? 'Unknown',
-      action: 'checked in at',
-      branchName: a.enrollments?.students?.branches?.name ?? 'Unknown',
-      branchId: a.enrollments?.students?.branches?.id ?? '',
-      avatarUrl: a.enrollments?.students?.photo ?? null,
-      rank: index + 1,
-      createdAt: new Date(a.created_at),
-    }));
+      const activities: RecentActivity[] = (attendanceData ?? []).map((a: any, index: number) => ({
+        id: a.id,
+        userName: a.enrollments?.students?.name ?? 'Unknown',
+        action: 'checked in at',
+        branchName: a.enrollments?.students?.branches?.name ?? 'Unknown',
+        branchId: a.enrollments?.students?.branches?.id ?? '',
+        avatarUrl: a.enrollments?.students?.photo ?? null,
+        rank: index + 1,
+        createdAt: new Date(a.created_at),
+      }));
 
-    return activities.slice(0, limit);
-  });
-}
+      return activities.slice(0, limit);
+    });
+  },
+  ["recent-activity"],
+  { revalidate: 60, tags: ["dashboard", "recent-activity"] }
+);
 
-export async function getAdcoinRanking(
-  userEmail: string,
-  limit = 10
-): Promise<AdcoinRanking[]> {
-  return withRetry(async () => {
-    const branchId = await getUserBranchIdByEmail(userEmail);
+export const getAdcoinRanking = unstable_cache(
+  async (userEmail: string, limit = 10): Promise<AdcoinRanking[]> => {
+    return withRetry(async () => {
+      const branchId = await getUserBranchIdByEmail(userEmail);
 
-    let query = supabaseAdmin
-      .from('students')
-      .select('id, name, adcoin_balance, photo, branch_id, branches!inner(id, name)')
-      .order('adcoin_balance', { ascending: false })
-      .limit(limit);
+      let query = supabaseAdmin
+        .from('students')
+        .select('id, name, adcoin_balance, photo, branch_id, branches!inner(id, name)')
+        .order('adcoin_balance', { ascending: false })
+        .limit(limit);
 
-    if (branchId) {
-      query = query.eq('branch_id', branchId);
-    }
+      if (branchId) {
+        query = query.eq('branch_id', branchId);
+      }
 
-    const { data } = await query;
+      const { data } = await query;
 
-    return (data ?? []).map((s: any, index) => ({
-      rank: index + 1,
-      studentId: s.id,
-      studentName: s.name,
-      coins: s.adcoin_balance ?? 0,
-      photo: s.photo,
-      branchId: s.branches?.id ?? '',
-      branchName: s.branches?.name ?? 'Unknown',
-    }));
-  });
-}
+      return (data ?? []).map((s: any, index) => ({
+        rank: index + 1,
+        studentId: s.id,
+        studentName: s.name,
+        coins: s.adcoin_balance ?? 0,
+        photo: s.photo,
+        branchId: s.branches?.id ?? '',
+        branchName: s.branches?.name ?? 'Unknown',
+      }));
+    });
+  },
+  ["adcoin-ranking"],
+  { revalidate: 60, tags: ["dashboard", "adcoin-ranking"] }
+);
 
-export async function getAdcoinTransactions(
-  userEmail: string,
-  limit = 10
-): Promise<AdcoinTransaction[]> {
-  return withRetry(async () => {
-    const branchId = await getUserBranchIdByEmail(userEmail);
+export const getAdcoinTransactions = unstable_cache(
+  async (userEmail: string, limit = 10): Promise<AdcoinTransaction[]> => {
+    return withRetry(async () => {
+      const branchId = await getUserBranchIdByEmail(userEmail);
 
-    let query = supabaseAdmin
-      .from('adcoin_transactions')
-      .select(`
-        id,
-        type,
-        amount,
-        description,
-        created_at,
-        students!inner(name, photo, branch_id, branches!inner(id))
-      `)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+      let query = supabaseAdmin
+        .from('adcoin_transactions')
+        .select(`
+          id,
+          type,
+          amount,
+          description,
+          created_at,
+          students!inner(name, photo, branch_id, branches!inner(id))
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    if (branchId) {
-      query = query.eq('students.branch_id', branchId);
-    }
+      if (branchId) {
+        query = query.eq('students.branch_id', branchId);
+      }
 
-    const { data } = await query;
+      const { data } = await query;
 
-    return (data ?? []).map((t: any, index: number) => ({
-      id: t.id,
-      studentName: t.students?.name ?? 'Unknown',
-      type: t.type as "earned" | "spent",
-      amount: t.amount,
-      description: t.description,
-      branchId: t.students?.branches?.id ?? '',
-      avatarUrl: t.students?.photo ?? null,
-      rank: index + 1,
-      createdAt: new Date(t.created_at),
-    }));
-  });
-}
+      return (data ?? []).map((t: any, index: number) => ({
+        id: t.id,
+        studentName: t.students?.name ?? 'Unknown',
+        type: t.type as "earned" | "spent",
+        amount: t.amount,
+        description: t.description,
+        branchId: t.students?.branches?.id ?? '',
+        avatarUrl: t.students?.photo ?? null,
+        rank: index + 1,
+        createdAt: new Date(t.created_at),
+      }));
+    });
+  },
+  ["adcoin-transactions"],
+  { revalidate: 60, tags: ["dashboard", "adcoin-transactions"] }
+);
 
 // Chart data types
 export interface ChartBranch {
@@ -402,134 +416,136 @@ function getWeekOfMonth(date: Date): number {
   return Math.floor((dayOfMonth + offsetToMonday - 1) / 7);
 }
 
-export async function getAttendanceChartData(
-  userEmail: string
-): Promise<AttendanceChartData> {
-  return withRetry(async () => {
-    const userBranchId = await getUserBranchIdByEmail(userEmail);
+export const getAttendanceChartData = unstable_cache(
+  async (userEmail: string): Promise<AttendanceChartData> => {
+    return withRetry(async () => {
+      const userBranchId = await getUserBranchIdByEmail(userEmail);
 
-    // Get branches
-    let branchQuery = supabaseAdmin
-      .from('branches')
-      .select('id, name')
-      .is('deleted_at', null)
-      .order('name');
+      // Get branches
+      let branchQuery = supabaseAdmin
+        .from('branches')
+        .select('id, name')
+        .is('deleted_at', null)
+        .order('name');
 
-    if (userBranchId) {
-      branchQuery = branchQuery.eq('id', userBranchId);
-    }
-
-    const { data: branchesData } = await branchQuery;
-    const branches: ChartBranch[] = (branchesData ?? []).map((b, idx) => ({
-      id: b.id,
-      name: b.name,
-      color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
-    }));
-
-    // Get date range (last 12 months)
-    const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-
-    // Initialize chart data structure
-    const attendanceData: ChartData = {};
-    const enrollmentData: ChartData = {};
-
-    branches.forEach((branch) => {
-      attendanceData[branch.id] = {};
-      enrollmentData[branch.id] = {};
-      for (let m = 0; m < 12; m++) {
-        attendanceData[branch.id][m] = [
-          { attendance: 0, trial: 0 },
-          { attendance: 0, trial: 0 },
-          { attendance: 0, trial: 0 },
-          { attendance: 0, trial: 0 },
-        ];
-        enrollmentData[branch.id][m] = [
-          { attendance: 0, trial: 0 },
-          { attendance: 0, trial: 0 },
-          { attendance: 0, trial: 0 },
-          { attendance: 0, trial: 0 },
-        ];
+      if (userBranchId) {
+        branchQuery = branchQuery.eq('id', userBranchId);
       }
-    });
 
-    // Fetch attendance records with branch info
-    const { data: attendanceRecords } = await supabaseAdmin
-      .from('attendance')
-      .select(`
-        id,
-        date,
-        status,
-        enrollments!inner(
+      const { data: branchesData } = await branchQuery;
+      const branches: ChartBranch[] = (branchesData ?? []).map((b, idx) => ({
+        id: b.id,
+        name: b.name,
+        color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
+      }));
+
+      // Get date range (last 12 months)
+      const now = new Date();
+      const startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+      // Initialize chart data structure
+      const attendanceData: ChartData = {};
+      const enrollmentData: ChartData = {};
+
+      branches.forEach((branch) => {
+        attendanceData[branch.id] = {};
+        enrollmentData[branch.id] = {};
+        for (let m = 0; m < 12; m++) {
+          attendanceData[branch.id][m] = [
+            { attendance: 0, trial: 0 },
+            { attendance: 0, trial: 0 },
+            { attendance: 0, trial: 0 },
+            { attendance: 0, trial: 0 },
+          ];
+          enrollmentData[branch.id][m] = [
+            { attendance: 0, trial: 0 },
+            { attendance: 0, trial: 0 },
+            { attendance: 0, trial: 0 },
+            { attendance: 0, trial: 0 },
+          ];
+        }
+      });
+
+      // Fetch attendance records with branch info
+      const { data: attendanceRecords } = await supabaseAdmin
+        .from('attendance')
+        .select(`
           id,
+          date,
+          status,
+          enrollments!inner(
+            id,
+            status,
+            courses!inner(branch_id)
+          )
+        `)
+        .gte('date', startDate.toISOString().split('T')[0]);
+
+      // Process attendance data
+      (attendanceRecords ?? []).forEach((record: any) => {
+        const branchId = record.enrollments?.courses?.branch_id;
+        if (!branchId || !attendanceData[branchId]) return;
+
+        const recordDate = new Date(record.date);
+        const monthIndex = recordDate.getMonth();
+        const weekIndex = Math.min(getWeekOfMonth(recordDate), 3);
+
+        const enrollmentStatus = record.enrollments?.status;
+        const isTrial = enrollmentStatus === 'pending';
+        const isPresent = record.status === 'present' || record.status === 'late';
+
+        if (isPresent) {
+          if (isTrial) {
+            attendanceData[branchId][monthIndex][weekIndex].trial += 1;
+          } else {
+            attendanceData[branchId][monthIndex][weekIndex].attendance += 1;
+          }
+        }
+      });
+
+      // Fetch enrollment records with branch info
+      const { data: enrollmentRecords } = await supabaseAdmin
+        .from('enrollments')
+        .select(`
+          id,
+          enrolled_at,
           status,
           courses!inner(branch_id)
-        )
-      `)
-      .gte('date', startDate.toISOString().split('T')[0]);
+        `)
+        .gte('enrolled_at', startDate.toISOString());
 
-    // Process attendance data
-    (attendanceRecords ?? []).forEach((record: any) => {
-      const branchId = record.enrollments?.courses?.branch_id;
-      if (!branchId || !attendanceData[branchId]) return;
+      // Process enrollment data
+      (enrollmentRecords ?? []).forEach((record: any) => {
+        const branchId = record.courses?.branch_id;
+        if (!branchId || !enrollmentData[branchId]) return;
 
-      const recordDate = new Date(record.date);
-      const monthIndex = recordDate.getMonth();
-      const weekIndex = Math.min(getWeekOfMonth(recordDate), 3);
+        const enrolledDate = new Date(record.enrolled_at);
+        const monthIndex = enrolledDate.getMonth();
+        const weekIndex = Math.min(getWeekOfMonth(enrolledDate), 3);
 
-      const enrollmentStatus = record.enrollments?.status;
-      const isTrial = enrollmentStatus === 'pending';
-      const isPresent = record.status === 'present' || record.status === 'late';
+        const status = record.status;
+        const isTrial = status === 'pending';
+        const isCancelled = status === 'cancelled';
 
-      if (isPresent) {
-        if (isTrial) {
-          attendanceData[branchId][monthIndex][weekIndex].trial += 1;
+        if (isCancelled) {
+          enrollmentData[branchId][monthIndex][weekIndex].trial += 1; // trial = dropped
+        } else if (isTrial) {
+          enrollmentData[branchId][monthIndex][weekIndex].trial += 1;
         } else {
-          attendanceData[branchId][monthIndex][weekIndex].attendance += 1;
+          enrollmentData[branchId][monthIndex][weekIndex].attendance += 1; // attendance = active enrollment
         }
-      }
+      });
+
+      return {
+        branches,
+        attendanceData,
+        enrollmentData,
+      };
     });
-
-    // Fetch enrollment records with branch info
-    const { data: enrollmentRecords } = await supabaseAdmin
-      .from('enrollments')
-      .select(`
-        id,
-        enrolled_at,
-        status,
-        courses!inner(branch_id)
-      `)
-      .gte('enrolled_at', startDate.toISOString());
-
-    // Process enrollment data
-    (enrollmentRecords ?? []).forEach((record: any) => {
-      const branchId = record.courses?.branch_id;
-      if (!branchId || !enrollmentData[branchId]) return;
-
-      const enrolledDate = new Date(record.enrolled_at);
-      const monthIndex = enrolledDate.getMonth();
-      const weekIndex = Math.min(getWeekOfMonth(enrolledDate), 3);
-
-      const status = record.status;
-      const isTrial = status === 'pending';
-      const isCancelled = status === 'cancelled';
-
-      if (isCancelled) {
-        enrollmentData[branchId][monthIndex][weekIndex].trial += 1; // trial = dropped
-      } else if (isTrial) {
-        enrollmentData[branchId][monthIndex][weekIndex].trial += 1;
-      } else {
-        enrollmentData[branchId][monthIndex][weekIndex].attendance += 1; // attendance = active enrollment
-      }
-    });
-
-    return {
-      branches,
-      attendanceData,
-      enrollmentData,
-    };
-  });
-}
+  },
+  ["attendance-chart"],
+  { revalidate: 60, tags: ["dashboard", "attendance-chart"] }
+);
 
 // Overview chart types
 export interface OverviewBranch {
@@ -548,66 +564,94 @@ export interface OverviewChartData {
   engagementData: MonthlyOverviewData;
 }
 
-export async function getOverviewChartData(
-  userEmail: string
-): Promise<OverviewChartData> {
-  return withRetry(async () => {
-    const userBranchId = await getUserBranchIdByEmail(userEmail);
+export const getOverviewChartData = unstable_cache(
+  async (userEmail: string): Promise<OverviewChartData> => {
+    return withRetry(async () => {
+      const userBranchId = await getUserBranchIdByEmail(userEmail);
 
-    // Get branches
-    let branchQuery = supabaseAdmin
-      .from('branches')
-      .select('id, name')
-      .is('deleted_at', null)
-      .order('name');
+      // Get branches
+      let branchQuery = supabaseAdmin
+        .from('branches')
+        .select('id, name')
+        .is('deleted_at', null)
+        .order('name');
 
-    if (userBranchId) {
-      branchQuery = branchQuery.eq('id', userBranchId);
-    }
+      if (userBranchId) {
+        branchQuery = branchQuery.eq('id', userBranchId);
+      }
 
-    const { data: branchesData } = await branchQuery;
-    const branches: OverviewBranch[] = (branchesData ?? []).map((b, idx) => ({
-      id: b.id,
-      name: b.name,
-      color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
-    }));
+      const { data: branchesData } = await branchQuery;
+      const branches: OverviewBranch[] = (branchesData ?? []).map((b, idx) => ({
+        id: b.id,
+        name: b.name,
+        color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
+      }));
 
-    // Get date range (last 60 months / 5 years)
-    const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth() - 59, 1);
+      // Get date range (last 60 months / 5 years)
+      const now = new Date();
+      const startDate = new Date(now.getFullYear(), now.getMonth() - 59, 1);
 
-    // Initialize monthly data arrays (60 months, oldest first)
-    const attendanceData: MonthlyOverviewData = {};
-    const engagementData: MonthlyOverviewData = {};
+      // Initialize monthly data arrays (60 months, oldest first)
+      const attendanceData: MonthlyOverviewData = {};
+      const engagementData: MonthlyOverviewData = {};
 
-    branches.forEach((branch) => {
-      attendanceData[branch.id] = new Array(60).fill(0);
-      engagementData[branch.id] = new Array(60).fill(0);
-    });
+      branches.forEach((branch) => {
+        attendanceData[branch.id] = new Array(60).fill(0);
+        engagementData[branch.id] = new Array(60).fill(0);
+      });
 
-    // Fetch attendance records
-    const { data: attendanceRecords } = await supabaseAdmin
-      .from('attendance')
-      .select(`
-        id,
-        date,
-        status,
-        enrollments!inner(
+      // Fetch attendance records
+      const { data: attendanceRecords } = await supabaseAdmin
+        .from('attendance')
+        .select(`
           id,
-          courses!inner(branch_id)
-        )
-      `)
-      .gte('date', startDate.toISOString().split('T')[0]);
+          date,
+          status,
+          enrollments!inner(
+            id,
+            courses!inner(branch_id)
+          )
+        `)
+        .gte('date', startDate.toISOString().split('T')[0]);
 
-    // Process attendance data - aggregate by month
-    (attendanceRecords ?? []).forEach((record: any) => {
-      const branchId = record.enrollments?.courses?.branch_id;
-      if (!branchId || !attendanceData[branchId]) return;
+      // Process attendance data - aggregate by month
+      (attendanceRecords ?? []).forEach((record: any) => {
+        const branchId = record.enrollments?.courses?.branch_id;
+        if (!branchId || !attendanceData[branchId]) return;
 
-      const recordDate = new Date(record.date);
-      const isPresent = record.status === 'present' || record.status === 'late';
+        const recordDate = new Date(record.date);
+        const isPresent = record.status === 'present' || record.status === 'late';
 
-      if (isPresent) {
+        if (isPresent) {
+          // Calculate month index (0 = oldest, 59 = current)
+          const monthsDiff =
+            (now.getFullYear() - recordDate.getFullYear()) * 12 +
+            (now.getMonth() - recordDate.getMonth());
+          const monthIndex = 59 - monthsDiff;
+
+          if (monthIndex >= 0 && monthIndex < 60) {
+            attendanceData[branchId][monthIndex] += 1;
+          }
+        }
+      });
+
+      // Fetch engagement data (using adcoin transactions as engagement metric)
+      const { data: engagementRecords } = await supabaseAdmin
+        .from('adcoin_transactions')
+        .select(`
+          id,
+          created_at,
+          students!inner(branch_id)
+        `)
+        .gte('created_at', startDate.toISOString());
+
+      // Process engagement data
+      (engagementRecords ?? []).forEach((record: any) => {
+        const branchId = record.students?.branch_id;
+        if (!branchId || !engagementData[branchId]) return;
+
+        const recordDate = new Date(record.created_at);
+
         // Calculate month index (0 = oldest, 59 = current)
         const monthsDiff =
           (now.getFullYear() - recordDate.getFullYear()) * 12 +
@@ -615,46 +659,20 @@ export async function getOverviewChartData(
         const monthIndex = 59 - monthsDiff;
 
         if (monthIndex >= 0 && monthIndex < 60) {
-          attendanceData[branchId][monthIndex] += 1;
+          engagementData[branchId][monthIndex] += 1;
         }
-      }
+      });
+
+      return {
+        branches,
+        attendanceData,
+        engagementData,
+      };
     });
-
-    // Fetch engagement data (using adcoin transactions as engagement metric)
-    const { data: engagementRecords } = await supabaseAdmin
-      .from('adcoin_transactions')
-      .select(`
-        id,
-        created_at,
-        students!inner(branch_id)
-      `)
-      .gte('created_at', startDate.toISOString());
-
-    // Process engagement data
-    (engagementRecords ?? []).forEach((record: any) => {
-      const branchId = record.students?.branch_id;
-      if (!branchId || !engagementData[branchId]) return;
-
-      const recordDate = new Date(record.created_at);
-
-      // Calculate month index (0 = oldest, 59 = current)
-      const monthsDiff =
-        (now.getFullYear() - recordDate.getFullYear()) * 12 +
-        (now.getMonth() - recordDate.getMonth());
-      const monthIndex = 59 - monthsDiff;
-
-      if (monthIndex >= 0 && monthIndex < 60) {
-        engagementData[branchId][monthIndex] += 1;
-      }
-    });
-
-    return {
-      branches,
-      attendanceData,
-      engagementData,
-    };
-  });
-}
+  },
+  ["overview-chart"],
+  { revalidate: 60, tags: ["dashboard", "overview-chart"] }
+);
 
 // Payment Due List types
 export interface PaymentDueItem {
@@ -673,227 +691,251 @@ export interface PaymentDueListData {
   branches: { id: string; name: string }[];
 }
 
-export async function getPaymentDueListData(
-  userEmail: string
-): Promise<PaymentDueListData> {
-  return withRetry(async () => {
-    const userBranchId = await getUserBranchIdByEmail(userEmail);
+export const getPaymentDueListData = unstable_cache(
+  async (userEmail: string): Promise<PaymentDueListData> => {
+    return withRetry(async () => {
+      const userBranchId = await getUserBranchIdByEmail(userEmail);
 
-    // Get branches
-    let branchQuery = supabaseAdmin
-      .from('branches')
-      .select('id, name')
-      .is('deleted_at', null)
-      .order('name');
+      // Get branches
+      let branchQuery = supabaseAdmin
+        .from('branches')
+        .select('id, name')
+        .is('deleted_at', null)
+        .order('name');
 
-    if (userBranchId) {
-      branchQuery = branchQuery.eq('id', userBranchId);
-    }
-
-    const { data: branchesData } = await branchQuery;
-    const branches = (branchesData ?? []).map((b) => ({
-      id: b.id,
-      name: b.name,
-    }));
-
-    // Get students with payment due (pending payments or low sessions)
-    let studentsQuery = supabaseAdmin
-      .from('students')
-      .select(`
-        id,
-        name,
-        photo,
-        branch_id,
-        branches!inner(id, name)
-      `)
-      .is('deleted_at', null);
-
-    if (userBranchId) {
-      studentsQuery = studentsQuery.eq('branch_id', userBranchId);
-    }
-
-    const { data: studentsData } = await studentsQuery;
-
-    // Get enrollments with session counts for each student
-    const studentIds = (studentsData ?? []).map((s) => s.id);
-
-    if (studentIds.length === 0) {
-      return { items: [], branches };
-    }
-
-    const { data: enrollmentsData } = await supabaseAdmin
-      .from('enrollments')
-      .select(`
-        id,
-        student_id,
-        total_sessions,
-        sessions_used
-      `)
-      .in('student_id', studentIds)
-      .eq('status', 'active')
-      .is('deleted_at', null);
-
-    // Calculate sessions left per student
-    const sessionsMap: Record<string, number> = {};
-    (enrollmentsData ?? []).forEach((e) => {
-      const sessionsLeft = (e.total_sessions ?? 0) - (e.sessions_used ?? 0);
-      if (sessionsMap[e.student_id] === undefined) {
-        sessionsMap[e.student_id] = sessionsLeft;
-      } else {
-        sessionsMap[e.student_id] += sessionsLeft;
+      if (userBranchId) {
+        branchQuery = branchQuery.eq('id', userBranchId);
       }
-    });
 
-    // Filter to students with low or negative sessions and build items
-    const items: PaymentDueItem[] = (studentsData ?? [])
-      .filter((s) => {
-        const sessionsLeft = sessionsMap[s.id] ?? 0;
-        return sessionsLeft <= 3; // Show students with 3 or fewer sessions
-      })
-      .map((s, idx) => ({
-        id: s.id,
-        studentId: s.id,
-        studentName: s.name,
-        avatarUrl: s.photo,
-        rank: idx + 1,
-        sessionsLeft: sessionsMap[s.id] ?? 0,
-        branchId: s.branch_id,
-        branchName: (s.branches as any)?.name ?? 'Unknown',
-      }))
-      .sort((a, b) => a.sessionsLeft - b.sessionsLeft); // Sort by sessions left (lowest first)
+      const { data: branchesData } = await branchQuery;
+      const branches = (branchesData ?? []).map((b) => ({
+        id: b.id,
+        name: b.name,
+      }));
 
-    // Update ranks after sorting
-    items.forEach((item, idx) => {
-      item.rank = idx + 1;
-    });
-
-    return { items, branches };
-  });
-}
-
-export async function getBranchOverviewData(
-  userEmail: string
-): Promise<BranchOverview[]> {
-  return withRetry(async () => {
-    const userBranchId = await getUserBranchIdByEmail(userEmail);
-    const lastMonth = getLastMonthDate();
-
-    // Get branches
-    let branchQuery = supabaseAdmin
-      .from('branches')
-      .select('id, name')
-      .is('deleted_at', null)
-      .order('name');
-
-    if (userBranchId) {
-      branchQuery = branchQuery.eq('id', userBranchId);
-    }
-
-    const { data: branchesData } = await branchQuery;
-
-    const overviewData: BranchOverview[] = [];
-
-    for (const branch of branchesData ?? []) {
-      // Get all students for this branch
-      const { data: students } = await supabaseAdmin
+      // Get students with payment due (pending payments or low sessions)
+      let studentsQuery = supabaseAdmin
         .from('students')
-        .select('id')
-        .eq('branch_id', branch.id)
+        .select(`
+          id,
+          name,
+          photo,
+          branch_id,
+          branches!inner(id, name)
+        `)
         .is('deleted_at', null);
 
-      const totalStudents = students?.length ?? 0;
-      const studentIds = students?.map(s => s.id) ?? [];
-
-      // Get students with active enrollments (active = has at least one active enrollment)
-      let activeStudentCount = 0;
-      if (studentIds.length > 0) {
-        const { data: activeEnrollments } = await supabaseAdmin
-          .from('enrollments')
-          .select('student_id')
-          .in('student_id', studentIds)
-          .eq('status', 'active')
-          .is('deleted_at', null);
-
-        // Count unique students with active enrollments
-        const uniqueActiveStudents = new Set(activeEnrollments?.map(e => e.student_id) ?? []);
-        activeStudentCount = uniqueActiveStudents.size;
+      if (userBranchId) {
+        studentsQuery = studentsQuery.eq('branch_id', userBranchId);
       }
 
-      const inactiveStudents = totalStudents - activeStudentCount;
-      const activeRate = totalStudents > 0 ? activeStudentCount / totalStudents : 0;
+      const { data: studentsData } = await studentsQuery;
 
-      // Get all enrollments for students in this branch
-      let activeEnrollments = 0;
-      let pendingEnrollments = 0;
+      // Get enrollments with session counts for each student
+      const studentIds = (studentsData ?? []).map((s) => s.id);
 
-      if (studentIds.length > 0) {
-        const { data: enrollments } = await supabaseAdmin
-          .from('enrollments')
-          .select('id, status')
-          .in('student_id', studentIds)
-          .is('deleted_at', null);
-
-        activeEnrollments = enrollments?.filter(e => e.status === 'active').length ?? 0;
-        pendingEnrollments = enrollments?.filter(e => e.status === 'pending').length ?? 0;
+      if (studentIds.length === 0) {
+        return { items: [], branches };
       }
 
-      // Trial conversion rate: active enrollments / (active + pending) enrollments
-      const trialBase = activeEnrollments + pendingEnrollments;
-      const conversionRate = trialBase > 0 ? activeEnrollments / trialBase : 0;
+      const { data: enrollmentsData } = await supabaseAdmin
+        .from('enrollments')
+        .select(`
+          id,
+          student_id,
+          total_sessions,
+          sessions_used
+        `)
+        .in('student_id', studentIds)
+        .eq('status', 'active')
+        .is('deleted_at', null);
 
-      // Get average monthly enrollments (last 12 months)
+      // Calculate sessions left per student
+      const sessionsMap: Record<string, number> = {};
+      (enrollmentsData ?? []).forEach((e) => {
+        const sessionsLeft = (e.total_sessions ?? 0) - (e.sessions_used ?? 0);
+        if (sessionsMap[e.student_id] === undefined) {
+          sessionsMap[e.student_id] = sessionsLeft;
+        } else {
+          sessionsMap[e.student_id] += sessionsLeft;
+        }
+      });
+
+      // Filter to students with low or negative sessions and build items
+      const items: PaymentDueItem[] = (studentsData ?? [])
+        .filter((s) => {
+          const sessionsLeft = sessionsMap[s.id] ?? 0;
+          return sessionsLeft <= 3; // Show students with 3 or fewer sessions
+        })
+        .map((s, idx) => ({
+          id: s.id,
+          studentId: s.id,
+          studentName: s.name,
+          avatarUrl: s.photo,
+          rank: idx + 1,
+          sessionsLeft: sessionsMap[s.id] ?? 0,
+          branchId: s.branch_id,
+          branchName: (s.branches as any)?.name ?? 'Unknown',
+        }))
+        .sort((a, b) => a.sessionsLeft - b.sessionsLeft); // Sort by sessions left (lowest first)
+
+      // Update ranks after sorting
+      items.forEach((item, idx) => {
+        item.rank = idx + 1;
+      });
+
+      return { items, branches };
+    });
+  },
+  ["payment-due"],
+  { revalidate: 60, tags: ["dashboard", "payment-due"] }
+);
+
+export const getBranchOverviewData = unstable_cache(
+  async (userEmail: string): Promise<BranchOverview[]> => {
+    return withRetry(async () => {
+      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const lastMonth = getLastMonthDate();
       const twelveMonthsAgo = new Date();
       twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
 
-      let enrollmentsLastYear = 0;
-      if (studentIds.length > 0) {
-        const { count } = await supabaseAdmin
-          .from('enrollments')
-          .select('id', { count: 'exact', head: true })
-          .in('student_id', studentIds)
-          .gte('enrolled_at', twelveMonthsAgo.toISOString())
-          .is('deleted_at', null);
+      // Get branches
+      let branchQuery = supabaseAdmin
+        .from('branches')
+        .select('id, name')
+        .is('deleted_at', null)
+        .order('name');
 
-        enrollmentsLastYear = count ?? 0;
+      if (userBranchId) {
+        branchQuery = branchQuery.eq('id', userBranchId);
       }
 
-      const avgEnroll = Math.round(enrollmentsLastYear / 12);
+      const { data: branchesData } = await branchQuery;
+      const branchIds = (branchesData ?? []).map(b => b.id);
 
-      // Get payments due (pending payments)
-      const { data: pendingPayments } = await supabaseAdmin
-        .from('payments')
-        .select('amount, students!inner(branch_id)')
-        .eq('students.branch_id', branch.id)
-        .eq('status', 'pending');
+      if (branchIds.length === 0) {
+        return [];
+      }
 
-      const paymentDue = pendingPayments?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+      // Run all bulk queries in parallel
+      const [
+        { data: allStudents },
+        { data: allEnrollments },
+        { data: pendingPaymentsData },
+        { data: receivedPaymentsData },
+      ] = await Promise.all([
+        // All students for these branches
+        supabaseAdmin
+          .from('students')
+          .select('id, branch_id')
+          .in('branch_id', branchIds)
+          .is('deleted_at', null),
+        // All enrollments (we'll filter by student in JS)
+        supabaseAdmin
+          .from('enrollments')
+          .select('id, student_id, status, enrolled_at')
+          .is('deleted_at', null),
+        // All pending payments for these branches
+        supabaseAdmin
+          .from('payments')
+          .select('amount, students!inner(branch_id)')
+          .in('students.branch_id', branchIds)
+          .eq('status', 'pending'),
+        // All received payments this month for these branches
+        supabaseAdmin
+          .from('payments')
+          .select('amount, students!inner(branch_id)')
+          .in('students.branch_id', branchIds)
+          .eq('status', 'paid')
+          .gte('created_at', lastMonth),
+      ]);
 
-      // Get payments received this month
-      const { data: receivedPayments } = await supabaseAdmin
-        .from('payments')
-        .select('amount, students!inner(branch_id)')
-        .eq('students.branch_id', branch.id)
-        .eq('status', 'paid')
-        .gte('created_at', lastMonth);
+      // Build lookup maps for fast aggregation
+      const studentsByBranch = groupBy(allStudents ?? [], 'branch_id');
+      const allStudentIds = new Set((allStudents ?? []).map(s => s.id));
 
-      const paymentReceived = receivedPayments?.reduce((sum, p) => sum + Number(p.amount), 0) ?? 0;
+      // Filter enrollments to only those belonging to students in our branches
+      const relevantEnrollments = (allEnrollments ?? []).filter(e => allStudentIds.has(e.student_id));
 
-      overviewData.push({
-        branch: branch.name,
-        totalStudents,
-        avgEnroll,
-        active: activeStudentCount,
-        inactive: inactiveStudents,
-        activeRate,
-        conversionRate,
-        paymentDue,
-        paymentReceived,
+      // Group enrollments by student
+      const enrollmentsByStudent = groupBy(relevantEnrollments, 'student_id');
+
+      // Group payments by branch_id
+      const pendingPaymentsByBranch: Record<string, number> = {};
+      const receivedPaymentsByBranch: Record<string, number> = {};
+
+      for (const p of pendingPaymentsData ?? []) {
+        const branchId = (p.students as any)?.branch_id;
+        if (branchId) {
+          pendingPaymentsByBranch[branchId] = (pendingPaymentsByBranch[branchId] ?? 0) + Number(p.amount);
+        }
+      }
+
+      for (const p of receivedPaymentsData ?? []) {
+        const branchId = (p.students as any)?.branch_id;
+        if (branchId) {
+          receivedPaymentsByBranch[branchId] = (receivedPaymentsByBranch[branchId] ?? 0) + Number(p.amount);
+        }
+      }
+
+      // Aggregate per branch (fast, in-memory)
+      const overviewData: BranchOverview[] = (branchesData ?? []).map(branch => {
+        const students = studentsByBranch[branch.id] ?? [];
+        const totalStudents = students.length;
+        const studentIds = students.map(s => s.id);
+
+        // Count active students (students with at least one active enrollment)
+        const uniqueActiveStudents = new Set<string>();
+        let activeEnrollmentsCount = 0;
+        let pendingEnrollmentsCount = 0;
+        let enrollmentsLastYearCount = 0;
+
+        for (const studentId of studentIds) {
+          const studentEnrollments = enrollmentsByStudent[studentId] ?? [];
+          for (const enrollment of studentEnrollments) {
+            if (enrollment.status === 'active') {
+              uniqueActiveStudents.add(studentId);
+              activeEnrollmentsCount++;
+            }
+            if (enrollment.status === 'pending') {
+              pendingEnrollmentsCount++;
+            }
+            // Count enrollments from last 12 months
+            if (new Date(enrollment.enrolled_at) >= twelveMonthsAgo) {
+              enrollmentsLastYearCount++;
+            }
+          }
+        }
+
+        const activeStudentCount = uniqueActiveStudents.size;
+        const inactiveStudents = totalStudents - activeStudentCount;
+        const activeRate = totalStudents > 0 ? activeStudentCount / totalStudents : 0;
+
+        // Trial conversion rate
+        const trialBase = activeEnrollmentsCount + pendingEnrollmentsCount;
+        const conversionRate = trialBase > 0 ? activeEnrollmentsCount / trialBase : 0;
+
+        const avgEnroll = Math.round(enrollmentsLastYearCount / 12);
+
+        return {
+          branch: branch.name,
+          totalStudents,
+          avgEnroll,
+          active: activeStudentCount,
+          inactive: inactiveStudents,
+          activeRate,
+          conversionRate,
+          paymentDue: pendingPaymentsByBranch[branch.id] ?? 0,
+          paymentReceived: receivedPaymentsByBranch[branch.id] ?? 0,
+        };
       });
-    }
 
-    return overviewData;
-  });
-}
+      return overviewData;
+    });
+  },
+  ["branch-overview"],
+  { revalidate: 60, tags: ["dashboard", "branch-overview"] }
+);
 
 // Branch colors for adcoin pool
 const POOL_COLORS = ["#615DFA", "#23D2E2", "#22C55E", "#F59E0B", "#EC4899"];
@@ -901,81 +943,89 @@ const POOL_COLORS = ["#615DFA", "#23D2E2", "#22C55E", "#F59E0B", "#EC4899"];
 // Adcoin to RM conversion rate
 const ADCOIN_TO_RM_RATE = 0.01;
 
-export async function getAdcoinPoolData(
-  userEmail: string
-): Promise<BranchPool[]> {
-  return withRetry(async () => {
-    const userBranchId = await getUserBranchIdByEmail(userEmail);
+export const getAdcoinPoolData = unstable_cache(
+  async (userEmail: string): Promise<BranchPool[]> => {
+    return withRetry(async () => {
+      const userBranchId = await getUserBranchIdByEmail(userEmail);
 
-    // Get branches
-    let branchQuery = supabaseAdmin
-      .from('branches')
-      .select('id, name')
-      .is('deleted_at', null)
-      .order('name');
+      // Get branches
+      let branchQuery = supabaseAdmin
+        .from('branches')
+        .select('id, name')
+        .is('deleted_at', null)
+        .order('name');
 
-    if (userBranchId) {
-      branchQuery = branchQuery.eq('id', userBranchId);
-    }
+      if (userBranchId) {
+        branchQuery = branchQuery.eq('id', userBranchId);
+      }
 
-    const { data: branchesData } = await branchQuery;
+      const { data: branchesData } = await branchQuery;
+      const branchIds = (branchesData ?? []).map(b => b.id);
 
-    const pools: BranchPool[] = [];
+      if (branchIds.length === 0) {
+        return [];
+      }
 
-    for (const [idx, branch] of (branchesData ?? []).entries()) {
-      // Get total adcoin balance for students in this branch
-      const { data: students } = await supabaseAdmin
+      // Single query for ALL students across all relevant branches
+      const { data: allStudents } = await supabaseAdmin
         .from('students')
-        .select('adcoin_balance')
-        .eq('branch_id', branch.id)
+        .select('branch_id, adcoin_balance')
+        .in('branch_id', branchIds)
         .is('deleted_at', null);
 
-      const totalAdcoins = students?.reduce(
-        (sum, s) => sum + (s.adcoin_balance ?? 0),
-        0
-      ) ?? 0;
+      // Aggregate adcoin balances by branch in JavaScript (fast, in-memory)
+      const branchTotals = new Map<string, number>();
+      for (const student of allStudents ?? []) {
+        const current = branchTotals.get(student.branch_id) ?? 0;
+        branchTotals.set(student.branch_id, current + (student.adcoin_balance ?? 0));
+      }
 
-      pools.push({
+      // Build result
+      const pools: BranchPool[] = (branchesData ?? []).map((branch, idx) => ({
         id: branch.id,
         name: branch.name,
         color: POOL_COLORS[idx % POOL_COLORS.length],
-        adcoins: totalAdcoins,
-        rmValue: totalAdcoins * ADCOIN_TO_RM_RATE,
-      });
-    }
+        adcoins: branchTotals.get(branch.id) ?? 0,
+        rmValue: (branchTotals.get(branch.id) ?? 0) * ADCOIN_TO_RM_RATE,
+      }));
 
-    return pools;
-  });
-}
+      return pools;
+    });
+  },
+  ["adcoin-pool"],
+  { revalidate: 60, tags: ["dashboard", "adcoin-pool"] }
+);
 
 // Default pool limit (can be made configurable via settings table)
 const DEFAULT_POOL_LIMIT = 100000;
 
-export async function getAdcoinProgressData(
-  userEmail: string
-): Promise<AdcoinProgressData> {
-  return withRetry(async () => {
-    const userBranchId = await getUserBranchIdByEmail(userEmail);
+export const getAdcoinProgressData = unstable_cache(
+  async (userEmail: string): Promise<AdcoinProgressData> => {
+    return withRetry(async () => {
+      const userBranchId = await getUserBranchIdByEmail(userEmail);
 
-    let query = supabaseAdmin
-      .from('students')
-      .select('adcoin_balance')
-      .is('deleted_at', null);
+      let query = supabaseAdmin
+        .from('students')
+        .select('adcoin_balance')
+        .is('deleted_at', null);
 
-    if (userBranchId) {
-      query = query.eq('branch_id', userBranchId);
-    }
+      if (userBranchId) {
+        query = query.eq('branch_id', userBranchId);
+      }
 
-    const { data } = await query;
+      const { data } = await query;
 
-    const currentTotal = (data ?? []).reduce(
-      (sum, s) => sum + (s.adcoin_balance ?? 0),
-      0
-    );
+      const currentTotal = (data ?? []).reduce(
+        (sum, s) => sum + (s.adcoin_balance ?? 0),
+        0
+      );
 
-    return {
-      currentTotal,
-      poolLimit: DEFAULT_POOL_LIMIT,
-    };
-  });
-}
+      return {
+        currentTotal,
+        poolLimit: DEFAULT_POOL_LIMIT,
+      };
+    });
+  },
+  ["adcoin-progress"],
+  { revalidate: 60, tags: ["dashboard", "adcoin-progress"] }
+);

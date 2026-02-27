@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/supabase/server";
 import { getPaymentRecordsForTable } from "@/data/payments";
 import { PaymentRecordTable } from "@/components/payments/payment-record-table";
 import { Banner } from "@/components/ui/banner";
@@ -12,10 +12,7 @@ interface PageProps {
 }
 
 export default async function PaymentRecordPage({ searchParams }: PageProps) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getUser();
 
   if (!user) {
     redirect("/login");

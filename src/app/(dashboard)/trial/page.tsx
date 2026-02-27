@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { TrialTable } from "@/components/trial/trial-table";
@@ -7,12 +7,9 @@ import { getAllBranches } from "@/data/branches";
 import { getAllCourses } from "@/data/courses";
 
 export default async function TrialPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getUser();
 
-  if (!user || !user.email) {
+  if (!user?.email) {
     redirect("/login");
   }
 

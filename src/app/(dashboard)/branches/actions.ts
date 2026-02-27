@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import {
   createBranch,
   updateBranch,
@@ -50,6 +50,7 @@ export async function addBranchAction(
     }
 
     revalidatePath("/branches");
+    revalidateTag("dashboard", "max");
     return { success: true, branch: result };
   } catch (error) {
     console.error("Error creating branch:", error);
@@ -81,6 +82,7 @@ export async function updateBranchAction(
     }
 
     revalidatePath("/branches");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error updating branch:", error);
@@ -102,6 +104,7 @@ export async function deleteBranchAction(
     }
 
     revalidatePath("/branches");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error deleting branch:", error);
