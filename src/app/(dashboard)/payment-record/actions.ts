@@ -32,7 +32,7 @@ export async function updatePaymentRecordAction(
     }
 
     revalidatePath("/payment-record");
-    revalidateTag("dashboard");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error updating payment record:", error);
@@ -54,7 +54,7 @@ export async function deletePaymentRecordAction(
     }
 
     revalidatePath("/payment-record");
-    revalidateTag("dashboard");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error deleting payment record:", error);

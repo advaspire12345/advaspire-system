@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
       if (uploadError) {
         console.error("Upload error for", file.name, ":", JSON.stringify(uploadError));
-        const errMsg = uploadError.message || uploadError.error || JSON.stringify(uploadError);
+        const errMsg = uploadError.message || JSON.stringify(uploadError);
         errors.push(`${file.name}: ${errMsg}`);
         continue;
       }
