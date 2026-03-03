@@ -380,6 +380,7 @@ export async function unlinkParentFromStudent(parentId: string, studentId: strin
 
 export interface StudentTableRow {
   id: string;
+  studentId: string | null;
   photo: string | null;
   name: string;
   email: string | null;
@@ -392,6 +393,7 @@ export interface StudentTableRow {
   enrollDate: string;
   expiredDate: string | null;
   enrollmentStatus: EnrollmentStatus | null;
+  level: number;
   adcoinBalance: number;
 }
 
@@ -412,10 +414,12 @@ export async function getStudentsForTable(
     .from('students')
     .select(`
       id,
+      student_id,
       photo,
       name,
       email,
       branch_id,
+      level,
       adcoin_balance,
       created_at,
       branch:branches(name),
@@ -477,6 +481,7 @@ export async function getStudentsForTable(
 
     return {
       id: student.id,
+      studentId: student.student_id || null,
       photo: student.photo || null,
       name: student.name,
       email: student.email || null,
@@ -489,6 +494,7 @@ export async function getStudentsForTable(
       enrollDate: student.created_at,
       expiredDate: null, // Can be calculated from sessions_remaining if needed
       enrollmentStatus: activeEnrollment?.status || null,
+      level: student.level || 1,
       adcoinBalance: student.adcoin_balance || 0,
     };
   });

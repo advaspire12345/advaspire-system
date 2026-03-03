@@ -12,6 +12,7 @@ import {
   CalendarIcon,
   X,
   Filter,
+  Download,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -31,20 +32,25 @@ import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import type { PaymentRecordRow } from "@/data/payments";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  PaymentRecordModal,
+  type PaymentRecordModalMode,
+  type PaymentRecordFormData,
+  type CourseOption,
+  type PackageOption,
+} from "@/components/payments/payment-record-modal";
+import { ReceiptPreviewModal } from "@/components/payments/receipt-preview-modal";
+import { ImagePreviewModal } from "@/components/payments/image-preview-modal";
+import {
+  updatePaymentRecordAction,
+  deletePaymentRecordAction,
+} from "@/app/(dashboard)/payment-record/actions";
 
 interface PaymentRecordTableProps {
   initialData: PaymentRecordRow[];
   initialStartDate?: string;
   initialEndDate?: string;
+  courses?: CourseOption[];
+  packages?: PackageOption[];
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -59,7 +65,7 @@ const columns = [
   { key: "payMethod", label: "Pay Method", width: "100px" },
   { key: "paidOn", label: "Paid On", width: "100px" },
   { key: "receipt", label: "Receipt", width: "70px", align: "center" as const },
-  { key: "invoice", label: "Invoice", width: "100px" },
+  { key: "invoice", label: "Invoice", width: "100px", align: "center" as const },
   { key: "actions", label: "Actions", width: "100px", align: "center" as const },
 ];
 
@@ -75,11 +81,13 @@ export function PaymentRecordTable({
   initialData,
   initialStartDate,
   initialEndDate,
+  courses = [],
+  packages = [],
 }: PaymentRecordTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [data] = useState<PaymentRecordRow[]>(initialData);
+  const [data, setData] = useState<PaymentRecordRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -91,10 +99,22 @@ export function PaymentRecordTable({
     initialEndDate ? new Date(initialEndDate) : undefined
   );
 
-  // Delete modal state
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [recordToDelete, setRecordToDelete] = useState<PaymentRecordRow | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  // Edit/Delete modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<PaymentRecordModalMode>("edit");
+  const [selectedRecord, setSelectedRecord] = useState<PaymentRecordRow | null>(
+    null
+  );
+
+  // Receipt preview modal state (for invoice)
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [receiptRecord, setReceiptRecord] = useState<PaymentRecordRow | null>(
+    null
+  );
+
+  // Image preview modal state (for receipt photo)
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+  const [previewImageSrc, setPreviewImageSrc] = useState<string>("");
 
   // Filter data based on search (date filtering is done server-side)
   const filteredData = useMemo(() => {
@@ -151,36 +171,82 @@ export function PaymentRecordTable({
     router.push("/payment-record");
   }, [router]);
 
-  // Handle edit
-  const handleEdit = (record: PaymentRecordRow) => {
-    // TODO: Implement edit modal
-    console.log("Edit record:", record);
+  // Open modal with specific mode
+  const openModal = (mode: PaymentRecordModalMode, record: PaymentRecordRow) => {
+    setModalMode(mode);
+    setSelectedRecord(record);
+    setModalOpen(true);
   };
 
-  // Handle delete confirmation
-  const openDeleteModal = (record: PaymentRecordRow) => {
-    setRecordToDelete(record);
-    setDeleteModalOpen(true);
+  // Open receipt preview modal (for invoice)
+  const openReceiptModal = (record: PaymentRecordRow) => {
+    setReceiptRecord(record);
+    setReceiptModalOpen(true);
   };
+
+  // Open image preview modal (for receipt photo)
+  const openImagePreview = (imageSrc: string) => {
+    setPreviewImageSrc(imageSrc);
+    setImagePreviewOpen(true);
+  };
+
+  // Handle update
+  const handleUpdate = useCallback(
+    async (formData: PaymentRecordFormData) => {
+      if (!selectedRecord) return;
+
+      const result = await updatePaymentRecordAction(selectedRecord.id, {
+        courseId: formData.courseId,
+        packageId: formData.packageId,
+        price: formData.price,
+        paymentMethod: formData.paymentMethod,
+        paidAt: formData.paidAt,
+        receiptPhoto: formData.receiptPhoto,
+      });
+
+      if (result.success) {
+        // Find course and package names for display
+        const course = courses.find((c) => c.id === formData.courseId);
+        const pkg = packages.find((p) => p.id === formData.packageId);
+
+        setData((prev) =>
+          prev.map((item) =>
+            item.id === selectedRecord.id
+              ? {
+                  ...item,
+                  courseId: formData.courseId,
+                  courseName: course?.name ?? null,
+                  packageId: formData.packageId,
+                  packageName: pkg?.name ?? null,
+                  price: formData.price,
+                  paymentMethod: formData.paymentMethod,
+                  paidAt: formData.paidAt,
+                  receiptPhoto: formData.receiptPhoto,
+                }
+              : item
+          )
+        );
+      } else {
+        console.error("Failed to update:", result.error);
+        throw new Error(result.error);
+      }
+    },
+    [selectedRecord, courses, packages]
+  );
 
   // Handle delete
-  const handleDelete = async () => {
-    if (!recordToDelete) return;
+  const handleDelete = useCallback(async () => {
+    if (!selectedRecord) return;
 
-    setIsDeleting(true);
-    try {
-      // TODO: Implement delete action
-      console.log("Delete record:", recordToDelete);
-      // After successful delete, refresh the page
-      router.refresh();
-    } catch (error) {
-      console.error("Failed to delete:", error);
-    } finally {
-      setIsDeleting(false);
-      setDeleteModalOpen(false);
-      setRecordToDelete(null);
+    const result = await deletePaymentRecordAction(selectedRecord.id);
+
+    if (result.success) {
+      setData((prev) => prev.filter((item) => item.id !== selectedRecord.id));
+    } else {
+      console.error("Failed to delete:", result.error);
+      throw new Error(result.error);
     }
-  };
+  }, [selectedRecord]);
 
   // Format date display
   const formatDate = (dateStr: string | null) => {
@@ -442,34 +508,38 @@ export function PaymentRecordTable({
                         style={{ width: columns[8].width }}
                       >
                         {row.receiptPhoto ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Image
-                                src={row.receiptPhoto}
-                                alt="Receipt"
-                                width={32}
-                                height={32}
-                                className="h-8 w-8 object-cover rounded cursor-pointer mx-auto"
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent side="left">
-                              <Image
-                                src={row.receiptPhoto}
-                                alt="Receipt"
-                                width={200}
-                                height={200}
-                                className="max-w-[200px] max-h-[200px] object-contain rounded"
-                              />
-                            </TooltipContent>
-                          </Tooltip>
+                          <button
+                            type="button"
+                            onClick={() => openImagePreview(row.receiptPhoto!)}
+                            className="mx-auto block"
+                          >
+                            <Image
+                              src={row.receiptPhoto}
+                              alt="Receipt"
+                              width={32}
+                              height={32}
+                              className="h-8 w-8 object-cover rounded cursor-pointer hover:ring-2 hover:ring-[#23D2E2] transition"
+                            />
+                          </button>
                         ) : (
                           "-"
                         )}
                       </td>
 
-                      {/* Invoice */}
-                      <td className="px-4 py-3" style={{ width: columns[9].width }}>
-                        <TruncatedText text={row.invoiceNumber} maxLength={12} />
+                      {/* Invoice - Download Button */}
+                      <td
+                        className="px-4 py-3 text-center"
+                        style={{ width: columns[9].width }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => openReceiptModal(row)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-muted-foreground/30 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-transparent hover:bg-[#23D2E2] hover:text-white"
+                          title="Download Invoice"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          <span>Invoice</span>
+                        </button>
                       </td>
 
                       {/* Actions */}
@@ -478,7 +548,7 @@ export function PaymentRecordTable({
                           {/* Edit Button */}
                           <button
                             type="button"
-                            onClick={() => handleEdit(row)}
+                            onClick={() => openModal("edit", row)}
                             className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
                             aria-label="Edit payment"
                             title="Edit"
@@ -489,7 +559,7 @@ export function PaymentRecordTable({
                           {/* Delete Button */}
                           <button
                             type="button"
-                            onClick={() => openDeleteModal(row)}
+                            onClick={() => openModal("delete", row)}
                             className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
                             aria-label="Delete payment"
                             title="Delete"
@@ -539,29 +609,47 @@ export function PaymentRecordTable({
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Payment Record</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this payment record for{" "}
-              <span className="font-semibold">{recordToDelete?.studentName}</span>?
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              disabled={isDeleting}
-              className="bg-red-500 hover:bg-red-600"
-            >
-              {isDeleting ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Edit/Delete Modal */}
+      <PaymentRecordModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        mode={modalMode}
+        record={selectedRecord}
+        courses={courses}
+        packages={packages}
+        onSubmit={handleUpdate}
+        onDelete={handleDelete}
+      />
+
+      {/* Receipt Preview Modal (Invoice) */}
+      {receiptRecord && (
+        <ReceiptPreviewModal
+          open={receiptModalOpen}
+          onOpenChange={setReceiptModalOpen}
+          billToName={receiptRecord.parentName ?? receiptRecord.studentName}
+          billToContact={undefined}
+          date={receiptRecord.paidAt ? new Date(receiptRecord.paidAt) : new Date()}
+          receiptNo={receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+          invoiceNo={receiptRecord.invoiceNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+          items={[
+            {
+              code: receiptRecord.packageId?.slice(0, 8).toUpperCase() ?? "PKG",
+              product: `${receiptRecord.courseName ?? "Course"} - ${receiptRecord.packageName ?? "Package"}`,
+              qty: 1,
+              rate: receiptRecord.price,
+            },
+          ]}
+          total={receiptRecord.price}
+        />
+      )}
+
+      {/* Image Preview Modal (Receipt Photo) */}
+      <ImagePreviewModal
+        open={imagePreviewOpen}
+        onOpenChange={setImagePreviewOpen}
+        imageSrc={previewImageSrc}
+        title="Receipt Photo"
+      />
     </>
   );
 }

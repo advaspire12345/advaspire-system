@@ -28,6 +28,7 @@ import {
   type CourseOption,
   type PackageOption,
 } from "@/components/payments/pending-payment-modal";
+import { ImagePreviewModal } from "@/components/payments/image-preview-modal";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import type { PendingPaymentRow } from "@/data/payments";
@@ -92,6 +93,10 @@ export function PendingPaymentTable({
   const [selectedRecord, setSelectedRecord] =
     useState<PendingPaymentRow | null>(null);
 
+  // Image preview modal state
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+  const [previewImageSrc, setPreviewImageSrc] = useState<string>("");
+
   // Filter data based on search
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return data;
@@ -129,6 +134,12 @@ export function PendingPaymentTable({
     setModalMode(mode);
     setSelectedRecord(record);
     setModalOpen(true);
+  };
+
+  // Open image preview modal
+  const openImagePreview = (imageSrc: string) => {
+    setPreviewImageSrc(imageSrc);
+    setImagePreviewOpen(true);
   };
 
   // Handle add
@@ -480,26 +491,19 @@ export function PendingPaymentTable({
                         style={{ width: columns[9].width }}
                       >
                         {row.receiptPhoto ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Image
-                                src={row.receiptPhoto}
-                                alt="Receipt"
-                                width={32}
-                                height={32}
-                                className="h-8 w-8 object-cover rounded cursor-pointer mx-auto"
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent side="left">
-                              <Image
-                                src={row.receiptPhoto}
-                                alt="Receipt"
-                                width={200}
-                                height={200}
-                                className="max-w-[200px] max-h-[200px] object-contain rounded"
-                              />
-                            </TooltipContent>
-                          </Tooltip>
+                          <button
+                            type="button"
+                            onClick={() => openImagePreview(row.receiptPhoto!)}
+                            className="mx-auto block"
+                          >
+                            <Image
+                              src={row.receiptPhoto}
+                              alt="Receipt"
+                              width={32}
+                              height={32}
+                              className="h-8 w-8 object-cover rounded cursor-pointer hover:ring-2 hover:ring-[#23D2E2] transition"
+                            />
+                          </button>
                         ) : (
                           "-"
                         )}
@@ -627,6 +631,14 @@ export function PendingPaymentTable({
         onAdd={handleAdd}
         onApprove={handleApprove}
         onDelete={handleDelete}
+      />
+
+      {/* Image Preview Modal */}
+      <ImagePreviewModal
+        open={imagePreviewOpen}
+        onOpenChange={setImagePreviewOpen}
+        imageSrc={previewImageSrc}
+        title="Receipt Photo"
       />
     </>
   );

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/supabase/server";
 import { getPaymentRecordsForTable } from "@/data/payments";
+import { getCoursesAndPackages } from "@/data/courses";
 import { PaymentRecordTable } from "@/components/payments/payment-record-table";
 import { Banner } from "@/components/ui/banner";
 
@@ -22,12 +23,11 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
   const startDate = params.startDate;
   const endDate = params.endDate;
 
-  // Fetch payment records with optional date filters
-  const payments = await getPaymentRecordsForTable(
-    user.email ?? "",
-    startDate,
-    endDate
-  );
+  // Fetch data in parallel
+  const [payments, { courses, packages }] = await Promise.all([
+    getPaymentRecordsForTable(user.email ?? "", startDate, endDate),
+    getCoursesAndPackages(),
+  ]);
 
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">
@@ -43,6 +43,8 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
           initialData={payments}
           initialStartDate={startDate}
           initialEndDate={endDate}
+          courses={courses}
+          packages={packages}
         />
       </div>
     </main>
