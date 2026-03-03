@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import {
   createTrial,
   updateTrial,
@@ -62,6 +62,7 @@ export async function addTrialAction(
     }
 
     revalidatePath("/trial");
+    revalidateTag("dashboard", "max");
     return { success: true, trial: result };
   } catch (error) {
     console.error("Error creating trial:", error);
@@ -97,6 +98,7 @@ export async function updateTrialAction(
     }
 
     revalidatePath("/trial");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error updating trial:", error);
@@ -119,6 +121,7 @@ export async function updateTrialStatusAction(
     }
 
     revalidatePath("/trial");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error updating trial status:", error);
@@ -140,6 +143,7 @@ export async function deleteTrialAction(
     }
 
     revalidatePath("/trial");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error deleting trial:", error);

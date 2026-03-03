@@ -37,6 +37,12 @@ export interface StudentFormData {
   studentImage: File | null;
   coverImage: File | null;
 
+  // Student Account
+  studentId: string | null;
+  studentPassword: string | null;
+  level: number | null;
+  adcoinBalance: number;
+
   // Parent Info
   parentId: string | null;
   parentName: string | null;
@@ -45,6 +51,7 @@ export interface StudentFormData {
   parentAddress: string | null;
   parentPostcode: string | null;
   parentCity: string | null;
+  parentPassword: string | null;
 
   // Enrollment
   branchId: string;
@@ -100,6 +107,19 @@ const SESSION_OPTIONS = [
   { value: "24", label: "24 Sessions" },
 ];
 
+const LEVEL_OPTIONS = [
+  { value: "1", label: "Level 1" },
+  { value: "2", label: "Level 2" },
+  { value: "3", label: "Level 3" },
+  { value: "4", label: "Level 4" },
+  { value: "5", label: "Level 5" },
+  { value: "6", label: "Level 6" },
+  { value: "7", label: "Level 7" },
+  { value: "8", label: "Level 8" },
+  { value: "9", label: "Level 9" },
+  { value: "10", label: "Level 10" },
+];
+
 export function StudentModal({
   open,
   onOpenChange,
@@ -127,6 +147,10 @@ export function StudentModal({
     schoolName: "",
     studentImage: null,
     coverImage: null,
+    studentId: "",
+    studentPassword: "",
+    level: 1,
+    adcoinBalance: 0,
     parentId: null,
     parentName: "",
     parentPhone: "",
@@ -134,6 +158,7 @@ export function StudentModal({
     parentAddress: "",
     parentPostcode: "",
     parentCity: "",
+    parentPassword: "",
     branchId: "",
     courseId: "",
     packageId: null,
@@ -158,6 +183,10 @@ export function StudentModal({
           schoolName: "",
           studentImage: null,
           coverImage: null,
+          studentId: "",
+          studentPassword: "",
+          level: 1,
+          adcoinBalance: 0,
           parentId: null,
           parentName: "",
           parentPhone: "",
@@ -165,6 +194,7 @@ export function StudentModal({
           parentAddress: "",
           parentPostcode: "",
           parentCity: "",
+          parentPassword: "",
           branchId: "",
           courseId: "",
           packageId: null,
@@ -186,6 +216,10 @@ export function StudentModal({
           schoolName: "",
           studentImage: null,
           coverImage: null,
+          studentId: record.studentId || "",
+          studentPassword: "",
+          level: record.level ?? 1,
+          adcoinBalance: record.adcoinBalance ?? 0,
           parentId: null,
           parentName: "",
           parentPhone: "",
@@ -193,6 +227,7 @@ export function StudentModal({
           parentAddress: "",
           parentPostcode: "",
           parentCity: "",
+          parentPassword: "",
           branchId: record.branchId || "",
           courseId: record.courseId || "",
           packageId: null,
@@ -331,7 +366,7 @@ export function StudentModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="p-0 sm:rounded-xl overflow-hidden border-0"
+        className="p-0 sm:rounded-xl border-0"
         style={{ maxWidth: "800px" }}
         floatingCloseButton
       >
@@ -342,7 +377,7 @@ export function StudentModal({
               ? "Edit Student"
               : "Add New Student"}
         </DialogTitle>
-        <div className="grid grid-cols-12 h-[75vh] min-h-[450px]">
+        <div className="grid grid-cols-12 h-[75vh] min-h-[450px] overflow-hidden rounded-xl">
           {/* LEFT PANEL - PREVIEW & NAVIGATION */}
           <div className="col-span-12 lg:col-span-4 flex flex-col border-r border-border">
             {/* Cover Banner */}
@@ -392,10 +427,10 @@ export function StudentModal({
                   onClick={() => !isReadOnly && setActiveTab(tab.id)}
                   disabled={isReadOnly}
                   className={cn(
-                    "w-full flex items-center gap-1 px-4 py-1.5 text-left text-sm rounded-lg transition-colors",
+                    "w-full flex items-center gap-1 px-4 py-1.5 text-left text-sm rounded-lg transition-all duration-200",
                     activeTab === tab.id
-                      ? "text-[#615DFA] font-bold"
-                      : "text-muted-foreground",
+                      ? "text-[#615DFA] font-bold translate-x-1"
+                      : "text-muted-foreground hover:translate-x-1 hover:text-[#615DFA]",
                     isReadOnly && "cursor-not-allowed opacity-50",
                   )}
                 >
@@ -573,6 +608,62 @@ export function StudentModal({
                         </p>
                       </div>
                     </div>
+
+                    {/* Student Account Section */}
+                    <div className="pt-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div className="md:col-span-2">
+                          <FloatingInput
+                            label="Student ID"
+                            value={formData.studentId || ""}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                studentId: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                        <FloatingSelect
+                          label="Level"
+                          value={formData.level?.toString() || "1"}
+                          onChange={(val) =>
+                            setFormData({
+                              ...formData,
+                              level: val ? parseInt(val) : 1,
+                            })
+                          }
+                          options={LEVEL_OPTIONS}
+                        />
+                        <FloatingInput
+                          label="Adcoin Balance"
+                          type="number"
+                          value={formData.adcoinBalance.toString()}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              adcoinBalance: parseInt(e.target.value) || 0,
+                            })
+                          }
+                        />
+                        <div className="md:col-span-2">
+                          <FloatingInput
+                            label="Password (First-time Login)"
+                            type="password"
+                            value={formData.studentPassword || ""}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                studentPassword: e.target.value,
+                              })
+                            }
+                          />
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Set a temporary password for the student&apos;s first login. They can change it later.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -667,6 +758,24 @@ export function StudentModal({
                                 })
                               }
                             />
+
+                            {/* Parent Password */}
+                            <div className="md:col-span-2">
+                              <FloatingInput
+                                label="Password (First-time Login)"
+                                type="password"
+                                value={formData.parentPassword || ""}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    parentPassword: e.target.value,
+                                  })
+                                }
+                              />
+                              <p className="text-xs text-muted-foreground mt-2">
+                                Set a temporary password for the parent&apos;s first login.
+                              </p>
+                            </div>
                           </div>
 
                           <div className="bg-info/10 border border-info/20 rounded-lg p-4">

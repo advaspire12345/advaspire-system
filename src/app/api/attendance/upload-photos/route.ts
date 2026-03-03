@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/db";
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     for (const file of files) {
       // Validate file type
       if (!ALLOWED_TYPES.includes(file.type)) {
-        errors.push(`${file.name}: Invalid file type. Allowed: JPEG, PNG, WebP`);
+        errors.push(`${file.name}: Invalid file type. Allowed: JPEG, PNG, WebP, PDF`);
         continue;
       }
 
@@ -70,8 +70,9 @@ export async function POST(request: NextRequest) {
         });
 
       if (uploadError) {
-        console.error("Upload error:", uploadError);
-        errors.push(`${file.name}: Upload failed`);
+        console.error("Upload error for", file.name, ":", JSON.stringify(uploadError));
+        const errMsg = uploadError.message || JSON.stringify(uploadError);
+        errors.push(`${file.name}: ${errMsg}`);
         continue;
       }
 

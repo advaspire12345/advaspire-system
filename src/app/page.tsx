@@ -1,65 +1,74 @@
-import Image from "next/image";
+import { LandingHeader } from "@/components/landing/landing-header";
+import { ProfileCover } from "@/components/landing/profile-cover";
+import { ProfileHeader } from "@/components/landing/profile-header";
+import { ProfileNavigation } from "@/components/landing/profile-navigation";
+import { SocialNetworkCard } from "@/components/landing/social-network-card";
+import { UserInfoCard } from "@/components/landing/user-info-card";
+import { ProgramList } from "@/components/landing/program-list";
+import { Leaderboard } from "@/components/landing/leaderboard";
+import { PhotoContainer } from "@/components/landing/photo-container";
+import { MarketplaceList } from "@/components/landing/marketplace-list";
+import { VideoPlayer } from "@/components/landing/video-player";
+import { ForumList } from "@/components/landing/forum-list";
+import { TeamList } from "@/components/landing/team-list";
+import { UpcomingEventsList } from "@/components/landing/upcoming-events-list";
+import {
+  mockProfile,
+  mockPhotos,
+  mockPrograms,
+  mockEvents,
+  mockLeaderboard,
+  mockMarketplace,
+  mockForumTopics,
+  mockTeamMembers,
+} from "@/data/landing-mock";
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-[#f8f8fb]">
+      {/* Header */}
+      <LandingHeader />
+
+      {/* Cover + Profile Header Container */}
+      <div className="mx-auto mt-4 max-w-[1184px]">
+        <ProfileCover coverUrl={mockProfile.coverUrl} />
+        <ProfileHeader profile={mockProfile} />
+        <ProfileNavigation />
+      </div>
+
+      {/* Main content */}
+      <div className="mx-auto max-w-[1184px] px-0">
+
+        {/* Three Column Layout */}
+        <div className="mt-4 grid grid-cols-12 gap-4 pb-12">
+          {/* Left Sidebar */}
+          <aside className="col-span-3 space-y-4">
+            <SocialNetworkCard />
+            <UserInfoCard profile={mockProfile} />
+            <ProgramList programs={mockPrograms} />
+            <UpcomingEventsList events={mockEvents} />
+          </aside>
+
+          {/* Main Feed */}
+          <main className="col-span-6">
+            <Leaderboard entries={mockLeaderboard} />
+            <PhotoContainer photos={mockPhotos} totalCount={24} />
+          </main>
+
+          {/* Right Sidebar */}
+          <aside className="col-span-3 space-y-4">
+            <MarketplaceList items={mockMarketplace} />
+            <VideoPlayer videos={[
+              "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80",
+              "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=400&q=80",
+              "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&q=80",
+              "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&q=80",
+            ]} />
+            <ForumList topics={mockForumTopics} />
+            <TeamList members={mockTeamMembers} />
+          </aside>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

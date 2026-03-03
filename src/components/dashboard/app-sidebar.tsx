@@ -16,6 +16,9 @@ import {
   Settings,
   FlaskConical,
   LogOut,
+  FileUser,
+  GraduationCap,
+  Users,
 } from "lucide-react";
 import {
   Sidebar,
@@ -52,8 +55,18 @@ const navigationItems = [
   },
   {
     title: "Student",
-    icon: FlaskConical,
+    icon: FileUser,
     href: "/student",
+  },
+  {
+    title: "Program",
+    icon: GraduationCap,
+    href: "/program",
+  },
+  {
+    title: "Team",
+    icon: Users,
+    href: "/team",
   },
   {
     title: "Mark Attendance",
@@ -144,7 +157,7 @@ export function AppSidebar() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push("/");
     router.refresh();
   };
 

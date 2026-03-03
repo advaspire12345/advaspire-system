@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import {
   createStudent,
   updateStudent,
@@ -118,6 +118,7 @@ export async function createStudentAction(
     }
 
     revalidatePath("/student");
+    revalidateTag("dashboard", "max");
     return { success: true, studentId: student.id };
   } catch (error) {
     console.error("Error in createStudentAction:", error);
@@ -152,6 +153,7 @@ export async function updateStudentAction(
     }
 
     revalidatePath("/student");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error in updateStudentAction:", error);
@@ -173,6 +175,7 @@ export async function deleteStudentAction(
     }
 
     revalidatePath("/student");
+    revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {
     console.error("Error in deleteStudentAction:", error);

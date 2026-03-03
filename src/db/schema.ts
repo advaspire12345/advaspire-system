@@ -14,6 +14,8 @@ export type UserRole =
   | 'student'
   | 'parent';
 
+export type TeamMemberStatus = 'active' | 'inactive';
+
 export type EnrollmentStatus = 'active' | 'completed' | 'cancelled' | 'expired' | 'pending';
 
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
@@ -47,6 +49,11 @@ export interface User {
   role: UserRole;
   branch_id: string | null;
   photo: string | null;
+  phone: string | null;
+  address: string | null;
+  cv_url: string | null;
+  employed_date: string | null;
+  status: TeamMemberStatus;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -86,6 +93,7 @@ export interface Student {
   school_name: string | null;
   cover_photo: string | null;
   branch_id: string;
+  level: number;
   adcoin_balance: number;
   created_at: string;
   updated_at: string;
@@ -403,6 +411,11 @@ export interface UserInsert {
   branch_id?: string | null;
   photo?: string | null;
   auth_id?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  cv_url?: string | null;
+  employed_date?: string | null;
+  status?: TeamMemberStatus;
 }
 
 export interface BranchInsert {
@@ -426,6 +439,7 @@ export interface StudentInsert {
   school_name?: string | null;
   cover_photo?: string | null;
   branch_id: string;
+  level?: number;
   adcoin_balance?: number;
 }
 
@@ -563,6 +577,11 @@ export interface UserUpdate {
   role?: UserRole;
   branch_id?: string | null;
   photo?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  cv_url?: string | null;
+  employed_date?: string | null;
+  status?: TeamMemberStatus;
 }
 
 export interface BranchUpdate {
@@ -586,6 +605,7 @@ export interface StudentUpdate {
   school_name?: string | null;
   cover_photo?: string | null;
   branch_id?: string;
+  level?: number;
   adcoin_balance?: number;
 }
 
@@ -1009,4 +1029,316 @@ export interface LessonProgressUpdate {
   completed?: boolean;
   completed_at?: string | null;
   watched_seconds?: number;
+}
+
+// ============================================
+// PROGRAM/COURSE EXTENDED TYPES
+// ============================================
+
+export type ProgramType = 'course' | 'workshop' | 'bootcamp' | 'certification';
+export type CourseStatus = 'draft' | 'active' | 'archived';
+export type LessonContentType = 'video' | 'text' | 'quiz' | 'assignment';
+export type PricingPackageType = 'monthly' | 'session';
+
+/**
+ * Course Category
+ */
+export interface CourseCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  deleted_at: string | null;
+}
+
+/**
+ * Extended Course (Program) - includes new fields
+ */
+export interface CourseExtended extends Course {
+  short_description: string | null;
+  category_id: string | null;
+  number_of_levels: number | null;
+  sessions_to_level_up: number | null;
+  program_type: ProgramType | null;
+  status: CourseStatus | null;
+  youtube_url: string | null;
+  cover_image_url: string | null;
+  assessment_enabled: boolean;
+  levelling_time_minutes: number | null;
+}
+
+/**
+ * Course Language junction
+ */
+export interface CourseLanguage {
+  id: string;
+  course_id: string;
+  language: string;
+}
+
+/**
+ * Course Instructor junction
+ */
+export interface CourseInstructor {
+  id: string;
+  course_id: string;
+  user_id: string;
+}
+
+/**
+ * Course Branch junction
+ */
+export interface CourseBranch {
+  id: string;
+  course_id: string;
+  branch_id: string;
+}
+
+/**
+ * Course Requirement
+ */
+export interface CourseRequirement {
+  id: string;
+  course_id: string;
+  requirement: string;
+  sort_order: number;
+}
+
+/**
+ * Course Outcome
+ */
+export interface CourseOutcome {
+  id: string;
+  course_id: string;
+  outcome: string;
+  sort_order: number;
+}
+
+/**
+ * Course FAQ
+ */
+export interface CourseFaq {
+  id: string;
+  course_id: string;
+  question: string;
+  answer: string;
+  sort_order: number;
+}
+
+/**
+ * Course Section (Curriculum)
+ */
+export interface CourseSection {
+  id: string;
+  course_id: string;
+  title: string;
+  description: string | null;
+  sort_order: number;
+}
+
+/**
+ * Course Lesson (within Section)
+ */
+export interface CourseLesson {
+  id: string;
+  section_id: string;
+  title: string;
+  description: string | null;
+  duration_minutes: number | null;
+  content_type: LessonContentType | null;
+  sort_order: number;
+}
+
+/**
+ * Course Pricing
+ */
+export interface CoursePricing {
+  id: string;
+  course_id: string;
+  package_type: PricingPackageType;
+  price: number;
+  duration: number;
+  description: string | null;
+  is_default: boolean;
+  deleted_at: string | null;
+}
+
+// ============================================
+// PROGRAM INSERT TYPES
+// ============================================
+
+export interface CourseCategoryInsert {
+  name: string;
+  description?: string | null;
+}
+
+export interface CourseExtendedInsert extends CourseInsert {
+  short_description?: string | null;
+  category_id?: string | null;
+  number_of_levels?: number | null;
+  sessions_to_level_up?: number | null;
+  program_type?: ProgramType | null;
+  status?: CourseStatus;
+  youtube_url?: string | null;
+  cover_image_url?: string | null;
+  assessment_enabled?: boolean;
+  levelling_time_minutes?: number | null;
+}
+
+export interface CourseLanguageInsert {
+  course_id: string;
+  language: string;
+}
+
+export interface CourseInstructorInsert {
+  course_id: string;
+  user_id: string;
+}
+
+export interface CourseBranchInsert {
+  course_id: string;
+  branch_id: string;
+}
+
+export interface CourseRequirementInsert {
+  course_id: string;
+  requirement: string;
+  sort_order?: number;
+}
+
+export interface CourseOutcomeInsert {
+  course_id: string;
+  outcome: string;
+  sort_order?: number;
+}
+
+export interface CourseFaqInsert {
+  course_id: string;
+  question: string;
+  answer: string;
+  sort_order?: number;
+}
+
+export interface CourseSectionInsert {
+  course_id: string;
+  title: string;
+  description?: string | null;
+  sort_order?: number;
+}
+
+export interface CourseLessonInsert {
+  section_id: string;
+  title: string;
+  description?: string | null;
+  duration_minutes?: number | null;
+  content_type?: LessonContentType | null;
+  sort_order?: number;
+}
+
+export interface CoursePricingInsert {
+  course_id: string;
+  package_type: PricingPackageType;
+  price: number;
+  duration: number;
+  description?: string | null;
+  is_default?: boolean;
+}
+
+// ============================================
+// PROGRAM UPDATE TYPES
+// ============================================
+
+export interface CourseCategoryUpdate {
+  name?: string;
+  description?: string | null;
+}
+
+export interface CourseExtendedUpdate extends CourseUpdate {
+  short_description?: string | null;
+  category_id?: string | null;
+  number_of_levels?: number | null;
+  sessions_to_level_up?: number | null;
+  program_type?: ProgramType | null;
+  status?: CourseStatus;
+  youtube_url?: string | null;
+  cover_image_url?: string | null;
+  assessment_enabled?: boolean;
+  levelling_time_minutes?: number | null;
+}
+
+export interface CourseRequirementUpdate {
+  requirement?: string;
+  sort_order?: number;
+}
+
+export interface CourseOutcomeUpdate {
+  outcome?: string;
+  sort_order?: number;
+}
+
+export interface CourseFaqUpdate {
+  question?: string;
+  answer?: string;
+  sort_order?: number;
+}
+
+export interface CourseSectionUpdate {
+  title?: string;
+  description?: string | null;
+  sort_order?: number;
+}
+
+export interface CourseLessonUpdate {
+  title?: string;
+  description?: string | null;
+  duration_minutes?: number | null;
+  content_type?: LessonContentType | null;
+  sort_order?: number;
+}
+
+export interface CoursePricingUpdate {
+  package_type?: PricingPackageType;
+  price?: number;
+  duration?: number;
+  description?: string | null;
+  is_default?: boolean;
+}
+
+// ============================================
+// PROGRAM JOINED/EXPANDED TYPES
+// ============================================
+
+export interface CourseSectionWithLessons extends CourseSection {
+  lessons: CourseLesson[];
+}
+
+export interface ProgramTableRow {
+  id: string;
+  name: string;
+  short_description: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  number_of_levels: number | null;
+  sessions_to_level_up: number | null;
+  program_type: ProgramType | null;
+  status: CourseStatus | null;
+  cover_image_url: string | null;
+  assessment_enabled: boolean;
+  levelling_time_minutes: number | null;
+  enrolled_count: number;
+  lesson_count: number;
+  branch_names: string[];
+  default_pricing: CoursePricing | null;
+}
+
+export interface ProgramFull extends CourseExtended {
+  category: CourseCategory | null;
+  languages: string[];
+  instructors: User[];
+  branches: Branch[];
+  requirements: CourseRequirement[];
+  outcomes: CourseOutcome[];
+  faqs: CourseFaq[];
+  sections: CourseSectionWithLessons[];
+  pricing: CoursePricing[];
 }
