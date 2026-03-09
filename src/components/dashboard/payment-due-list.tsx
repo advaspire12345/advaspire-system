@@ -75,7 +75,7 @@ export function PaymentDueList({ items, branches }: PaymentDueListProps) {
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
-          <CardTitle className="font-bold">Payment Due List</CardTitle>
+          <CardTitle className="font-bold">Payment Due List ({items.length})</CardTitle>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

@@ -6,11 +6,13 @@ import {
   updateTeamMember,
   softDeleteTeamMember,
 } from "@/data/team";
+import { supabaseAdmin } from "@/db";
 import type { UserInsert, UserUpdate, UserRole, TeamMemberStatus } from "@/db/schema";
 
 export interface TeamMemberFormPayload {
   name: string;
   email: string;
+  password?: string;
   phone: string | null;
   address: string | null;
   branchId: string | null;
@@ -25,9 +27,36 @@ export async function createTeamMemberAction(
   payload: TeamMemberFormPayload
 ): Promise<{ success: boolean; error?: string; userId?: string }> {
   try {
+    // Validate password is provided for new team members
+    if (!payload.password || payload.password.length < 6) {
+      return { success: false, error: "Password must be at least 6 characters" };
+    }
+
+    // Create Supabase Auth user with email and password
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email: payload.email,
+      password: payload.password,
+      email_confirm: true, // Auto-confirm email so they can login immediately
+      user_metadata: {
+        full_name: payload.name,
+        role: payload.role,
+      },
+    });
+
+    if (authError) {
+      console.error("Error creating auth user:", authError);
+      return { success: false, error: authError.message };
+    }
+
+    if (!authData.user) {
+      return { success: false, error: "Failed to create authentication account" };
+    }
+
+    // Create team member record with auth_id linked
     const userData: UserInsert = {
       name: payload.name,
       email: payload.email,
+      auth_id: authData.user.id,
       phone: payload.phone || null,
       address: payload.address || null,
       branch_id: payload.branchId || null,
@@ -41,6 +70,8 @@ export async function createTeamMemberAction(
     const user = await createTeamMember(userData);
 
     if (!user) {
+      // If team member creation fails, we should clean up the auth user
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
       return { success: false, error: "Failed to create team member" };
     }
 

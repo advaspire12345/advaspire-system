@@ -25,6 +25,7 @@ export interface BranchOption {
 export interface CourseOption {
   id: string;
   name: string;
+  numberOfLevels?: number | null;
 }
 
 interface TrialModalProps {

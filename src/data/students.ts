@@ -346,10 +346,41 @@ export async function restoreStudent(studentId: string): Promise<boolean> {
 // PARENT RELATIONSHIPS
 // ============================================
 
-export async function linkParentToStudent(parentId: string, studentId: string): Promise<boolean> {
+export async function linkParentToStudent(
+  parentId: string,
+  studentId: string,
+  relationship?: string | null
+): Promise<boolean> {
+  // First check if link already exists
+  const { data: existing } = await supabaseAdmin
+    .from('parent_students')
+    .select('id')
+    .eq('parent_id', parentId)
+    .eq('student_id', studentId)
+    .maybeSingle();
+
+  if (existing) {
+    // Update the relationship if it exists
+    const { error: updateError } = await supabaseAdmin
+      .from('parent_students')
+      .update({ relationship: relationship || 'parent' })
+      .eq('id', existing.id);
+
+    if (updateError) {
+      console.error('Error updating parent-student relationship:', updateError);
+      return false;
+    }
+    return true;
+  }
+
+  // Create new link
   const { error } = await supabaseAdmin
     .from('parent_students')
-    .insert({ parent_id: parentId, student_id: studentId });
+    .insert({
+      parent_id: parentId,
+      student_id: studentId,
+      relationship: relationship || 'parent'
+    });
 
   if (error) {
     console.error('Error linking parent to student:', error);
@@ -382,12 +413,20 @@ export interface StudentTableRow {
   id: string;
   studentId: string | null;
   photo: string | null;
+  coverPhoto: string | null;
   name: string;
   email: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  gender: "male" | "female" | "other" | null;
+  schoolName: string | null;
   branchId: string;
   branchName: string;
   programName: string | null;
   courseId: string | null;
+  instructorId: string | null;
+  packageId: string | null;
+  packageType: "monthly" | "session" | null;
   scheduleDays: string[];
   scheduleTime: string | null;
   enrollDate: string;
@@ -395,6 +434,27 @@ export interface StudentTableRow {
   enrollmentStatus: EnrollmentStatus | null;
   level: number;
   adcoinBalance: number;
+  // Period Active info
+  sessionsRemaining: number | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  packageDuration: number | null;
+  // Session count - total attended sessions
+  sessionCount: number;
+  // Payment info - total paid and sessions bought
+  paymentCount: {
+    totalPaid: number;
+    totalSessionsBought: number;
+  };
+  // Parent info
+  parentId: string | null;
+  parentName: string | null;
+  parentPhone: string | null;
+  parentEmail: string | null;
+  parentAddress: string | null;
+  parentPostcode: string | null;
+  parentCity: string | null;
+  parentRelationship: string | null;
 }
 
 /**
@@ -416,8 +476,13 @@ export async function getStudentsForTable(
       id,
       student_id,
       photo,
+      cover_photo,
       name,
       email,
+      phone,
+      date_of_birth,
+      gender,
+      school_name,
       branch_id,
       level,
       adcoin_balance,
@@ -428,11 +493,30 @@ export async function getStudentsForTable(
         status,
         enrolled_at,
         sessions_remaining,
+        period_start,
         day_of_week,
         start_time,
         end_time,
-        course:courses(id, name)
-      )
+        schedule,
+        package_id,
+        instructor_id,
+        course:courses(id, name),
+        package:course_pricing(id, package_type, duration),
+        attendance(date, status)
+      ),
+      parent_students(
+        relationship,
+        parent:parents(
+          id,
+          name,
+          phone,
+          email,
+          address,
+          postcode,
+          city
+        )
+      ),
+      payments(amount, status, course_id, package_id)
     `)
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
@@ -459,12 +543,29 @@ export async function getStudentsForTable(
         new Date(b.enrolled_at || 0).getTime() - new Date(a.enrolled_at || 0).getTime()
       )[0] || null;
 
-    // Parse schedule from enrollment
+    // Parse schedule from enrollment - prefer new schedule field
     let scheduleDays: string[] = [];
     let scheduleTime: string | null = null;
 
-    if (activeEnrollment?.day_of_week) {
-      // day_of_week might be comma-separated like "Mon,Wed" or JSON array
+    if (activeEnrollment?.schedule) {
+      // New format: JSON array of {day, time} objects
+      try {
+        const scheduleEntries = JSON.parse(activeEnrollment.schedule);
+        if (Array.isArray(scheduleEntries)) {
+          scheduleDays = scheduleEntries.map((e: { day: string }) => e.day).filter(Boolean);
+          // Build time string from all entries
+          const times = scheduleEntries
+            .map((e: { day: string; time: string }) => e.time)
+            .filter(Boolean);
+          scheduleTime = times.length > 0 ? times.join(', ') : null;
+        }
+      } catch {
+        // Fall back to legacy parsing
+      }
+    }
+
+    // Fall back to legacy day_of_week/start_time if schedule not available
+    if (scheduleDays.length === 0 && activeEnrollment?.day_of_week) {
       try {
         const parsed = JSON.parse(activeEnrollment.day_of_week);
         scheduleDays = Array.isArray(parsed) ? parsed : [activeEnrollment.day_of_week];
@@ -473,22 +574,104 @@ export async function getStudentsForTable(
       }
     }
 
-    if (activeEnrollment?.start_time && activeEnrollment?.end_time) {
-      scheduleTime = `${activeEnrollment.start_time}-${activeEnrollment.end_time}`;
-    } else if (activeEnrollment?.start_time) {
+    if (!scheduleTime && activeEnrollment?.start_time) {
       scheduleTime = activeEnrollment.start_time;
     }
+
+    // Get first parent (if any)
+    const firstParentLink = student.parent_students?.[0];
+    const parent = firstParentLink?.parent || null;
+
+    // Calculate period active info
+    let sessionsRemaining: number | null = null;
+    let periodStart: string | null = null;
+    let periodEnd: string | null = null;
+    const packageDuration: number | null = activeEnrollment?.package?.duration || null;
+    const packageType = activeEnrollment?.package?.package_type || null;
+
+    if (activeEnrollment) {
+      // sessions_remaining from enrollment represents:
+      // - For session packages: number of sessions remaining
+      // - For monthly packages: number of months remaining
+      // Value of 0 means payment not approved yet
+      const enrollmentSessions = activeEnrollment.sessions_remaining ?? 0;
+
+      if (packageType === 'session') {
+        // For session-based: show remaining sessions directly
+        // 0 means payment not approved or all sessions used
+        sessionsRemaining = enrollmentSessions;
+      } else if (packageType === 'monthly') {
+        // For monthly: sessions_remaining represents months remaining
+        // period_start is set when first attendance is marked
+        const dbPeriodStart = activeEnrollment.period_start;
+
+        if (dbPeriodStart && enrollmentSessions > 0) {
+          periodStart = dbPeriodStart;
+          // Calculate end date: start + 1 month (per period)
+          const endDate = new Date(dbPeriodStart);
+          endDate.setMonth(endDate.getMonth() + 1);
+          const endDateStr = endDate.toISOString().split('T')[0];
+          periodEnd = endDateStr;
+
+          // Show months remaining
+          sessionsRemaining = enrollmentSessions;
+        } else if (enrollmentSessions > 0) {
+          // Payment approved but no attendance yet
+          // Show months remaining, waiting for first attendance
+          sessionsRemaining = enrollmentSessions;
+        } else {
+          // No payment approved yet - show 0
+          sessionsRemaining = 0;
+        }
+      }
+    }
+
+    // Calculate session count - total attended sessions across all enrollments
+    let sessionCount = 0;
+    for (const enrollment of student.enrollments || []) {
+      const attendanceRecords = (enrollment.attendance || []) as Array<{ date: string; status: string }>;
+      // Count only present and late statuses
+      sessionCount += attendanceRecords.filter(
+        (a) => a.status === 'present' || a.status === 'late'
+      ).length;
+    }
+
+    // Calculate payment count - total paid amount and sessions bought
+    const payments = (student.payments || []) as Array<{
+      amount: number;
+      status: string;
+      course_id: string | null;
+      package_id: string | null;
+    }>;
+    const paidPayments = payments.filter((p) => p.status === 'paid');
+    const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+
+    // Calculate total sessions bought from enrollment package
+    // For monthly packages: 4 sessions per month
+    // For session packages: use the duration directly
+    const enrollmentPackageType = activeEnrollment?.package?.package_type;
+    const packageDurationVal = activeEnrollment?.package?.duration ?? 0;
+    const sessionsPerPayment = enrollmentPackageType === 'monthly' ? packageDurationVal * 4 : packageDurationVal;
+    const totalSessionsBought = paidPayments.length * sessionsPerPayment;
 
     return {
       id: student.id,
       studentId: student.student_id || null,
       photo: student.photo || null,
+      coverPhoto: student.cover_photo || null,
       name: student.name,
       email: student.email || null,
+      phone: student.phone || null,
+      dateOfBirth: student.date_of_birth || null,
+      gender: student.gender || null,
+      schoolName: student.school_name || null,
       branchId: student.branch_id,
       branchName: student.branch?.name || 'N/A',
       programName: activeEnrollment?.course?.name || null,
       courseId: activeEnrollment?.course?.id || null,
+      instructorId: activeEnrollment?.instructor_id || null,
+      packageId: activeEnrollment?.package_id || null,
+      packageType: activeEnrollment?.package?.package_type || null,
       scheduleDays,
       scheduleTime,
       enrollDate: student.created_at,
@@ -496,6 +679,27 @@ export async function getStudentsForTable(
       enrollmentStatus: activeEnrollment?.status || null,
       level: student.level || 1,
       adcoinBalance: student.adcoin_balance || 0,
+      // Period Active info
+      sessionsRemaining, // Allow negative for tracking sessions used before payment
+      periodStart,
+      periodEnd,
+      packageDuration,
+      // Session count
+      sessionCount,
+      // Payment info
+      paymentCount: {
+        totalPaid,
+        totalSessionsBought,
+      },
+      // Parent info
+      parentId: parent?.id || null,
+      parentName: parent?.name || null,
+      parentPhone: parent?.phone || null,
+      parentEmail: parent?.email || null,
+      parentAddress: parent?.address || null,
+      parentPostcode: parent?.postcode || null,
+      parentCity: parent?.city || null,
+      parentRelationship: firstParentLink?.relationship || null,
     };
   });
 }
@@ -512,6 +716,100 @@ export async function createEnrollment(enrollmentData: EnrollmentInsert): Promis
   if (error) {
     console.error('Error creating enrollment:', error);
     return false;
+  }
+
+  return true;
+}
+
+export async function updateOrCreateEnrollment(
+  studentId: string,
+  enrollmentData: {
+    course_id: string;
+    package_id: string | null;
+    instructor_id: string | null;
+    schedule: { day: string; time: string }[];
+    sessions_remaining: number;
+  }
+): Promise<boolean> {
+  // Build day_of_week and start_time from schedule for backwards compatibility
+  const days = enrollmentData.schedule.map(s => s.day).filter(Boolean);
+  const firstEntry = enrollmentData.schedule[0];
+
+  // First, check if student has any active enrollment
+  const { data: activeEnrollments, error: fetchError } = await supabaseAdmin
+    .from('enrollments')
+    .select('id, course_id, sessions_remaining')
+    .eq('student_id', studentId)
+    .eq('status', 'active')
+    .is('deleted_at', null);
+
+  if (fetchError) {
+    console.error('Error fetching existing enrollments:', fetchError);
+    return false;
+  }
+
+  // Find if there's an enrollment for the same course
+  const sameCourseEnrollment = activeEnrollments?.find(
+    (e) => e.course_id === enrollmentData.course_id
+  );
+
+  if (sameCourseEnrollment) {
+    // Update existing enrollment for the same course
+    // Keep existing sessions_remaining if it has value (payment was approved)
+    const keepSessions = sameCourseEnrollment.sessions_remaining > 0;
+    const { error: updateError } = await supabaseAdmin
+      .from('enrollments')
+      .update({
+        package_id: enrollmentData.package_id,
+        instructor_id: enrollmentData.instructor_id,
+        day_of_week: days.length > 0 ? JSON.stringify(days) : null,
+        start_time: firstEntry?.time || null,
+        schedule: JSON.stringify(enrollmentData.schedule),
+        // Only update sessions if existing is 0 (no payment approved yet)
+        ...(keepSessions ? {} : { sessions_remaining: 0 }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', sameCourseEnrollment.id);
+
+    if (updateError) {
+      console.error('Error updating enrollment:', updateError);
+      return false;
+    }
+  } else {
+    // Deactivate any other active enrollments
+    if (activeEnrollments && activeEnrollments.length > 0) {
+      const { error: deactivateError } = await supabaseAdmin
+        .from('enrollments')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('student_id', studentId)
+        .eq('status', 'active')
+        .is('deleted_at', null);
+
+      if (deactivateError) {
+        console.error('Error deactivating old enrollments:', deactivateError);
+      }
+    }
+
+    // Create new enrollment with sessions_remaining = 0
+    // Sessions will be added when payment is approved
+    const { error: insertError } = await supabaseAdmin
+      .from('enrollments')
+      .insert({
+        student_id: studentId,
+        course_id: enrollmentData.course_id,
+        package_id: enrollmentData.package_id,
+        instructor_id: enrollmentData.instructor_id,
+        day_of_week: days.length > 0 ? JSON.stringify(days) : null,
+        start_time: firstEntry?.time || null,
+        schedule: JSON.stringify(enrollmentData.schedule),
+        sessions_remaining: 0, // Start with 0, will be set when payment approved
+        status: 'active',
+      });
+
+    if (insertError) {
+      console.error('Error creating enrollment:', insertError);
+      return false;
+    }
   }
 
   return true;

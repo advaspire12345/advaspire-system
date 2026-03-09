@@ -59,7 +59,7 @@ export async function getTeamMembersForTable(
       role,
       employed_date,
       status,
-      branch:branches(name)
+      branch:branches!users_branch_id_branches_id_fk(name)
     `)
     .in('role', staffRoles)
     .is('deleted_at', null)

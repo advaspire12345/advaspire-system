@@ -28,9 +28,11 @@ export async function updatePendingPaymentAction(
   data: UpdatePaymentData
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // Note: We don't set package_id because payments.package_id references
+    // the legacy 'packages' table, not 'course_pricing'.
+    // The package is looked up by course_id + amount in getPendingPaymentsForTable.
     const result = await updatePayment(paymentId, {
       course_id: data.courseId,
-      package_id: data.packageId,
       amount: data.price,
       payment_method: data.paymentMethod,
       paid_at: data.paidAt || null,
@@ -101,10 +103,12 @@ export async function addPendingPaymentAction(
   data: AddPaymentData
 ): Promise<{ success: boolean; error?: string; payment?: Payment }> {
   try {
+    // Note: We don't set package_id because payments.package_id references
+    // the legacy 'packages' table, not 'course_pricing'.
+    // The package is looked up by course_id + amount in getPendingPaymentsForTable.
     const result = await createPayment({
       student_id: data.studentId,
       course_id: data.courseId || null,
-      package_id: data.packageId || null,
       amount: data.price,
       status: "pending",
       payment_method: data.paymentMethod,

@@ -71,7 +71,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
       assessment_enabled,
       levelling_time_minutes,
       course_categories(name),
-      course_branches(branch_id, branches(name)),
+      course_branches(branch_id, branches(id, name)),
       course_sections(
         id,
         course_lessons(id)
@@ -100,6 +100,32 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
     enrollmentCountMap.set(e.course_id, count + 1);
   });
 
+  // Fetch slot counts per course and branch
+  const { data: slotsData } = await supabaseAdmin
+    .from("course_slots")
+    .select("course_id, branch_id, branches(name)")
+    .in("course_id", courseIds)
+    .is("deleted_at", null);
+
+  // Group slots by course_id and branch
+  const slotCountsMap = new Map<string, { branch_name: string; count: number }[]>();
+  (slotsData ?? []).forEach((slot: any) => {
+    const courseId = slot.course_id;
+    const branchName = slot.branches?.name || "Unknown";
+
+    if (!slotCountsMap.has(courseId)) {
+      slotCountsMap.set(courseId, []);
+    }
+
+    const courseSlots = slotCountsMap.get(courseId)!;
+    const existingBranch = courseSlots.find((s) => s.branch_name === branchName);
+    if (existingBranch) {
+      existingBranch.count++;
+    } else {
+      courseSlots.push({ branch_name: branchName, count: 1 });
+    }
+  });
+
   return (programs ?? []).map((program: any) => {
     const branchNames = program.course_branches
       ?.map((cb: any) => cb.branches?.name)
@@ -110,8 +136,10 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
       0
     ) ?? 0;
 
-    const defaultPricing = program.course_pricing?.find((p: any) => p.is_default) ||
-      program.course_pricing?.[0] || null;
+    // Count pricing packages by type
+    const activePricing = (program.course_pricing ?? []).filter((p: any) => !p.deleted_at);
+    const monthlyPackageCount = activePricing.filter((p: any) => p.package_type === "monthly").length;
+    const sessionPackageCount = activePricing.filter((p: any) => p.package_type === "session").length;
 
     return {
       id: program.id,
@@ -129,7 +157,9 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
       enrolled_count: enrollmentCountMap.get(program.id) || 0,
       lesson_count: lessonCount,
       branch_names: branchNames,
-      default_pricing: defaultPricing,
+      monthly_package_count: monthlyPackageCount,
+      session_package_count: sessionPackageCount,
+      slot_counts: slotCountsMap.get(program.id) || [],
     };
   });
 }
@@ -168,6 +198,21 @@ export async function getProgramById(programId: string): Promise<ProgramFull | n
 
   if (!course) return null;
 
+  // Fetch slots with their teachers
+  const { data: slotsData } = await supabaseAdmin
+    .from("course_slots")
+    .select(`
+      *,
+      course_slot_teachers(user_id)
+    `)
+    .eq("course_id", programId)
+    .is("deleted_at", null);
+
+  const slots = (slotsData ?? []).map((slot: any) => ({
+    ...slot,
+    teacher_ids: slot.course_slot_teachers?.map((t: any) => t.user_id) ?? [],
+  }));
+
   // Transform data to ProgramFull
   const programFull: ProgramFull = {
     ...course,
@@ -185,6 +230,7 @@ export async function getProgramById(programId: string): Promise<ProgramFull | n
         lessons: (section.course_lessons ?? []).sort((a: any, b: any) => a.sort_order - b.sort_order),
       })),
     pricing: (course.course_pricing ?? []).filter((p: any) => !p.deleted_at),
+    slots,
   };
 
   return programFull;
@@ -226,9 +272,13 @@ export interface CreateProgramPayload {
     description: string;
     lessons: {
       title: string;
-      description: string;
-      duration_minutes: number | null;
-      content_type: string | null;
+      thumbnail_url: string | null;
+      url: string | null;
+      missions: {
+        level: number | null;
+        url_mission: string | null;
+        url_answer: string | null;
+      }[];
     }[];
   }[];
 
@@ -239,6 +289,16 @@ export interface CreateProgramPayload {
     duration: number;
     description: string | null;
     is_default: boolean;
+  }[];
+
+  // Slots
+  slots: {
+    branch_id: string;
+    teacher_ids: string[];
+    day: string;
+    time: string;
+    duration: number;
+    limit_student: number;
   }[];
 }
 
@@ -366,9 +426,9 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
         .map((lesson, lessonIndex) => ({
           section_id: sectionData.id,
           title: lesson.title,
-          description: lesson.description || null,
-          duration_minutes: lesson.duration_minutes,
-          content_type: lesson.content_type,
+          thumbnail_url: lesson.thumbnail_url,
+          url: lesson.url,
+          missions: lesson.missions,
           sort_order: lessonIndex,
         }));
       if (lessonInserts.length > 0) {
@@ -388,6 +448,35 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
       is_default: p.is_default,
     }));
     await supabaseAdmin.from("course_pricing").insert(pricingInserts);
+  }
+
+  // 10. Insert slots
+  if (payload.slots && payload.slots.length > 0) {
+    for (const slot of payload.slots) {
+      const { data: slotData, error: slotError } = await supabaseAdmin
+        .from("course_slots")
+        .insert({
+          course_id: courseId,
+          branch_id: slot.branch_id,
+          day: slot.day,
+          time: slot.time,
+          duration: slot.duration,
+          limit_student: slot.limit_student,
+        })
+        .select("id")
+        .single();
+
+      if (slotError || !slotData) continue;
+
+      // Insert slot teachers
+      if (slot.teacher_ids && slot.teacher_ids.length > 0) {
+        const teacherInserts = slot.teacher_ids.map((user_id) => ({
+          slot_id: slotData.id,
+          user_id,
+        }));
+        await supabaseAdmin.from("course_slot_teachers").insert(teacherInserts);
+      }
+    }
   }
 
   return courseId;
@@ -528,9 +617,9 @@ export async function updateProgram(
           validLessons.map((lesson, lessonIndex) => ({
             section_id: sectionData.id,
             title: lesson.title,
-            description: lesson.description || null,
-            duration_minutes: lesson.duration_minutes,
-            content_type: lesson.content_type,
+            thumbnail_url: lesson.thumbnail_url,
+            url: lesson.url,
+            missions: lesson.missions,
             sort_order: lessonIndex,
           }))
         );
@@ -558,6 +647,56 @@ export async function updateProgram(
     );
   }
 
+  // 10. Replace slots (soft delete old, insert new)
+  // First, get existing slots to delete their teachers
+  const { data: existingSlots } = await supabaseAdmin
+    .from("course_slots")
+    .select("id")
+    .eq("course_id", programId)
+    .is("deleted_at", null);
+
+  if (existingSlots) {
+    for (const slot of existingSlots) {
+      await supabaseAdmin.from("course_slot_teachers").delete().eq("slot_id", slot.id);
+    }
+  }
+
+  // Soft delete old slots
+  await supabaseAdmin
+    .from("course_slots")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("course_id", programId)
+    .is("deleted_at", null);
+
+  // Insert new slots
+  if (payload.slots && payload.slots.length > 0) {
+    for (const slot of payload.slots) {
+      const { data: slotData, error: slotError } = await supabaseAdmin
+        .from("course_slots")
+        .insert({
+          course_id: programId,
+          branch_id: slot.branch_id,
+          day: slot.day,
+          time: slot.time,
+          duration: slot.duration,
+          limit_student: slot.limit_student,
+        })
+        .select("id")
+        .single();
+
+      if (slotError || !slotData) continue;
+
+      // Insert slot teachers
+      if (slot.teacher_ids && slot.teacher_ids.length > 0) {
+        const teacherInserts = slot.teacher_ids.map((user_id) => ({
+          slot_id: slotData.id,
+          user_id,
+        }));
+        await supabaseAdmin.from("course_slot_teachers").insert(teacherInserts);
+      }
+    }
+  }
+
   return true;
 }
 
@@ -583,11 +722,11 @@ export async function softDeleteProgram(programId: string): Promise<boolean> {
 // HELPER QUERIES
 // ============================================
 
-export async function getInstructors(): Promise<{ id: string; name: string }[]> {
+export async function getInstructors(): Promise<{ id: string; name: string; branch_id: string | null }[]> {
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, name")
-    .eq("role", "instructor")
+    .select("id, name, branch_id")
+    .in("role", ["instructor", "branch_admin"])
     .is("deleted_at", null)
     .order("name");
 

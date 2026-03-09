@@ -13,7 +13,7 @@ export function AdcoinProgress({
   imageUrl,
 }: AdcoinProgressProps) {
   const remaining = poolLimit - currentTotal;
-  const percentage = Math.min((currentTotal / poolLimit) * 100, 100);
+  const percentage = poolLimit > 0 ? Math.min((currentTotal / poolLimit) * 100, 100) : 0;
 
   return (
     <Card className="flex flex-row items-center gap-4 p-6">
@@ -34,8 +34,8 @@ export function AdcoinProgress({
       <div className="flex-1 min-w-0">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <span className="text-base text-muted-foreground font-medium">
-            <span className="text-2xl font-black text-foreground">
-              +{remaining.toLocaleString()}
+            <span className={`text-2xl font-black ${remaining >= 0 ? 'text-foreground' : 'text-red-500'}`}>
+              {remaining >= 0 ? '+' : ''}{remaining.toLocaleString()}
             </span>{" "}
             away from the Adcoin pool limit
           </span>

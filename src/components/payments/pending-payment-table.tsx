@@ -161,6 +161,11 @@ export function PendingPaymentTable({
         const course = courses.find((c) => c.id === formData.courseId);
         const pkg = packages.find((p) => p.id === formData.packageId);
 
+        // Generate package name from package data
+        const packageName = pkg
+          ? `${pkg.duration} ${pkg.packageType === "monthly" ? "Month" : "Session"}${pkg.duration > 1 ? "s" : ""}`
+          : null;
+
         const newRow: PendingPaymentRow = {
           id: result.payment.id,
           parentName: student?.parentName ?? null,
@@ -173,7 +178,7 @@ export function PendingPaymentTable({
           courseId: formData.courseId || null,
           courseName: course?.name ?? null,
           packageId: formData.packageId || null,
-          packageName: pkg?.name ?? null,
+          packageName,
           price: formData.price,
           paymentMethod: formData.paymentMethod,
           status: "pending",
@@ -209,6 +214,11 @@ export function PendingPaymentTable({
         const course = courses.find((c) => c.id === formData.courseId);
         const pkg = packages.find((p) => p.id === formData.packageId);
 
+        // Generate package name from package data
+        const packageName = pkg
+          ? `${pkg.duration} ${pkg.packageType === "monthly" ? "Month" : "Session"}${pkg.duration > 1 ? "s" : ""}`
+          : null;
+
         setData((prev) =>
           prev.map((item) =>
             item.id === selectedRecord.id
@@ -217,7 +227,7 @@ export function PendingPaymentTable({
                   courseId: formData.courseId,
                   courseName: course?.name ?? null,
                   packageId: formData.packageId,
-                  packageName: pkg?.name ?? null,
+                  packageName,
                   price: formData.price,
                   paymentMethod: formData.paymentMethod,
                   paidAt: formData.paidAt,

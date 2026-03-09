@@ -640,6 +640,15 @@ export function PaymentRecordTable({
             },
           ]}
           total={receiptRecord.price}
+          branch={{
+            name: receiptRecord.branchName,
+            companyName: receiptRecord.branchCompanyName,
+            address: receiptRecord.branchAddress,
+            phone: receiptRecord.branchPhone,
+            email: receiptRecord.branchEmail,
+            bankName: receiptRecord.branchBankName,
+            bankAccount: receiptRecord.branchBankAccount,
+          }}
         />
       )}
 

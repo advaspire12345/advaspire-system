@@ -11,14 +11,14 @@ export function VideoPlayer({ videos }: VideoPlayerProps) {
   return (
     <div className="rounded-xl bg-white shadow-[0_0_40px_rgba(94,92,154,0.06)]">
       {/* Header */}
-      <div className="border-b border-[#eaeaf5] px-7 py-6">
+      <div className="border-b border-[#eaeaf5] px-4 py-4 sm:px-7 sm:py-6">
         <h4 className="text-xs font-bold uppercase tracking-wide text-[#3e3f5e]">
           Video Stream
         </h4>
       </div>
 
       {/* Videos - One per row */}
-      <div className="p-7">
+      <div className="p-4 sm:p-7">
         <div className="space-y-3">
           {videos.slice(0, 4).map((video, index) => (
             <div

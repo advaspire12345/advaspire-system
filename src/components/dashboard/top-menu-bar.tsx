@@ -325,7 +325,7 @@ export function TopMenuBar() {
                 <span>Profile</span>
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => router.push("/dashboard/settings")}
+                onClick={() => router.push("/settings")}
                 className="font-bold"
               >
                 <span>Settings</span>

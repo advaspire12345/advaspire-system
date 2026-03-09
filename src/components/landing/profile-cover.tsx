@@ -6,7 +6,7 @@ interface ProfileCoverProps {
 
 export function ProfileCover({ coverUrl }: ProfileCoverProps) {
   return (
-    <div className="relative h-[300px] w-full overflow-hidden rounded-t-xl">
+    <div className="relative h-[180px] w-full overflow-hidden rounded-t-xl sm:h-[220px] md:h-[300px]">
       <Image
         src={coverUrl}
         alt="Profile cover"

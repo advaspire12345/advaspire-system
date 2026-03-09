@@ -44,6 +44,9 @@ export interface AttendanceFormData {
   adcoin: number;
   projectPhotos: string[];
   notes: string;
+  // Trial-specific field
+  instructorFeedback?: string;
+  isTrial?: boolean;
 }
 
 const DAYS_OF_WEEK = [
@@ -103,6 +106,10 @@ export function StudentAttendanceModal({
   const [adcoin, setAdcoin] = useState<number>(0);
   const [projectPhotos, setProjectPhotos] = useState<string[]>([]);
   const [reason, setReason] = useState("");
+  const [instructorFeedback, setInstructorFeedback] = useState("");
+
+  // Check if the selected row is a trial
+  const isTrial = selectedRow?.type === 'trial';
 
   // Get unique students for dropdown
   const uniqueStudents = useMemo(() => {
@@ -120,10 +127,16 @@ export function StudentAttendanceModal({
     return allStudents.filter((row) => row.studentId === selectedStudentId);
   }, [allStudents, selectedStudentId]);
 
-  // Get selected enrollment details
+  // Get selected enrollment details - find by course name for selected student
   const selectedEnrollment = useMemo(() => {
+    // In add mode, selectedEnrollmentId is the courseName
+    // Find the enrollment for the selected student with this course
+    if (mode === "add" && selectedStudentId && selectedEnrollmentId) {
+      return studentEnrollments.find((row) => row.courseName === selectedEnrollmentId);
+    }
+    // For present/absent mode, find by enrollment id
     return allStudents.find((row) => row.enrollmentId === selectedEnrollmentId);
-  }, [allStudents, selectedEnrollmentId]);
+  }, [allStudents, studentEnrollments, selectedEnrollmentId, selectedStudentId, mode]);
 
   // Reset form when modal opens or mode/selectedRow changes
   useEffect(() => {
@@ -140,18 +153,34 @@ export function StudentAttendanceModal({
         setAdcoin(0);
         setProjectPhotos([]);
         setReason("");
+        setInstructorFeedback("");
       } else if (selectedRow) {
         // Present or Absent mode - pre-fill with selected row
         setSelectedStudentId(selectedRow.studentId);
         setSelectedEnrollmentId(selectedRow.enrollmentId);
-        setClassType("Physical");
-        setActualDay(selectedRow.dayOfWeek || getCurrentDayOfWeek());
-        setActualStartTime(formatTimeForInput(selectedRow.startTime));
-        setInstructorName("");
-        setLastActivity("");
-        setAdcoin(0);
-        setProjectPhotos([]);
-        setReason("");
+
+        // If there's existing attendance data, use it; otherwise use defaults
+        const existing = selectedRow.existingAttendance;
+        if (existing) {
+          setClassType(existing.classType || "Physical");
+          setActualDay(existing.actualDay || selectedRow.slotDay || selectedRow.dayOfWeek || getCurrentDayOfWeek());
+          setActualStartTime(formatTimeForInput(existing.actualStartTime || selectedRow.slotTime || selectedRow.startTime));
+          setInstructorName(existing.instructorName || "");
+          setLastActivity(existing.lastActivity || "");
+          setAdcoin(existing.adcoin || 0);
+          setProjectPhotos(existing.projectPhotos || []);
+          setReason(existing.notes || "");
+        } else {
+          setClassType("Physical");
+          setActualDay(selectedRow.slotDay || selectedRow.dayOfWeek || getCurrentDayOfWeek());
+          setActualStartTime(formatTimeForInput(selectedRow.slotTime || selectedRow.startTime));
+          setInstructorName("");
+          setLastActivity("");
+          setAdcoin(0);
+          setProjectPhotos([]);
+          setReason("");
+          setInstructorFeedback("");
+        }
       }
     }
   }, [open, mode, selectedRow]);
@@ -159,39 +188,47 @@ export function StudentAttendanceModal({
   // Update fields when student changes (for add mode)
   useEffect(() => {
     if (mode === "add" && selectedStudentId && studentEnrollments.length > 0) {
-      // Auto-select first enrollment
+      // Auto-select first enrollment's course name (since dropdown uses courseName as value)
       const firstEnrollment = studentEnrollments[0];
-      setSelectedEnrollmentId(firstEnrollment.enrollmentId);
-      setActualDay(firstEnrollment.dayOfWeek || getCurrentDayOfWeek());
-      setActualStartTime(formatTimeForInput(firstEnrollment.startTime));
+      setSelectedEnrollmentId(firstEnrollment.courseName);
+      setActualDay(firstEnrollment.slotDay || firstEnrollment.dayOfWeek || getCurrentDayOfWeek());
+      setActualStartTime(formatTimeForInput(firstEnrollment.slotTime || firstEnrollment.startTime));
     }
   }, [mode, selectedStudentId, studentEnrollments]);
 
   // Update times when enrollment changes
   useEffect(() => {
     if (selectedEnrollment && mode !== "absent") {
-      setActualDay(selectedEnrollment.dayOfWeek || getCurrentDayOfWeek());
-      setActualStartTime(formatTimeForInput(selectedEnrollment.startTime));
+      setActualDay(selectedEnrollment.slotDay || selectedEnrollment.dayOfWeek || getCurrentDayOfWeek());
+      setActualStartTime(formatTimeForInput(selectedEnrollment.slotTime || selectedEnrollment.startTime));
     }
   }, [selectedEnrollmentId, selectedEnrollment, mode]);
 
   const handleSubmit = async () => {
-    if (!selectedEnrollmentId) return;
+    // Use selectedEnrollment to get the actual enrollment ID
+    const enrollmentId = selectedEnrollment?.enrollmentId || selectedRow?.enrollmentId;
+    if (!enrollmentId) return;
+
+    // Use existing attendance date if updating, otherwise use today's date
+    const existingDate = selectedRow?.existingAttendance?.date;
+    const attendanceDate = existingDate || format(new Date(), "yyyy-MM-dd");
 
     setIsSubmitting(true);
     try {
       await onSubmit({
-        enrollmentId: selectedEnrollmentId,
-        date: format(new Date(), "yyyy-MM-dd"),
+        enrollmentId: enrollmentId,
+        date: attendanceDate,
         status: mode === "absent" ? "absent" : "present",
         classType,
         actualDay,
         actualStartTime,
         instructorName: mode === "absent" ? "" : instructorName,
         lastActivity: mode === "absent" ? "" : lastActivity,
-        adcoin: mode === "absent" ? 0 : adcoin,
+        adcoin: mode === "absent" ? 0 : (isTrial ? 0 : adcoin),
         projectPhotos: mode === "absent" ? [] : projectPhotos,
         notes: mode === "absent" ? reason : "",
+        instructorFeedback: isTrial ? instructorFeedback : undefined,
+        isTrial: isTrial,
       });
       onOpenChange(false);
     } catch (error) {
@@ -206,9 +243,36 @@ export function StudentAttendanceModal({
     label: s.studentName,
   }));
 
-  const programOptions = studentEnrollments.map((e) => ({
-    value: e.enrollmentId,
-    label: e.courseName,
+  // Get all unique programs/courses from all students
+  const allUniquePrograms = useMemo(() => {
+    const seen = new Set<string>();
+    const programs: { enrollmentId: string; courseName: string }[] = [];
+    for (const row of allStudents) {
+      // Use courseName as key to get unique courses
+      if (seen.has(row.courseName)) continue;
+      seen.add(row.courseName);
+      programs.push({
+        enrollmentId: row.enrollmentId,
+        courseName: row.courseName,
+      });
+    }
+    return programs;
+  }, [allStudents]);
+
+  // Get programs for selected student (for filtering after selection)
+  const studentPrograms = useMemo(() => {
+    const seen = new Set<string>();
+    return studentEnrollments.filter((e) => {
+      if (seen.has(e.enrollmentId)) return false;
+      seen.add(e.enrollmentId);
+      return true;
+    });
+  }, [studentEnrollments]);
+
+  // Show all programs in dropdown, but use student's enrollment if available
+  const programOptions = allUniquePrograms.map((p) => ({
+    value: p.courseName, // Use courseName as value to match across students
+    label: p.courseName,
   }));
 
   const instructorOptions = instructors.map((i) => ({
@@ -282,8 +346,8 @@ export function StudentAttendanceModal({
               </div>
             )}
 
-            {/* Program Selection */}
-            {isFieldsEditable ? (
+            {/* Program Selection - only show dropdown in "add" mode */}
+            {mode === "add" ? (
               <FloatingSelect
                 id="select-program"
                 label="Program"
@@ -298,7 +362,7 @@ export function StudentAttendanceModal({
                 <input
                   type="text"
                   readOnly
-                  value={selectedEnrollment?.courseName ?? "-"}
+                  value={selectedRow?.courseName ?? "-"}
                   className={cn(
                     "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
                     readonlyFieldClass,
@@ -425,13 +489,22 @@ export function StudentAttendanceModal({
                 />
 
                 <div className="grid grid-cols-2 gap-4">
-                  <FloatingInput
-                    id="adcoin"
-                    label="Adcoin"
-                    type="number"
-                    value={adcoin === 0 ? "" : adcoin.toString()}
-                    onChange={(e) => setAdcoin(Number(e.target.value) || 0)}
-                  />
+                  {isTrial ? (
+                    <FloatingInput
+                      id="instructor-feedback"
+                      label="Instructor Feedback"
+                      value={instructorFeedback}
+                      onChange={(e) => setInstructorFeedback(e.target.value)}
+                    />
+                  ) : (
+                    <FloatingInput
+                      id="adcoin"
+                      label="Adcoin"
+                      type="number"
+                      value={adcoin === 0 ? "" : adcoin.toString()}
+                      onChange={(e) => setAdcoin(Number(e.target.value) || 0)}
+                    />
+                  )}
 
                   <FloatingSelect
                     id="select-instructor"

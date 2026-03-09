@@ -16,8 +16,8 @@ export async function GET() {
     const stats = await getDashboardStats(user.email);
 
     return NextResponse.json({
-      totalAdcoinBalance: stats.totalAdcoinBalance,
-      adcoinChange: stats.adcoinChange,
+      totalAdcoinTransactions: stats.totalAdcoinTransactions,
+      adcoinTransactionChange: stats.adcoinTransactionChange,
     });
   } catch (error) {
     console.error("Error fetching dashboard stats:", error);

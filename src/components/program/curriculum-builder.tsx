@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, X, GripVertical, ChevronDown, ChevronUp, Video, FileText, HelpCircle, ClipboardList } from "lucide-react";
+import { Plus, Minus, X, GripVertical, ChevronDown, ChevronUp, Image, Link } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingTextarea } from "@/components/ui/floating-textarea";
@@ -24,14 +24,20 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { LessonContentType } from "@/db/schema";
+
+export interface MissionItem {
+  id: string;
+  level: number | null;
+  url_mission: string | null;
+  url_answer: string | null;
+}
 
 export interface CurriculumLesson {
   id: string;
   title: string;
-  description: string;
-  duration_minutes: number | null;
-  content_type: LessonContentType | null;
+  thumbnail_url: string | null;
+  url: string | null;
+  missions: MissionItem[];
 }
 
 export interface CurriculumSection {
@@ -46,22 +52,70 @@ interface CurriculumBuilderProps {
   onChange: (sections: CurriculumSection[]) => void;
 }
 
-const CONTENT_TYPE_OPTIONS = [
-  { value: "video", label: "Video" },
-  { value: "text", label: "Text/Article" },
-  { value: "quiz", label: "Quiz" },
-  { value: "assignment", label: "Assignment" },
-];
-
-const CONTENT_TYPE_ICONS: Record<string, React.ReactNode> = {
-  video: <Video className="h-4 w-4" />,
-  text: <FileText className="h-4 w-4" />,
-  quiz: <HelpCircle className="h-4 w-4" />,
-  assignment: <ClipboardList className="h-4 w-4" />,
-};
-
 function generateId() {
   return `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+interface MissionFieldListProps {
+  missions: MissionItem[];
+  onAdd: () => void;
+  onUpdate: (id: string, updates: Partial<MissionItem>) => void;
+  onRemove: (id: string) => void;
+}
+
+function MissionFieldList({ missions, onAdd, onUpdate, onRemove }: MissionFieldListProps) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-semibold text-muted-foreground">Missions</label>
+        <span className="text-xs text-muted-foreground">{missions.length} mission(s)</span>
+      </div>
+      {missions.map((mission, index) => (
+        <div key={mission.id} className="flex items-center gap-2 bg-muted/30 rounded-lg p-2">
+          <div className="flex-1 grid grid-cols-3 gap-2">
+            <FloatingSelect
+              label="Level"
+              value={mission.level?.toString() || ""}
+              onChange={(val) => onUpdate(mission.id, { level: val ? parseInt(val) : null })}
+              options={Array.from({ length: 20 }, (_, i) => ({
+                value: (i + 1).toString(),
+                label: `Level ${i + 1}`,
+              }))}
+            />
+            <FloatingInput
+              label="Mission URL"
+              value={mission.url_mission || ""}
+              onChange={(e) => onUpdate(mission.id, { url_mission: e.target.value || null })}
+            />
+            <FloatingInput
+              label="Answer URL"
+              value={mission.url_answer || ""}
+              onChange={(e) => onUpdate(mission.id, { url_answer: e.target.value || null })}
+            />
+          </div>
+          {index === 0 ? (
+            <button
+              type="button"
+              onClick={onAdd}
+              className="p-1 rounded-full border-2 border-[#23D2E2] transition-all duration-200 flex items-center justify-center hover:bg-[#23D2E2]/10 hover:shadow-md flex-shrink-0"
+              title="Add mission"
+            >
+              <Plus size={12} className="text-[#23D2E2]" strokeWidth={5} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onRemove(mission.id)}
+              className="p-1 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10 transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center flex-shrink-0"
+              title="Remove mission"
+            >
+              <Minus size={12} className="text-[#fd434f]" strokeWidth={5} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 interface SortableLessonProps {
@@ -109,17 +163,17 @@ function SortableLesson({ lesson, sectionId, onUpdate, onRemove }: SortableLesso
         </button>
 
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          {lesson.content_type && CONTENT_TYPE_ICONS[lesson.content_type] && (
+          {lesson.thumbnail_url && (
             <span className="text-muted-foreground">
-              {CONTENT_TYPE_ICONS[lesson.content_type]}
+              <Image className="h-4 w-4" />
             </span>
           )}
           <span className="text-sm font-medium truncate">
             {lesson.title || "Untitled Lesson"}
           </span>
-          {lesson.duration_minutes && (
-            <span className="text-xs text-muted-foreground">
-              ({lesson.duration_minutes} min)
+          {lesson.url && (
+            <span className="text-muted-foreground">
+              <Link className="h-3 w-3" />
             </span>
           )}
         </div>
@@ -154,26 +208,42 @@ function SortableLesson({ lesson, sectionId, onUpdate, onRemove }: SortableLesso
             onChange={(e) => onUpdate(sectionId, lesson.id, { title: e.target.value })}
           />
           <div className="grid grid-cols-2 gap-3">
-            <FloatingSelect
-              label="Content Type"
-              value={lesson.content_type || ""}
-              onChange={(val) => onUpdate(sectionId, lesson.id, { content_type: val as LessonContentType })}
-              options={CONTENT_TYPE_OPTIONS}
+            <FloatingInput
+              label="Thumbnail URL"
+              value={lesson.thumbnail_url || ""}
+              onChange={(e) => onUpdate(sectionId, lesson.id, { thumbnail_url: e.target.value || null })}
             />
             <FloatingInput
-              label="Duration (minutes)"
-              type="number"
-              value={lesson.duration_minutes?.toString() || ""}
-              onChange={(e) => onUpdate(sectionId, lesson.id, {
-                duration_minutes: e.target.value ? parseInt(e.target.value) : null
-              })}
+              label="Lesson URL"
+              value={lesson.url || ""}
+              onChange={(e) => onUpdate(sectionId, lesson.id, { url: e.target.value || null })}
             />
           </div>
-          <FloatingTextarea
-            label="Lesson Description"
-            value={lesson.description}
-            onChange={(e) => onUpdate(sectionId, lesson.id, { description: e.target.value })}
-            rows={2}
+          <MissionFieldList
+            missions={lesson.missions}
+            onAdd={() => {
+              const newMission: MissionItem = {
+                id: generateId(),
+                level: null,
+                url_mission: null,
+                url_answer: null,
+              };
+              onUpdate(sectionId, lesson.id, { missions: [...lesson.missions, newMission] });
+            }}
+            onUpdate={(missionId, updates) => {
+              onUpdate(sectionId, lesson.id, {
+                missions: lesson.missions.map((m) =>
+                  m.id === missionId ? { ...m, ...updates } : m
+                ),
+              });
+            }}
+            onRemove={(missionId) => {
+              if (lesson.missions.length > 1) {
+                onUpdate(sectionId, lesson.id, {
+                  missions: lesson.missions.filter((m) => m.id !== missionId),
+                });
+              }
+            }}
           />
         </div>
       )}
@@ -232,11 +302,6 @@ function SortableSection({
     }
   };
 
-  const totalDuration = section.lessons.reduce(
-    (sum, l) => sum + (l.duration_minutes || 0),
-    0
-  );
-
   return (
     <div
       ref={setNodeRef}
@@ -269,7 +334,6 @@ function SortableSection({
 
         <span className="text-xs text-muted-foreground px-2">
           {section.lessons.length} lessons
-          {totalDuration > 0 && ` • ${totalDuration} min`}
         </span>
 
         <button
@@ -374,9 +438,14 @@ export function CurriculumBuilder({ sections, onChange }: CurriculumBuilderProps
     const newLesson: CurriculumLesson = {
       id: generateId(),
       title: "",
-      description: "",
-      duration_minutes: null,
-      content_type: null,
+      thumbnail_url: null,
+      url: null,
+      missions: [{
+        id: generateId(),
+        level: null,
+        url_mission: null,
+        url_answer: null,
+      }],
     };
     onChange(
       sections.map((s) =>
@@ -433,11 +502,6 @@ export function CurriculumBuilder({ sections, onChange }: CurriculumBuilderProps
   };
 
   const totalLessons = sections.reduce((sum, s) => sum + s.lessons.length, 0);
-  const totalDuration = sections.reduce(
-    (sum, s) =>
-      sum + s.lessons.reduce((lSum, l) => lSum + (l.duration_minutes || 0), 0),
-    0
-  );
 
   return (
     <div className="space-y-4">
@@ -445,7 +509,6 @@ export function CurriculumBuilder({ sections, onChange }: CurriculumBuilderProps
         <label className="text-sm font-bold text-foreground">Curriculum</label>
         <span className="text-xs text-muted-foreground">
           {sections.length} sections • {totalLessons} lessons
-          {totalDuration > 0 && ` • ${totalDuration} min total`}
         </span>
       </div>
 

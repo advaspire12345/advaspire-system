@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -74,7 +75,7 @@ function getAmountDisplay(amount: number) {
 }
 
 export function TransactionsTable({ initialData, participants }: TransactionsTableProps) {
-  const [data] = useState<TransactionDisplayRow[]>(initialData);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -82,7 +83,7 @@ export function TransactionsTable({ initialData, participants }: TransactionsTab
   const [modalOpen, setModalOpen] = useState(false);
 
   const filteredData = useMemo(() => {
-    let result = data;
+    let result = initialData;
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -97,7 +98,7 @@ export function TransactionsTable({ initialData, participants }: TransactionsTab
     }
 
     return result;
-  }, [data, searchQuery]);
+  }, [initialData, searchQuery]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -132,6 +133,7 @@ export function TransactionsTable({ initialData, participants }: TransactionsTab
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to transfer adcoin");
       }
+      router.refresh();
     } catch (error) {
       console.error("Failed to transfer adcoin:", error);
       throw error;

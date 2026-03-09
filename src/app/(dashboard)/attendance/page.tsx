@@ -5,6 +5,10 @@ import { AttendanceTable } from "@/components/attendance/attendance-table";
 import { getEnrollmentsForAttendance } from "@/data/attendance";
 import { getAllInstructors } from "@/data/users";
 
+// Disable caching for this page to always get fresh data
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function AttendancePage() {
   const user = await getUser();
 

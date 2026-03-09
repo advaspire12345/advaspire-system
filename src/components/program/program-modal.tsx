@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   BookOpen,
@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { DynamicFieldList } from "@/components/program/dynamic-field-list";
 import { DynamicFaqList, type FaqItem } from "@/components/program/dynamic-faq-list";
 import { CurriculumBuilder, type CurriculumSection } from "@/components/program/curriculum-builder";
-import type { ProgramTableRow, PricingPackageType } from "@/db/schema";
+import type { ProgramTableRow, PricingPackageType, ProgramFull } from "@/db/schema";
 import type { ProgramFormPayload } from "@/app/(dashboard)/program/actions";
 import {
   LANGUAGE_OPTIONS,
@@ -38,6 +38,7 @@ interface BranchOption {
 interface InstructorOption {
   id: string;
   name: string;
+  branch_id: string | null;
 }
 
 interface CategoryOption {
@@ -76,6 +77,8 @@ interface ProgramModalProps {
   onEdit: (payload: ProgramFormPayload) => Promise<void>;
   onDelete: () => Promise<void>;
   onCreateCategory: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
+  onFetchProgram: (programId: string) => Promise<{ success: boolean; data?: ProgramFull; error?: string }>;
+  onUploadCoverImage: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
 }
 
 const TABS = [
@@ -117,8 +120,8 @@ function PricingFieldList({ items, onAdd, onUpdate, onRemove }: PricingFieldList
 
       <div className="space-y-4">
         {items.map((plan, index) => (
-          <div key={plan.id} className="flex items-center gap-2 w-full">
-            <div className="flex-1 grid grid-cols-3 gap-3">
+          <div key={plan.id} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full bg-muted/30 rounded-xl p-3 sm:p-0 sm:bg-transparent border border-border sm:border-0">
+            <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <FloatingSelect
                 label="Package Type"
                 value={plan.package_type}
@@ -149,28 +152,30 @@ function PricingFieldList({ items, onAdd, onUpdate, onRemove }: PricingFieldList
             </div>
 
             {/* Add/Remove button */}
-            {index === 0 ? (
-              <button
-                type="button"
-                onClick={onAdd}
-                className="p-0.5 rounded-full border-2 border-[#23D2E2]
-                  transition-all duration-200 flex items-center justify-center
-                  hover:bg-[#23D2E2]/10 hover:shadow-md"
-                title="Add pricing plan"
-              >
-                <Plus size={9} className="text-[#23D2E2]" strokeWidth={5} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onRemove(plan.id)}
-                className="p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10
-                  transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
-                title="Remove pricing plan"
-              >
-                <Minus size={9} className="text-[#fd434f]" strokeWidth={5} />
-              </button>
-            )}
+            <div className="flex justify-end sm:justify-start">
+              {index === 0 ? (
+                <button
+                  type="button"
+                  onClick={onAdd}
+                  className="p-1 sm:p-0.5 rounded-full border-2 border-[#23D2E2]
+                    transition-all duration-200 flex items-center justify-center
+                    hover:bg-[#23D2E2]/10 hover:shadow-md"
+                  title="Add pricing plan"
+                >
+                  <Plus size={12} className="text-[#23D2E2] sm:w-[9px] sm:h-[9px]" strokeWidth={5} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onRemove(plan.id)}
+                  className="p-1 sm:p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10
+                    transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
+                  title="Remove pricing plan"
+                >
+                  <Minus size={12} className="text-[#fd434f] sm:w-[9px] sm:h-[9px]" strokeWidth={5} />
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -200,11 +205,11 @@ function SlotFieldList({ branchId, branchName, items, instructors, onAdd, onUpda
 
       <div className="space-y-3">
         {branchSlots.map((slot, index) => (
-          <div key={slot.id} className="flex items-start gap-2 w-full">
+          <div key={slot.id} className="flex flex-col gap-3 w-full bg-muted/30 rounded-xl p-3 border border-border">
             <div className="flex-1 space-y-3">
-              {/* Row 1: Teacher (2 cols) + Student Limit (1 col) */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-2">
+              {/* Row 1: Teacher + Student Limit */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
                   <FloatingMultiSelect
                     label="Teacher"
                     value={slot.teacher_ids}
@@ -225,7 +230,7 @@ function SlotFieldList({ branchId, branchName, items, instructors, onAdd, onUpda
               </div>
 
               {/* Row 2: Day + Time + Duration */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <FloatingSelect
                   label="Day"
                   value={slot.day}
@@ -240,38 +245,42 @@ function SlotFieldList({ branchId, branchName, items, instructors, onAdd, onUpda
                   onChange={(e) => onUpdate(slot.id, { time: e.target.value })}
                 />
 
-                <FloatingInput
-                  label="Duration (mins)"
-                  type="number"
-                  value={slot.duration.toString()}
-                  onChange={(e) => onUpdate(slot.id, { duration: parseInt(e.target.value) || 0 })}
-                />
+                <div className="col-span-2 sm:col-span-1">
+                  <FloatingInput
+                    label="Duration (mins)"
+                    type="number"
+                    value={slot.duration.toString()}
+                    onChange={(e) => onUpdate(slot.id, { duration: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
               </div>
             </div>
 
             {/* Add/Remove button */}
-            {index === 0 ? (
-              <button
-                type="button"
-                onClick={() => onAdd(branchId)}
-                className="p-0.5 rounded-full border-2 border-[#23D2E2]
-                  transition-all duration-200 flex items-center justify-center
-                  hover:bg-[#23D2E2]/10 hover:shadow-md mt-4"
-                title="Add slot"
-              >
-                <Plus size={9} className="text-[#23D2E2]" strokeWidth={5} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onRemove(slot.id)}
-                className="p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10
-                  transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center mt-4"
-                title="Remove slot"
-              >
-                <Minus size={9} className="text-[#fd434f]" strokeWidth={5} />
-              </button>
-            )}
+            <div className="flex justify-end">
+              {index === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => onAdd(branchId)}
+                  className="p-1 rounded-full border-2 border-[#23D2E2]
+                    transition-all duration-200 flex items-center justify-center
+                    hover:bg-[#23D2E2]/10 hover:shadow-md"
+                  title="Add slot"
+                >
+                  <Plus size={12} className="text-[#23D2E2]" strokeWidth={5} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onRemove(slot.id)}
+                  className="p-1 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10
+                    transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
+                  title="Remove slot"
+                >
+                  <Minus size={12} className="text-[#fd434f]" strokeWidth={5} />
+                </button>
+              )}
+            </div>
           </div>
         ))}
 
@@ -292,11 +301,15 @@ export function ProgramModal({
   onEdit,
   onDelete,
   onCreateCategory,
+  onFetchProgram,
+  onUploadCoverImage,
 }: ProgramModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localCategories, setLocalCategories] = useState(categories);
+  const isLoadingDataRef = useRef(false);
 
   // Basic tab state
   const [name, setName] = useState("");
@@ -311,6 +324,8 @@ export function ProgramModal({
   const [status, setStatus] = useState("active");
   const [branchIds, setBranchIds] = useState<string[]>([]);
   const [coverImageUrl, setCoverImageUrl] = useState("");
+  const [coverImagePreview, setCoverImagePreview] = useState("");
+  const [pendingCoverFile, setPendingCoverFile] = useState<File | null>(null);
 
   // New category creation state
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -338,6 +353,11 @@ export function ProgramModal({
 
   // Sync slots with branches - ensure each branch has at least one slot
   useEffect(() => {
+    // Skip slot sync while loading data from database (editing mode)
+    if (isLoadingDataRef.current) {
+      return;
+    }
+
     if (branchIds.length > 0) {
       setSlots((prevSlots) => {
         const newSlots = [...prevSlots];
@@ -375,33 +395,156 @@ export function ProgramModal({
       setLocalCategories(categories);
       if (mode === "add") {
         resetForm();
+        setActiveTab("basic");
+        setError(null);
       } else if (record && mode === "edit") {
-        // TODO: Load full program data when editing
-        setName(record.name);
-        setShortDescription(record.short_description || "");
-        setCategoryId(record.category_id || "");
-        setNumberOfLevels(record.number_of_levels?.toString() || "");
-        setSessionsToLevelUp(record.sessions_to_level_up?.toString() || "");
-        setStatus(record.status || "active");
-        setBranchIds([]); // Would need to load from full data
-        setCoverImageUrl(record.cover_image_url || "");
-        setIsVideoPlaying(false);
-        setNewCategoryName("");
-        // Initialize pricing with at least one row
-        setPricing([{
-          id: generateTempId(),
-          package_type: "monthly",
-          price: 0,
-          duration: 1,
-          description: "",
-          is_default: true,
-        }]);
-        setSlots([]);
+        // Fetch full program data when editing
+        setIsLoading(true);
+        setError(null);
+        onFetchProgram(record.id)
+          .then((result) => {
+            if (result.success && result.data) {
+              populateFormFromFullData(result.data);
+            } else {
+              setError(result.error || "Failed to load program data");
+              // Fallback to basic data
+              setName(record.name);
+              setShortDescription(record.short_description || "");
+              setCategoryId(record.category_id || "");
+              setStatus(record.status || "active");
+            }
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : "Failed to load program data");
+          })
+          .finally(() => {
+            setIsLoading(false);
+          });
+        setActiveTab("basic");
+      } else if (mode === "delete") {
+        setActiveTab("basic");
+        setError(null);
       }
-      setActiveTab("basic");
-      setError(null);
     }
-  }, [open, record, mode, categories]);
+  }, [open, record, mode, categories, onFetchProgram]);
+
+  // Function to populate form from full program data
+  const populateFormFromFullData = (data: ProgramFull) => {
+    // Set flag to prevent branchIds useEffect from overwriting slots
+    isLoadingDataRef.current = true;
+
+    // Basic tab
+    setName(data.name);
+    setShortDescription(data.short_description || "");
+    setDescription(data.description || "");
+    setCategoryId(data.category_id || "");
+    setNumberOfLevels(data.number_of_levels?.toString() || "");
+    setSessionsToLevelUp(data.sessions_to_level_up?.toString() || "");
+    setLanguages(data.languages || []);
+    setInstructorIds(data.instructors?.map((i) => i.id) || []);
+    setProgramType(data.program_type || "");
+    setStatus(data.status || "active");
+    setBranchIds(data.branches?.map((b) => b.id) || []);
+    setCoverImageUrl(data.cover_image_url || "");
+    setCoverImagePreview(data.cover_image_url || "");
+    setPendingCoverFile(null);
+    setYoutubeUrl(data.youtube_url || "");
+    setIsVideoPlaying(false);
+    setNewCategoryName("");
+
+    // Info tab
+    setRequirements(
+      data.requirements?.length > 0
+        ? data.requirements.map((r) => r.requirement)
+        : [""]
+    );
+    setOutcomes(
+      data.outcomes?.length > 0
+        ? data.outcomes.map((o) => o.outcome)
+        : [""]
+    );
+    setFaqs(
+      data.faqs?.length > 0
+        ? data.faqs.map((f) => ({ question: f.question, answer: f.answer }))
+        : [{ question: "", answer: "" }]
+    );
+
+    // Curriculum tab
+    setSections(
+      data.sections?.map((s) => ({
+        id: s.id,
+        title: s.title,
+        description: s.description || "",
+        lessons: s.lessons?.map((l) => ({
+          id: l.id,
+          title: l.title,
+          thumbnail_url: l.thumbnail_url || null,
+          url: l.url || null,
+          missions: (l.missions || []).map((m) => ({
+            id: generateTempId(),
+            level: m.level,
+            url_mission: m.url_mission,
+            url_answer: m.url_answer,
+          })),
+        })) || [],
+      })) || []
+    );
+
+    // Pricing tab
+    if (data.pricing && data.pricing.length > 0) {
+      setPricing(
+        data.pricing.map((p) => ({
+          id: p.id,
+          package_type: p.package_type,
+          price: p.price,
+          duration: p.duration,
+          description: p.description || "",
+          is_default: p.is_default,
+        }))
+      );
+    } else {
+      setPricing([{
+        id: generateTempId(),
+        package_type: "monthly",
+        price: 0,
+        duration: 1,
+        description: "",
+        is_default: true,
+      }]);
+    }
+
+    // Slots tab - populate from database
+    if (data.slots && data.slots.length > 0) {
+      setSlots(
+        data.slots.map((s) => ({
+          id: s.id,
+          branch_id: s.branch_id,
+          teacher_ids: s.teacher_ids || [],
+          day: s.day,
+          time: s.time,
+          duration: s.duration,
+          limit_student: s.limit_student,
+        }))
+      );
+    } else {
+      // If no slots but have branches, create default slots for each branch
+      const defaultSlots = (data.branches || []).map((b) => ({
+        id: generateTempId(),
+        branch_id: b.id,
+        teacher_ids: [],
+        day: "monday",
+        time: "09:00",
+        duration: 60,
+        limit_student: 10,
+      }));
+      setSlots(defaultSlots);
+    }
+
+    // Reset the loading flag after state updates are scheduled
+    setTimeout(() => {
+      isLoadingDataRef.current = false;
+    }, 0);
+  };
 
   const resetForm = () => {
     setName("");
@@ -416,6 +559,8 @@ export function ProgramModal({
     setStatus("active");
     setBranchIds([]);
     setCoverImageUrl("");
+    setCoverImagePreview("");
+    setPendingCoverFile(null);
     setRequirements([""]);
     setOutcomes([""]);
     setFaqs([{ question: "", answer: "" }]);
@@ -549,9 +694,13 @@ export function ProgramModal({
             .filter((l) => l.title.trim())
             .map((l) => ({
               title: l.title,
-              description: l.description,
-              duration_minutes: l.duration_minutes,
-              content_type: l.content_type,
+              thumbnail_url: l.thumbnail_url,
+              url: l.url,
+              missions: l.missions.map((m) => ({
+                level: m.level,
+                url_mission: m.url_mission,
+                url_answer: m.url_answer,
+              })),
             })),
         })),
       pricing: pricing.map((p) => ({
@@ -603,6 +752,23 @@ export function ProgramModal({
     setError(null);
 
     try {
+      // Upload cover image if there's a pending file
+      let finalCoverImageUrl = coverImageUrl;
+      if (pendingCoverFile && mode !== "delete") {
+        const formData = new FormData();
+        formData.append("file", pendingCoverFile);
+        const uploadResult = await onUploadCoverImage(formData);
+        if (uploadResult.success && uploadResult.url) {
+          finalCoverImageUrl = uploadResult.url;
+          setCoverImageUrl(uploadResult.url);
+          setPendingCoverFile(null);
+        } else {
+          setError(uploadResult.error || "Failed to upload cover image");
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       // Create new category if needed
       let finalCategoryId = categoryId;
       if (categoryId === "new" && newCategoryName.trim()) {
@@ -626,6 +792,8 @@ export function ProgramModal({
         await onDelete();
       } else if (mode === "add") {
         const payload = buildPayload();
+        // Override with uploaded cover image URL
+        payload.cover_image_url = finalCoverImageUrl || null;
         // Override category_id with the newly created one
         if (finalCategoryId && finalCategoryId !== "new") {
           payload.category_id = finalCategoryId;
@@ -633,6 +801,8 @@ export function ProgramModal({
         await onAdd(payload);
       } else {
         const payload = buildPayload();
+        // Override with uploaded cover image URL
+        payload.cover_image_url = finalCoverImageUrl || null;
         if (finalCategoryId && finalCategoryId !== "new") {
           payload.category_id = finalCategoryId;
         }
@@ -660,13 +830,15 @@ export function ProgramModal({
 
   const previewName = name || record?.name || "New Program";
 
-  // Upload handler
+  // Upload handler - store file for later upload
   const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Store the file for upload on submit
+      setPendingCoverFile(file);
       // Create preview URL
-      const url = URL.createObjectURL(file);
-      setCoverImageUrl(url);
+      const previewUrl = URL.createObjectURL(file);
+      setCoverImagePreview(previewUrl);
     }
   };
 
@@ -683,8 +855,7 @@ export function ProgramModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="p-0 sm:rounded-xl border-0"
-        style={{ maxWidth: "900px" }}
+        className="p-0 sm:rounded-xl border-0 sm:max-w-4xl"
         floatingCloseButton
       >
         <DialogTitle className="sr-only">
@@ -694,9 +865,9 @@ export function ProgramModal({
               ? "Edit Program"
               : "Add New Program"}
         </DialogTitle>
-        <div className="grid grid-cols-12 h-[80vh] min-h-[500px] overflow-hidden rounded-xl">
-          {/* LEFT PANEL - PREVIEW & NAVIGATION */}
-          <div className="col-span-12 lg:col-span-4 flex flex-col border-r border-border">
+        <div className="flex flex-col lg:grid lg:grid-cols-12 h-[90vh] sm:h-[85vh] lg:h-[80vh] min-h-[500px] overflow-hidden rounded-xl">
+          {/* LEFT PANEL - PREVIEW & NAVIGATION (hidden on mobile, shown on lg+) */}
+          <div className="hidden lg:flex lg:col-span-4 flex-col border-r border-border">
             {/* Cover Banner */}
             <div className="relative h-24 w-full bg-gradient-to-r from-[#615DFA] to-[#23D2E2]">
               {isVideoPlaying && youtubeEmbedUrl ? (
@@ -719,9 +890,9 @@ export function ProgramModal({
                 </>
               ) : (
                 <>
-                  {coverImageUrl && (
+                  {coverImagePreview && (
                     <img
-                      src={coverImageUrl}
+                      src={coverImagePreview}
                       alt="Cover"
                       className="absolute inset-0 w-full h-full object-cover"
                     />
@@ -808,7 +979,7 @@ export function ProgramModal({
             <div className="px-6 py-4 space-y-3">
               <Button
                 onClick={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isLoading}
                 className={cn(
                   "w-full h-12 text-white font-bold rounded-xl text-base",
                   mode === "delete"
@@ -816,7 +987,7 @@ export function ProgramModal({
                     : "bg-[#23D2E2] hover:bg-[#18a9b8] shadow-md"
                 )}
               >
-                {submitButtonText}
+                {isLoading ? "Loading..." : submitButtonText}
               </Button>
 
               <Button
@@ -835,9 +1006,39 @@ export function ProgramModal({
             </div>
           </div>
 
+          {/* MOBILE HEADER - Tab Navigation (visible on mobile only) */}
+          <div className="lg:hidden border-b border-border bg-[#f8fafc]">
+            <div className="flex items-center gap-2 px-4 py-3 overflow-x-auto scrollbar-hide">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => !isReadOnly && setActiveTab(tab.id)}
+                  disabled={isReadOnly}
+                  className={cn(
+                    "flex-shrink-0 px-4 py-2 text-sm rounded-full transition-all duration-200",
+                    activeTab === tab.id
+                      ? "bg-[#615DFA] text-white font-bold"
+                      : "bg-white text-muted-foreground border border-border hover:border-[#615DFA]/50",
+                    isReadOnly && "cursor-not-allowed opacity-50"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* RIGHT PANEL - FORM CONTENT */}
-          <div className="col-span-12 lg:col-span-8 overflow-y-auto p-6">
-            {mode === "delete" && record ? (
+          <div className="flex-1 lg:col-span-8 overflow-y-auto p-4 sm:p-6">
+            {isLoading ? (
+              // LOADING STATE
+              <div className="flex items-center justify-center h-full min-h-[300px]">
+                <div className="text-center">
+                  <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-[#615DFA] border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" />
+                  <p className="mt-4 text-muted-foreground">Loading program data...</p>
+                </div>
+              </div>
+            ) : mode === "delete" && record ? (
               // DELETE CONFIRMATION VIEW
               <div className="max-w-2xl mx-auto">
                 <div className="text-center mb-8">
@@ -1081,7 +1282,7 @@ export function ProgramModal({
                               branchId={branchId}
                               branchName={branch.name}
                               items={slots}
-                              instructors={instructors.filter((i) => instructorIds.includes(i.id))}
+                              instructors={instructors.filter((i) => i.branch_id === branchId)}
                               onAdd={handleAddSlot}
                               onUpdate={handleUpdateSlot}
                               onRemove={handleRemoveSlot}
@@ -1137,9 +1338,9 @@ export function ProgramModal({
                             onChange={handleCoverUpload}
                             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                           />
-                          {coverImageUrl ? (
+                          {coverImagePreview ? (
                             <img
-                              src={coverImageUrl}
+                              src={coverImagePreview}
                               alt="Cover preview"
                               className="w-full h-full object-cover rounded-xl"
                             />
@@ -1162,6 +1363,36 @@ export function ProgramModal({
                 )}
               </div>
             )}
+          </div>
+
+          {/* MOBILE ACTION BUTTONS - Fixed at bottom (visible on mobile only) */}
+          <div className="lg:hidden border-t border-border bg-white px-4 py-3 space-y-2">
+            {error && (
+              <p className="text-center text-sm text-red-500 font-medium">
+                {error}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <Button
+                onClick={() => onOpenChange(false)}
+                variant="outline"
+                className="flex-1 h-11 rounded-xl font-bold border-border hover:bg-muted"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={isSubmitting || isLoading}
+                className={cn(
+                  "flex-1 h-11 text-white font-bold rounded-xl",
+                  mode === "delete"
+                    ? "bg-[#fd434f] hover:bg-[#e03a45]"
+                    : "bg-[#23D2E2] hover:bg-[#18a9b8] shadow-md"
+                )}
+              >
+                {isLoading ? "Loading..." : submitButtonText}
+              </Button>
+            </div>
           </div>
         </div>
       </DialogContent>

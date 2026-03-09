@@ -72,18 +72,10 @@ export function PaymentRecordModal({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
   const [paidAt, setPaidAt] = useState("");
   const [receiptPhoto, setReceiptPhoto] = useState<string[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState("");
-  const [selectedPackageId, setSelectedPackageId] = useState("");
-
-  // Get selected package price
-  const selectedPackage = packages.find((p) => p.id === selectedPackageId);
-  const price = selectedPackage?.price ?? record?.price ?? 0;
 
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open && record) {
-      setSelectedCourseId(record.courseId ?? "");
-      setSelectedPackageId(record.packageId ?? "");
       setPaymentMethod(record.paymentMethod ?? "");
       setPaidAt(
         record.paidAt ? format(new Date(record.paidAt), "yyyy-MM-dd") : ""
@@ -99,10 +91,11 @@ export function PaymentRecordModal({
         await onDelete();
       } else {
         if (!record) return;
+        // Course, package, and price are read-only, use values from record
         await onSubmit({
-          courseId: selectedCourseId || null,
-          packageId: selectedPackageId || null,
-          price: price || record.price,
+          courseId: record.courseId,
+          packageId: record.packageId,
+          price: record.price,
           paymentMethod: paymentMethod || null,
           paidAt: paidAt ? new Date(paidAt).toISOString() : null,
           receiptPhoto: receiptPhoto[0] || null,
@@ -140,17 +133,6 @@ export function PaymentRecordModal({
 
   // We need a record for this modal
   if (!record) return null;
-
-  // Dropdown options
-  const courseOptions = courses.map((c) => ({
-    value: c.id,
-    label: c.name,
-  }));
-
-  const packageOptions = packages.map((p) => ({
-    value: p.id,
-    label: `${p.name} (RM${p.price.toLocaleString()})`,
-  }));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -219,60 +201,40 @@ export function PaymentRecordModal({
                 </label>
               </div>
 
-              {isReadonly ? (
-                <div className="relative">
-                  <input
-                    type="text"
-                    readOnly
-                    value={record.courseName ?? "-"}
-                    className={cn(
-                      "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
-                      readonlyFieldClass
-                    )}
-                  />
-                  <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                    Program
-                  </label>
-                </div>
-              ) : (
-                <FloatingSelect
-                  id="edit-select-course"
-                  label="Program"
-                  placeholder="Select program..."
-                  value={selectedCourseId}
-                  onChange={setSelectedCourseId}
-                  options={courseOptions}
+              {/* Program - always read-only */}
+              <div className="relative">
+                <input
+                  type="text"
+                  readOnly
+                  value={record.courseName ?? "-"}
+                  className={cn(
+                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                    readonlyFieldClass
+                  )}
                 />
-              )}
+                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                  Program
+                </label>
+              </div>
             </div>
 
             {/* Package and Price */}
             <div className="grid grid-cols-2 gap-4">
-              {isReadonly ? (
-                <div className="relative">
-                  <input
-                    type="text"
-                    readOnly
-                    value={record.packageName ?? "-"}
-                    className={cn(
-                      "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
-                      readonlyFieldClass
-                    )}
-                  />
-                  <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                    Package
-                  </label>
-                </div>
-              ) : (
-                <FloatingSelect
-                  id="edit-select-package"
-                  label="Package"
-                  placeholder="Select package..."
-                  value={selectedPackageId}
-                  onChange={setSelectedPackageId}
-                  options={packageOptions}
+              {/* Package - always read-only */}
+              <div className="relative">
+                <input
+                  type="text"
+                  readOnly
+                  value={record.packageName ?? "-"}
+                  className={cn(
+                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                    readonlyFieldClass
+                  )}
                 />
-              )}
+                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                  Package
+                </label>
+              </div>
 
               <div className="relative">
                 <div
@@ -281,7 +243,7 @@ export function PaymentRecordModal({
                     readonlyFieldClass
                   )}
                 >
-                  RM{(isReadonly ? record.price : price).toLocaleString()}
+                  RM{record.price.toLocaleString()}
                 </div>
                 <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
                   Price

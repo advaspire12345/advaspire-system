@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Pencil, Trash2, Plus, Users, BookOpen } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/ui/search-bar";
 import { Pagination } from "@/components/ui/pagination";
 import { cn } from "@/lib/utils";
-import type { ProgramTableRow } from "@/db/schema";
+import type { ProgramTableRow, ProgramFull } from "@/db/schema";
 import type { BranchOption } from "@/components/trial/trial-modal";
 import { ProgramModal } from "@/components/program/program-modal";
 import type { ProgramFormPayload } from "@/app/(dashboard)/program/actions";
@@ -16,6 +17,7 @@ import type { ProgramFormPayload } from "@/app/(dashboard)/program/actions";
 interface InstructorOption {
   id: string;
   name: string;
+  branch_id: string | null;
 }
 
 interface CategoryOption {
@@ -32,6 +34,8 @@ interface ProgramTableProps {
   onEdit: (programId: string, payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
   onDelete: (programId: string) => Promise<{ success: boolean; error?: string }>;
   onCreateCategory: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
+  onFetchProgram: (programId: string) => Promise<{ success: boolean; data?: ProgramFull; error?: string }>;
+  onUploadCoverImage: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -45,13 +49,13 @@ const columns: {
   { key: "name", label: "Program Name", width: "200px" },
   { key: "category", label: "Category", width: "120px" },
   { key: "enrolled", label: "Enrolled", width: "90px", align: "center" },
-  { key: "plan", label: "Plan", width: "100px" },
-  { key: "package", label: "Package", width: "100px" },
-  { key: "period", label: "Period", width: "80px" },
+  { key: "monthly", label: "Monthly Pack", width: "110px", align: "center" },
+  { key: "session", label: "Session Pack", width: "110px", align: "center" },
   { key: "lessons", label: "Lessons", width: "80px", align: "center" },
-  { key: "branch", label: "Branch", width: "120px" },
-  { key: "assessment", label: "Assessment", width: "100px", align: "center" },
-  { key: "levelling", label: "Levelling", width: "100px" },
+  { key: "branch", label: "Branch", width: "150px" },
+  { key: "slots", label: "Slots", width: "150px" },
+  { key: "levels", label: "Levels", width: "80px", align: "center" },
+  { key: "sessions_level", label: "Level Up Sessions", width: "130px", align: "center" },
   { key: "status", label: "Status", width: "90px", align: "center" },
   { key: "action", label: "Action", width: "100px", align: "center" },
 ];
@@ -61,6 +65,26 @@ const STATUS_STYLES: Record<string, string> = {
   draft: "bg-yellow-100 text-yellow-700",
   archived: "bg-gray-100 text-gray-700",
 };
+
+// Color palette for branches - each branch gets a consistent color
+const BRANCH_COLORS = [
+  { bg: "bg-blue-100", text: "text-blue-700" },
+  { bg: "bg-purple-100", text: "text-purple-700" },
+  { bg: "bg-pink-100", text: "text-pink-700" },
+  { bg: "bg-orange-100", text: "text-orange-700" },
+  { bg: "bg-teal-100", text: "text-teal-700" },
+  { bg: "bg-indigo-100", text: "text-indigo-700" },
+  { bg: "bg-rose-100", text: "text-rose-700" },
+  { bg: "bg-cyan-100", text: "text-cyan-700" },
+  { bg: "bg-amber-100", text: "text-amber-700" },
+  { bg: "bg-emerald-100", text: "text-emerald-700" },
+];
+
+// Get consistent color for a branch name
+function getBranchColor(branchName: string, allBranches: string[]) {
+  const index = allBranches.indexOf(branchName);
+  return BRANCH_COLORS[index % BRANCH_COLORS.length];
+}
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
@@ -77,8 +101,10 @@ export function ProgramTable({
   onEdit,
   onDelete,
   onCreateCategory,
+  onFetchProgram,
+  onUploadCoverImage,
 }: ProgramTableProps) {
-  const [data] = useState<ProgramTableRow[]>(initialData);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -92,6 +118,7 @@ export function ProgramTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to create program");
     }
+    router.refresh();
   };
 
   const handleEdit = async (payload: ProgramFormPayload) => {
@@ -100,6 +127,7 @@ export function ProgramTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to update program");
     }
+    router.refresh();
   };
 
   const handleDelete = async () => {
@@ -108,20 +136,21 @@ export function ProgramTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to delete program");
     }
+    router.refresh();
   };
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (!searchQuery.trim()) return initialData;
 
     const query = searchQuery.toLowerCase();
-    return data.filter(
+    return initialData.filter(
       (row) =>
         row.name.toLowerCase().includes(query) ||
         row.category_name?.toLowerCase().includes(query) ||
         row.branch_names.some((b) => b.toLowerCase().includes(query))
     );
-  }, [data, searchQuery]);
+  }, [initialData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -153,22 +182,6 @@ export function ProgramTable({
     setModalOpen(true);
   };
 
-  const formatBranches = (branchNames: string[]) => {
-    if (branchNames.length === 0) return "-";
-    if (branchNames.length === 1) return branchNames[0];
-    return `${branchNames[0]} +${branchNames.length - 1}`;
-  };
-
-  const formatPricing = (pricing: ProgramTableRow["default_pricing"]) => {
-    if (!pricing) return { plan: "-", package: "-", period: "-" };
-    return {
-      plan: `$${pricing.price}`,
-      package: pricing.package_type === "monthly" ? "Monthly" : "Session",
-      period: pricing.package_type === "monthly"
-        ? `${pricing.duration} mo`
-        : `${pricing.duration} sess`,
-    };
-  };
 
   return (
     <>
@@ -233,7 +246,6 @@ export function ProgramTable({
                   </tr>
                 ) : (
                   paginatedData.map((row, rowIdx) => {
-                    const pricing = formatPricing(row.default_pricing);
                     return (
                       <tr
                         key={row.id}
@@ -285,34 +297,30 @@ export function ProgramTable({
                           </div>
                         </td>
 
-                        {/* Plan */}
+                        {/* Monthly Package Count */}
                         <td
-                          className="px-4 py-3 font-bold"
+                          className="px-4 py-3 text-center font-medium"
                           style={{ width: columns[3].width }}
                         >
-                          {pricing.plan}
+                          <span className="text-[#615DFA]">
+                            {row.monthly_package_count || 0}
+                          </span>
                         </td>
 
-                        {/* Package */}
+                        {/* Session Package Count */}
                         <td
-                          className="px-4 py-3"
+                          className="px-4 py-3 text-center font-medium"
                           style={{ width: columns[4].width }}
                         >
-                          {pricing.package}
-                        </td>
-
-                        {/* Period */}
-                        <td
-                          className="px-4 py-3"
-                          style={{ width: columns[5].width }}
-                        >
-                          {pricing.period}
+                          <span className="text-[#23D2E2]">
+                            {row.session_package_count || 0}
+                          </span>
                         </td>
 
                         {/* Lessons */}
                         <td
                           className="px-4 py-3 text-center"
-                          style={{ width: columns[6].width }}
+                          style={{ width: columns[5].width }}
                         >
                           <div className="flex items-center justify-center gap-1">
                             <BookOpen className="h-4 w-4 text-muted-foreground" />
@@ -320,39 +328,76 @@ export function ProgramTable({
                           </div>
                         </td>
 
-                        {/* Branch */}
+                        {/* Branch - Show all branches with different colors */}
+                        <td
+                          className="px-4 py-3"
+                          style={{ width: columns[6].width }}
+                        >
+                          {row.branch_names.length === 0 ? (
+                            <span className="text-muted-foreground">-</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {row.branch_names.map((name, idx) => {
+                                const color = getBranchColor(name, row.branch_names);
+                                return (
+                                  <span
+                                    key={idx}
+                                    className={cn(
+                                      "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+                                      color.bg,
+                                      color.text
+                                    )}
+                                  >
+                                    {name}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Slots - Show count per branch with matching colors */}
                         <td
                           className="px-4 py-3"
                           style={{ width: columns[7].width }}
                         >
-                          {formatBranches(row.branch_names)}
+                          {row.slot_counts.length === 0 ? (
+                            <span className="text-muted-foreground">-</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {row.slot_counts.map((slot, idx) => {
+                                const color = getBranchColor(slot.branch_name, row.branch_names);
+                                return (
+                                  <span
+                                    key={idx}
+                                    className={cn(
+                                      "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+                                      color.bg,
+                                      color.text
+                                    )}
+                                  >
+                                    {slot.count}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                         </td>
 
-                        {/* Assessment */}
+                        {/* Number of Levels */}
                         <td
-                          className="px-4 py-3 text-center"
+                          className="px-4 py-3 text-center font-medium"
                           style={{ width: columns[8].width }}
                         >
-                          <span
-                            className={cn(
-                              "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                              row.assessment_enabled
-                                ? "bg-green-100 text-green-700"
-                                : "bg-gray-100 text-gray-700"
-                            )}
-                          >
-                            {row.assessment_enabled ? "Yes" : "No"}
-                          </span>
+                          {row.number_of_levels || "-"}
                         </td>
 
-                        {/* Levelling */}
+                        {/* Sessions to Level Up */}
                         <td
-                          className="px-4 py-3"
+                          className="px-4 py-3 text-center font-medium"
                           style={{ width: columns[9].width }}
                         >
-                          {row.levelling_time_minutes
-                            ? `${row.levelling_time_minutes} min`
-                            : "-"}
+                          {row.sessions_to_level_up || "-"}
                         </td>
 
                         {/* Status */}
@@ -429,6 +474,8 @@ export function ProgramTable({
         onEdit={handleEdit}
         onDelete={handleDelete}
         onCreateCategory={onCreateCategory}
+        onFetchProgram={onFetchProgram}
+        onUploadCoverImage={onUploadCoverImage}
       />
     </>
   );

@@ -105,7 +105,7 @@ export function AttendanceLogModal({
       setActualStartTime(formatTimeForInput(record.actualStartTime));
       setInstructorName(record.instructorName ?? "");
       setLastActivity(record.lastActivity ?? "");
-      setAdcoin(0);
+      setAdcoin(record.adcoin ?? 0);
       setProjectPhotos(record.projectPhotos ?? []);
       setReason(record.notes ?? "");
     }

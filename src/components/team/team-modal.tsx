@@ -28,6 +28,7 @@ interface BranchOption {
 export interface TeamMemberFormData {
   name: string;
   email: string;
+  password: string;
   phone: string | null;
   address: string | null;
   branchId: string | null;
@@ -65,6 +66,7 @@ const STATUS_OPTIONS: { value: TeamMemberStatus; label: string }[] = [
 const initialFormData: TeamMemberFormData = {
   name: "",
   email: "",
+  password: "",
   phone: null,
   address: null,
   branchId: null,
@@ -123,6 +125,7 @@ export function TeamModal({
         setFormData({
           name: record.name,
           email: record.email,
+          password: "",
           phone: record.phone,
           address: record.address,
           branchId: record.branchId,
@@ -374,6 +377,17 @@ export function TeamModal({
               />
             )}
 
+            {/* Password - Only shown in add mode */}
+            {mode === "add" && (
+              <FloatingInput
+                label="Password *"
+                type="password"
+                value={formData.password}
+                onChange={(e) => updateField("password", e.target.value)}
+                required
+              />
+            )}
+
             {/* Phone and Branch */}
             <div className="grid grid-cols-2 gap-4">
               {isReadonly ? (
@@ -545,7 +559,8 @@ export function TeamModal({
               onClick={handleSubmit}
               disabled={
                 isSubmitting ||
-                (!isReadonly && (!formData.name || !formData.email))
+                (!isReadonly && (!formData.name || !formData.email)) ||
+                (mode === "add" && formData.password.length < 6)
               }
               className={cn(
                 "w-full h-[50px] text-white font-bold rounded-[10px]",

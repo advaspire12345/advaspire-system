@@ -13,14 +13,14 @@ export function SocialNetworkCard() {
   return (
     <div className="rounded-xl bg-white shadow-[0_0_40px_rgba(94,92,154,0.06)]">
       {/* Header */}
-      <div className="border-b border-[#eaeaf5] px-7 py-6">
+      <div className="border-b border-[#eaeaf5] px-4 py-4 sm:px-7 sm:py-6">
         <h4 className="text-xs font-bold uppercase tracking-wide text-[#3e3f5e]">
           Social Network
         </h4>
       </div>
 
       {/* Content */}
-      <div className="px-7 py-6">
+      <div className="px-4 py-4 sm:px-7 sm:py-6">
         <div className="flex flex-wrap items-center gap-3">
           {socialButtons.map((btn, idx) => (
             <button

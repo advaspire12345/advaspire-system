@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Search,
   UserCheck,
@@ -34,11 +35,33 @@ export interface AttendanceRow {
   courseName: string;
   packageName: string | null;
   dayOfWeek: string | null;
+  slotDay: string;
+  slotTime: string | null;
   startTime: string | null;
   endTime: string | null;
   lastAttendanceDate: string | null;
   lastAttendanceStatus: AttendanceStatus | null;
   sessionsRemaining: number;
+  // Type to distinguish between enrollment and trial
+  type: 'enrollment' | 'trial';
+  // Trial-specific fields
+  trialId?: string;
+  parentName?: string;
+  childAge?: number;
+  // Existing attendance data for this week (if partially filled)
+  existingAttendance?: {
+    id: string;
+    date: string;
+    status: AttendanceStatus;
+    classType: 'Physical' | 'Online' | null;
+    actualDay: string | null;
+    actualStartTime: string | null;
+    instructorName: string | null;
+    lastActivity: string | null;
+    projectPhotos: string[] | null;
+    notes: string | null;
+    adcoin: number;
+  } | null;
 }
 
 interface InstructorOption {
@@ -73,9 +96,15 @@ export function AttendanceTable({
   initialData,
   instructors = [],
 }: AttendanceTableProps) {
+  const router = useRouter();
   const [data, setData] = useState<AttendanceRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Sync data state when initialData changes (after page refresh)
+  useEffect(() => {
+    setData(initialData);
+  }, [initialData]);
 
   // Unified modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -117,40 +146,42 @@ export function AttendanceTable({
 
   // Handle modal submit
   const handleModalSubmit = async (formData: AttendanceFormData) => {
+    // Debug: log what we're sending
+    console.log('Submitting attendance formData:', formData);
+
     try {
+      const requestBody = {
+        enrollmentId: formData.enrollmentId,
+        date: formData.date,
+        status: formData.status,
+        notes: formData.notes || undefined,
+        actualDay: formData.actualDay,
+        actualStartTime: formData.actualStartTime,
+        classType: formData.classType,
+        instructorName: formData.instructorName || undefined,
+        lastActivity: formData.lastActivity || undefined,
+        projectPhotos:
+          formData.projectPhotos.length > 0
+            ? formData.projectPhotos
+            : undefined,
+        adcoin: formData.adcoin || 0,
+        // Trial-specific fields
+        instructorFeedback: formData.instructorFeedback || undefined,
+        isTrial: formData.isTrial || false,
+      };
+      console.log('Request body:', requestBody);
+
       const response = await fetch("/api/attendance/mark", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enrollmentId: formData.enrollmentId,
-          date: formData.date,
-          status: formData.status,
-          notes: formData.notes || undefined,
-          actualDay: formData.actualDay,
-          actualStartTime: formData.actualStartTime,
-          classType: formData.classType,
-          instructorName: formData.instructorName || undefined,
-          lastActivity: formData.lastActivity || undefined,
-          projectPhotos:
-            formData.projectPhotos.length > 0
-              ? formData.projectPhotos
-              : undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (response.ok) {
-        // Update all rows for this enrollment
-        setData((prev) =>
-          prev.map((item) =>
-            item.enrollmentId === formData.enrollmentId
-              ? {
-                  ...item,
-                  lastAttendanceDate: formData.date,
-                  lastAttendanceStatus: formData.status,
-                }
-              : item,
-          ),
-        );
+        const result = await response.json();
+        // Only remove the row if attendance is complete (server will filter it out anyway on refresh)
+        // For now, just refresh to let server decide what to show
+        router.refresh();
       } else {
         const errorData = await response.json();
         console.error("API Error:", errorData);
@@ -292,6 +323,7 @@ export function AttendanceTable({
                         "transition hover:bg-[#f0f6ff]",
                         rowIdx === paginatedData.length - 1 &&
                           "rounded-bl-lg rounded-br-lg",
+                        row.type === 'trial' && "bg-purple-50/50",
                       )}
                     >
                       {/* Photo */}
@@ -324,7 +356,14 @@ export function AttendanceTable({
                         className="px-4 py-3 font-bold text-[#23d2e2]"
                         style={{ width: columns[1].width }}
                       >
-                        {row.studentName}
+                        <div className="flex items-center gap-2">
+                          {row.studentName}
+                          {row.type === 'trial' && (
+                            <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                              Trial
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Branch */}
@@ -348,7 +387,7 @@ export function AttendanceTable({
                         className="px-4 py-3 font-bold"
                         style={{ width: columns[4].width }}
                       >
-                        {row.dayOfWeek ?? "-"}
+                        {row.slotDay ?? "-"}
                       </td>
 
                       {/* Time */}
@@ -356,7 +395,7 @@ export function AttendanceTable({
                         className="px-4 py-3 font-bold"
                         style={{ width: columns[5].width }}
                       >
-                        {formatTime(row.startTime, row.endTime)}
+                        {formatTime(row.slotTime, null)}
                       </td>
 
                       {/* Last Activity */}
