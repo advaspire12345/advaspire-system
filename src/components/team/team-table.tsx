@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus, FileText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -73,7 +74,7 @@ export function TeamTable({
   onEdit,
   onDelete,
 }: TeamTableProps) {
-  const [data] = useState<TeamTableRow[]>(initialData);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -90,9 +91,10 @@ export function TeamTable({
   // Convert form data to payload
   // Note: avatarImage and coverImage are File objects that would need to be uploaded
   // to a storage service to get URLs. For now, we pass null for photoUrl.
-  const convertToPayload = (formData: TeamMemberFormData): TeamMemberFormPayload => ({
+  const convertToPayload = (formData: TeamMemberFormData, includePassword = false): TeamMemberFormPayload => ({
     name: formData.name,
     email: formData.email,
+    ...(includePassword && formData.password ? { password: formData.password } : {}),
     phone: formData.phone,
     address: formData.address,
     branchId: formData.branchId,
@@ -104,11 +106,12 @@ export function TeamTable({
   });
 
   const handleAdd = async (formData: TeamMemberFormData) => {
-    const payload = convertToPayload(formData);
+    const payload = convertToPayload(formData, true);
     const result = await onAdd(payload);
     if (!result.success) {
       throw new Error(result.error || "Failed to create team member");
     }
+    router.refresh();
   };
 
   const handleEdit = async (formData: TeamMemberFormData) => {
@@ -118,6 +121,7 @@ export function TeamTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to update team member");
     }
+    router.refresh();
   };
 
   const handleDelete = async () => {
@@ -126,14 +130,15 @@ export function TeamTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to delete team member");
     }
+    router.refresh();
   };
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (!searchQuery.trim()) return initialData;
 
     const query = searchQuery.toLowerCase();
-    return data.filter(
+    return initialData.filter(
       (row) =>
         row.name.toLowerCase().includes(query) ||
         row.email.toLowerCase().includes(query) ||
@@ -141,7 +146,7 @@ export function TeamTable({
         row.phone?.toLowerCase().includes(query) ||
         ROLE_LABELS[row.role]?.toLowerCase().includes(query)
     );
-  }, [data, searchQuery]);
+  }, [initialData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);

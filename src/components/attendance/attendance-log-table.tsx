@@ -173,6 +173,7 @@ export function AttendanceLogTable({
         lastActivity: formData.lastActivity,
         notes: formData.notes,
         projectPhotos: formData.projectPhotos,
+        adcoin: formData.adcoin,
       });
 
       if (result.success) {
@@ -190,6 +191,7 @@ export function AttendanceLogTable({
                   lastActivity: formData.lastActivity,
                   notes: formData.notes,
                   projectPhotos: formData.projectPhotos,
+                  adcoin: formData.adcoin,
                 }
               : item,
           ),
@@ -223,7 +225,7 @@ export function AttendanceLogTable({
       ...row,
       date: format(new Date(row.date), "do MMM yyyy"),
       status: row.status.charAt(0).toUpperCase() + row.status.slice(1),
-      adcoin: 0, // Placeholder - would come from actual data
+      adcoin: row.adcoin ?? 0,
     }));
     exportToCSV(
       exportData,
@@ -529,7 +531,7 @@ export function AttendanceLogTable({
                         className="px-4 py-3 text-center font-bold text-[#23d2e2]"
                         style={{ width: columns[10].width }}
                       >
-                        0
+                        {row.adcoin ?? 0}
                       </td>
 
                       {/* PIC (Instructor/Marked By) */}

@@ -13,9 +13,9 @@ export function PhotoContainer({ photos, totalCount = 26 }: PhotoContainerProps)
   const remainingCount = totalCount - 7;
 
   return (
-    <div className="mt-4 rounded-xl bg-white shadow-[0_0_40px_rgba(94,92,154,0.06)]">
+    <div className="rounded-xl bg-white shadow-[0_0_40px_rgba(94,92,154,0.06)]">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#eaeaf5] px-7 py-6">
+      <div className="flex items-center justify-between border-b border-[#eaeaf5] px-4 py-4 sm:px-7 sm:py-6">
         <h4 className="text-xs font-bold uppercase tracking-wide text-[#3e3f5e]">
           Photos
         </h4>
@@ -23,7 +23,7 @@ export function PhotoContainer({ photos, totalCount = 26 }: PhotoContainerProps)
       </div>
 
       {/* Content */}
-      <div className="p-7">
+      <div className="p-4 sm:p-7">
         {/* First row - 2 photos */}
         <div className="grid grid-cols-2 gap-3">
           {displayPhotos.slice(0, 2).map((photo) => (

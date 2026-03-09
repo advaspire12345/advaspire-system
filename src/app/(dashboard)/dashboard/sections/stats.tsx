@@ -2,10 +2,10 @@ import { CirclePlus, CircleMinus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardStats } from "@/data/dashboard";
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
+function formatCurrency(amount: number, currency: string = "USD"): string {
+  return new Intl.NumberFormat("en-MY", {
     style: "currency",
-    currency: "USD",
+    currency: currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);
@@ -25,44 +25,49 @@ export async function DashboardStats({ userEmail }: DashboardStatsProps) {
 
   const statsCards = [
     {
+      title: "Total Trial",
+      imageUrl: "/stat/01.jpg",
+      value: stats.totalTrials.toLocaleString(),
+      change: formatPercentage(stats.trialChange),
+      trend: stats.trialChange >= 0 ? "up" : "down",
+      description: "this month vs last month",
+    },
+    {
       title: "Total Attendance",
       imageUrl: "/stat/01.jpg",
       value: stats.totalAttendance.toLocaleString(),
       change: formatPercentage(stats.attendanceChange),
       trend: stats.attendanceChange >= 0 ? "up" : "down",
-      description: "vs last month",
+      description: "this month vs last month",
     },
     {
       title: "Total Payments",
       imageUrl: "/stat/02.jpg",
-      value: formatCurrency(stats.totalPayments),
+      value: formatCurrency(stats.totalPayments, "MYR"),
       change: formatPercentage(stats.paymentsChange),
       trend: stats.paymentsChange >= 0 ? "up" : "down",
-      description: "vs last month",
+      description: "this month vs last month",
     },
     {
       title: "Payment Due",
       imageUrl: "/stat/03.jpg",
-      value: stats.activeBranches.toString(),
-      change:
-        stats.branchesChange >= 0
-          ? `+${stats.branchesChange}`
-          : stats.branchesChange.toString(),
-      trend: stats.branchesChange >= 0 ? "up" : "down",
-      description: "new this month",
+      value: formatCurrency(stats.paymentDueAmount, "MYR"),
+      change: `${stats.paymentDuePercentage.toFixed(1)}%`,
+      trend: stats.paymentDuePercentage <= 20 ? "up" : "down", // Low percentage is better
+      description: "of total payments pending",
     },
     {
       title: "Total Adcoin Transaction",
       imageUrl: "/stat/04.jpg",
-      value: stats.totalAdcoinBalance.toLocaleString(),
-      change: formatPercentage(stats.adcoinChange),
-      trend: stats.adcoinChange >= 0 ? "up" : "down",
-      description: "vs last month",
+      value: stats.totalAdcoinTransactions.toLocaleString(),
+      change: formatPercentage(stats.adcoinTransactionChange),
+      trend: stats.adcoinTransactionChange >= 0 ? "up" : "down",
+      description: "this month vs last month",
     },
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
       {statsCards.map((stat) => (
         <Card
           key={stat.title}

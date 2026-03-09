@@ -9,6 +9,8 @@ import {
   updateProgramAction,
   deleteProgramAction,
   createCategoryAction,
+  getProgramByIdAction,
+  uploadCoverImageAction,
 } from "./actions";
 
 export default async function ProgramsPage() {
@@ -39,6 +41,7 @@ export default async function ProgramsPage() {
   const instructors = instructorsData.map((i) => ({
     id: i.id,
     name: i.name,
+    branch_id: i.branch_id,
   }));
 
   return (
@@ -60,6 +63,8 @@ export default async function ProgramsPage() {
           onEdit={updateProgramAction}
           onDelete={deleteProgramAction}
           onCreateCategory={createCategoryAction}
+          onFetchProgram={getProgramByIdAction}
+          onUploadCoverImage={uploadCoverImageAction}
         />
       </div>
     </main>

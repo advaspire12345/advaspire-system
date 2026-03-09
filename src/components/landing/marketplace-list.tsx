@@ -12,7 +12,7 @@ export function MarketplaceList({ items }: MarketplaceListProps) {
   return (
     <div className="rounded-xl bg-white shadow-[0_0_40px_rgba(94,92,154,0.06)]">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#eaeaf5] px-7 py-6">
+      <div className="flex items-center justify-between border-b border-[#eaeaf5] px-4 py-4 sm:px-7 sm:py-6">
         <h4 className="text-xs font-bold uppercase tracking-wide text-[#3e3f5e]">
           Marketplace
         </h4>
@@ -20,7 +20,7 @@ export function MarketplaceList({ items }: MarketplaceListProps) {
       </div>
 
       {/* Content */}
-      <div className="px-7 py-6">
+      <div className="px-4 py-4 sm:px-7 sm:py-6">
         <div className="space-y-4">
           {items.map((item) => (
             <MarketplaceItemRow key={item.id} item={item} />

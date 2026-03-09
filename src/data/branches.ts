@@ -277,3 +277,30 @@ export async function getAdminOptions(): Promise<AdminOption[]> {
   return data ?? [];
 }
 
+
+export interface InstructorOption {
+  id: string;
+  name: string;
+  branchId: string | null;
+}
+
+export async function getInstructorOptions(): Promise<InstructorOption[]> {
+  const { data, error } = await supabaseAdmin
+    .from("users")
+    .select("id, name, branch_id")
+    .in("role", ["branch_admin", "instructor"])
+    .is("deleted_at", null)
+    .order("name");
+
+  if (error) {
+    console.error("Error fetching instructor options:", error);
+    return [];
+  }
+
+  return (data ?? []).map((user) => ({
+    id: user.id,
+    name: user.name,
+    branchId: user.branch_id,
+  }));
+}
+

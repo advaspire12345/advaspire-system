@@ -12,18 +12,18 @@ export function Leaderboard({ entries }: LeaderboardProps) {
   return (
     <div className="rounded-xl bg-white shadow-[0_0_40px_rgba(94,92,154,0.06)]">
       {/* Header */}
-      <div className="border-b border-[#eaeaf5] px-7 py-6">
+      <div className="border-b border-[#eaeaf5] px-4 py-4 sm:px-7 sm:py-6">
         <h4 className="text-xs font-bold uppercase tracking-wide text-[#3e3f5e]">
           Leaderboard
         </h4>
       </div>
 
-      {/* Table Header */}
-      <div className="grid grid-cols-12 gap-4 border-b border-[#eaeaf5] px-7 py-4">
+      {/* Table Header - hidden on mobile */}
+      <div className="hidden border-b border-[#eaeaf5] px-4 py-3 sm:grid sm:grid-cols-12 sm:gap-4 sm:px-7 sm:py-4">
         <div className="col-span-1 text-xs font-bold uppercase text-[#adafca]">
           Rank
         </div>
-        <div className="col-span-4 text-xs font-bold uppercase text-[#adafca]">
+        <div className="col-span-4 text-xs font-bold uppercase text-[#adafca] md:col-span-4">
           Name
         </div>
         <div className="col-span-4 text-xs font-bold uppercase text-[#adafca]">
@@ -63,37 +63,67 @@ function LeaderboardRow({ entry }: LeaderboardRowProps) {
   };
 
   return (
-    <div className="grid grid-cols-12 items-center gap-4 px-7 py-4 transition-colors hover:bg-[#f8f8fb]">
-      {/* Rank */}
-      <div className="col-span-1">
+    <>
+      {/* Mobile Layout */}
+      <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[#f8f8fb] sm:hidden">
+        {/* Rank */}
         <span
-          className={`flex size-8 items-center justify-center rounded-full text-sm font-bold ${getRankStyle(entry.rank)}`}
+          className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${getRankStyle(entry.rank)}`}
         >
           {entry.rank}
         </span>
-      </div>
 
-      {/* Name with Avatar */}
-      <div className="col-span-4 flex items-center gap-3">
-        <Avatar className="size-10">
+        {/* Avatar */}
+        <Avatar className="size-9 shrink-0">
           <AvatarImage src={entry.avatarUrl} alt={entry.name} />
           <AvatarFallback>{entry.name.charAt(0)}</AvatarFallback>
         </Avatar>
-        <span className="text-sm font-bold text-[#3e3f5e]">{entry.name}</span>
+
+        {/* Name and Adcoin */}
+        <div className="flex min-w-0 flex-1 items-center justify-between">
+          <span className="truncate text-sm font-bold text-[#3e3f5e]">{entry.name}</span>
+          <div className="flex shrink-0 items-center gap-1">
+            <Coins className="size-3.5 text-[#ffd700]" />
+            <span className="text-xs font-bold text-[#3e3f5e]">
+              {entry.adcoin.toLocaleString()}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* Program Joined */}
-      <div className="col-span-4">
-        <span className="text-sm text-[#8f91ac]">{entry.programJoined}</span>
-      </div>
+      {/* Desktop Layout */}
+      <div className="hidden items-center gap-4 px-4 py-3 transition-colors hover:bg-[#f8f8fb] sm:grid sm:grid-cols-12 sm:px-7 sm:py-4">
+        {/* Rank */}
+        <div className="col-span-1">
+          <span
+            className={`flex size-8 items-center justify-center rounded-full text-sm font-bold ${getRankStyle(entry.rank)}`}
+          >
+            {entry.rank}
+          </span>
+        </div>
 
-      {/* Adcoin */}
-      <div className="col-span-3 flex items-center justify-end gap-2">
-        <Coins className="size-4 text-[#ffd700]" />
-        <span className="text-sm font-bold text-[#3e3f5e]">
-          {entry.adcoin.toLocaleString()}
-        </span>
+        {/* Name with Avatar */}
+        <div className="col-span-4 flex items-center gap-3">
+          <Avatar className="size-10">
+            <AvatarImage src={entry.avatarUrl} alt={entry.name} />
+            <AvatarFallback>{entry.name.charAt(0)}</AvatarFallback>
+          </Avatar>
+          <span className="text-sm font-bold text-[#3e3f5e]">{entry.name}</span>
+        </div>
+
+        {/* Program Joined */}
+        <div className="col-span-4">
+          <span className="text-sm text-[#8f91ac]">{entry.programJoined}</span>
+        </div>
+
+        {/* Adcoin */}
+        <div className="col-span-3 flex items-center justify-end gap-2">
+          <Coins className="size-4 text-[#ffd700]" />
+          <span className="text-sm font-bold text-[#3e3f5e]">
+            {entry.adcoin.toLocaleString()}
+          </span>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

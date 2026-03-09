@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/db";
 import type { User, UserRole, UserInsert, UserUpdate } from "@/db/schema";
 
-const SUPERADMIN_EMAIL = "admin@advaspire.com";
+const SUPERADMIN_EMAILS = ["admin@advaspire.com", "advaspire@gmail.com"];
 
 // ============================================
 // READ OPERATIONS
@@ -110,7 +110,7 @@ export async function getAllUsers(): Promise<User[]> {
 // ============================================
 
 export function isSuperAdmin(email: string): boolean {
-  return email === SUPERADMIN_EMAIL;
+  return SUPERADMIN_EMAILS.includes(email);
 }
 
 export function isSuperAdminRole(role: UserRole): boolean {
@@ -288,6 +288,26 @@ export async function restoreUser(userId: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Update a user's adcoin balance
+ */
+export async function updateUserAdcoinBalance(
+  userId: string,
+  newBalance: number
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ adcoin_balance: newBalance })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Error updating user adcoin balance:', error);
+    return false;
+  }
+
+  return true;
+}
+
 // ============================================
 // INSTRUCTOR QUERIES
 // ============================================
@@ -396,7 +416,8 @@ export async function getTransferParticipants(): Promise<TransferParticipant[]> 
       photo,
       role,
       branch_id,
-      branch:branches(id, name)
+      adcoin_balance,
+      branch:branches!users_branch_id_branches_id_fk(id, name)
     `)
     .not('role', 'in', '("parent","student")')
     .is('deleted_at', null)
@@ -417,7 +438,7 @@ export async function getTransferParticipants(): Promise<TransferParticipant[]> 
         role: user.role as UserRole,
         branchId: user.branch_id,
         branchName,
-        adcoinBalance: 0, // Users don't have adcoin balance
+        adcoinBalance: user.adcoin_balance ?? 0,
       });
     }
   }

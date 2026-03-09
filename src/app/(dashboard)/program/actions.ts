@@ -8,6 +8,7 @@ import {
   createCategory,
   type CreateProgramPayload,
 } from "@/data/programs";
+import type { ProgramFull } from "@/db/schema";
 
 export interface ProgramFormPayload {
   // Basic
@@ -41,9 +42,13 @@ export interface ProgramFormPayload {
     description: string;
     lessons: {
       title: string;
-      description: string;
-      duration_minutes: number | null;
-      content_type: string | null;
+      thumbnail_url: string | null;
+      url: string | null;
+      missions: {
+        level: number | null;
+        url_mission: string | null;
+        url_answer: string | null;
+      }[];
     }[];
   }[];
 
@@ -145,6 +150,75 @@ export async function createCategoryAction(
     return { success: true, categoryId: category.id };
   } catch (error) {
     console.error("Error in createCategoryAction:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
+export async function getProgramByIdAction(
+  programId: string
+): Promise<{ success: boolean; data?: ProgramFull; error?: string }> {
+  try {
+    const { getProgramById } = await import("@/data/programs");
+    const program = await getProgramById(programId);
+
+    if (!program) {
+      return { success: false, error: "Program not found" };
+    }
+
+    return { success: true, data: program };
+  } catch (error) {
+    console.error("Error in getProgramByIdAction:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
+export async function uploadCoverImageAction(
+  formData: FormData
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  try {
+    const { supabaseAdmin } = await import("@/db");
+    const file = formData.get("file") as File;
+
+    if (!file) {
+      return { success: false, error: "No file provided" };
+    }
+
+    // Generate unique filename
+    const fileExt = file.name.split(".").pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const filePath = `covers/${fileName}`;
+
+    // Convert File to ArrayBuffer then to Buffer
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Upload to Supabase Storage
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("program-covers")
+      .upload(filePath, buffer, {
+        contentType: file.type,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error("Upload error:", uploadError);
+      return { success: false, error: uploadError.message };
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from("program-covers")
+      .getPublicUrl(filePath);
+
+    return { success: true, url: publicUrl };
+  } catch (error) {
+    console.error("Error in uploadCoverImageAction:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "An unexpected error occurred",

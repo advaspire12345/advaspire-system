@@ -9,14 +9,14 @@ export function UserInfoCard({ profile }: UserInfoCardProps) {
   return (
     <div className="rounded-xl bg-white shadow-[0_0_40px_rgba(94,92,154,0.06)]">
       {/* Header */}
-      <div className="border-b border-[#eaeaf5] px-7 py-6">
+      <div className="border-b border-[#eaeaf5] px-4 py-4 sm:px-7 sm:py-6">
         <h4 className="text-xs font-bold uppercase tracking-wide text-[#3e3f5e]">
           About
         </h4>
       </div>
 
       {/* Content */}
-      <div className="px-7 py-6">
+      <div className="px-4 py-4 sm:px-7 sm:py-6">
         <p className="text-sm leading-6 text-[#8f91ac]">{profile.bio}</p>
 
         <div className="mt-6 space-y-5">

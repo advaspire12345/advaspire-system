@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
 import {
   Dialog,
@@ -35,6 +35,9 @@ export interface PackageOption {
   id: string;
   name: string;
   price: number;
+  courseId: string;
+  packageType: "monthly" | "session";
+  duration: number;
 }
 
 interface PendingPaymentModalProps {
@@ -104,8 +107,14 @@ export function PendingPaymentModal({
   // Get selected student details
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
 
+  // Filter packages based on selected course
+  const filteredPackages = useMemo(() => {
+    if (!selectedCourseId) return [];
+    return packages.filter((p) => p.courseId === selectedCourseId);
+  }, [packages, selectedCourseId]);
+
   // Get selected package price
-  const selectedPackage = packages.find((p) => p.id === selectedPackageId);
+  const selectedPackage = filteredPackages.find((p) => p.id === selectedPackageId);
   const price = selectedPackage?.price ?? 0;
 
   // Reset form when modal opens or record changes
@@ -122,13 +131,19 @@ export function PendingPaymentModal({
       } else if (record) {
         // Edit/delete/approve mode: initialize from record
         setSelectedCourseId(record.courseId ?? "");
-        setSelectedPackageId(record.packageId ?? "");
+
+        // Find matching package by course_id and price (since packageId references legacy table)
+        const matchingPackage = packages.find(
+          (p) => p.courseId === record.courseId && p.price === record.price
+        );
+        setSelectedPackageId(matchingPackage?.id ?? "");
+
         setPaymentMethod(record.paymentMethod ?? "");
         setPaidAt(record.paidAt ? format(new Date(record.paidAt), "yyyy-MM-dd") : "");
         setReceiptPhoto(record.receiptPhoto ? [record.receiptPhoto] : []);
       }
     }
-  }, [open, record, mode]);
+  }, [open, record, mode, packages]);
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -213,7 +228,7 @@ export function PendingPaymentModal({
     label: c.name,
   }));
 
-  const packageOptions = packages.map((p) => ({
+  const packageOptions = filteredPackages.map((p) => ({
     value: p.id,
     label: `${p.name} (RM${p.price.toLocaleString()})`,
   }));
@@ -294,7 +309,10 @@ export function PendingPaymentModal({
                     label="Program"
                     placeholder="Select program..."
                     value={selectedCourseId}
-                    onChange={setSelectedCourseId}
+                    onChange={(val) => {
+                      setSelectedCourseId(val);
+                      setSelectedPackageId(""); // Reset package when course changes
+                    }}
                     options={courseOptions}
                   />
                 </div>
@@ -304,10 +322,11 @@ export function PendingPaymentModal({
                   <FloatingSelect
                     id="select-package"
                     label="Package"
-                    placeholder="Select package..."
+                    placeholder={selectedCourseId ? "Select package..." : "Select program first"}
                     value={selectedPackageId}
                     onChange={setSelectedPackageId}
                     options={packageOptions}
+                    disabled={!selectedCourseId || packageOptions.length === 0}
                   />
 
                   <div className="relative">
@@ -398,7 +417,10 @@ export function PendingPaymentModal({
                       label="Program"
                       placeholder="Select program..."
                       value={selectedCourseId}
-                      onChange={setSelectedCourseId}
+                      onChange={(val) => {
+                        setSelectedCourseId(val);
+                        setSelectedPackageId(""); // Reset package when course changes
+                      }}
                       options={courseOptions}
                     />
                   )}
@@ -425,10 +447,11 @@ export function PendingPaymentModal({
                     <FloatingSelect
                       id="edit-select-package"
                       label="Package"
-                      placeholder="Select package..."
+                      placeholder={selectedCourseId ? "Select package..." : "Select program first"}
                       value={selectedPackageId}
                       onChange={setSelectedPackageId}
                       options={packageOptions}
+                      disabled={!selectedCourseId || packageOptions.length === 0}
                     />
                   )}
 

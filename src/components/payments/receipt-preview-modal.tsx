@@ -18,6 +18,16 @@ interface ReceiptItem {
   rate: number;
 }
 
+interface BranchInfo {
+  name: string;
+  companyName: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  bankName: string | null;
+  bankAccount: string | null;
+}
+
 interface ReceiptPreviewModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -29,6 +39,7 @@ interface ReceiptPreviewModalProps {
   invoiceNo: string;
   items: ReceiptItem[];
   total: number;
+  branch?: BranchInfo;
 }
 
 function formatDisplayDate(date: Date): string {
@@ -46,7 +57,15 @@ export function ReceiptPreviewModal({
   invoiceNo,
   items,
   total,
+  branch,
 }: ReceiptPreviewModalProps) {
+  // Use branch info or defaults
+  const companyName = branch?.companyName || "ADVASPIRE SDN BHD";
+  const companyAddress = branch?.address || "32A-3, Jalan Ecohill 1/3C, Setia Ecohill\n43500 Semenyih, Selangor";
+  const companyPhone = branch?.phone || "012-5804645";
+  const companyEmail = branch?.email || "advaspire@gmail.com";
+  const bankName = branch?.bankName || "HONG LEONG BANK";
+  const bankAccount = branch?.bankAccount || "201 000 48797";
   const receiptRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -137,20 +156,21 @@ export function ReceiptPreviewModal({
                     className="w-20 h-20 object-contain"
                   />
                   <div className="text-lg font-bold uppercase pb-1">
-                    ADVASPIRE SDN BHD
+                    {companyName}
                   </div>
                 </div>
 
                 {/* Address on its own lines */}
                 <div className="mt-1 text-[11px]">
-                  <p>32A-3, Jalan Ecohill 1/3C, Setia Ecohill</p>
-                  <p>43500 Semenyih, Selangor</p>
+                  {companyAddress.split('\n').map((line, idx) => (
+                    <p key={idx}>{line}</p>
+                  ))}
                 </div>
 
                 {/* Contact + Email in same line */}
                 <div className="mt-1 flex flex-wrap gap-4 text-[11px]">
-                  <span>Contact: 012-5804645</span>
-                  <span>Email: advaspire@gmail.com</span>
+                  <span>Contact: {companyPhone}</span>
+                  <span>Email: {companyEmail}</span>
                 </div>
               </div>
 
@@ -283,13 +303,13 @@ export function ReceiptPreviewModal({
                 <div className="font-bold uppercase underline">
                   BANK DETAILS:
                 </div>
-                <p className="font-bold uppercase">HONG LEONG BANK</p>
-                <p className="font-bold uppercase">ACC NO: 201 000 48797</p>
+                <p className="font-bold uppercase">{bankName}</p>
+                <p className="font-bold uppercase">ACC NO: {bankAccount}</p>
                 <div className="font-semibold mt-4 mb-1">Notes:</div>
                 <ol className="list-decimal list-inside">
                   <li>
                     All cheques should be crossed and made payable to
-                    <p className="font-bold px-10">ADVASPIRE SDN BHD</p>
+                    <p className="font-bold px-10">{companyName}</p>
                   </li>
                   <li className="mt-2">
                     Goods sold are neither returnable nor refundable. Otherwise

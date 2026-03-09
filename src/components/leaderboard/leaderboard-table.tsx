@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowLeftRight, Plus, Star } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,7 @@ export function LeaderboardTable({
   initialData,
   participants,
 }: LeaderboardTableProps) {
-  const [data] = useState<LeaderboardEntry[]>(initialData);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -57,16 +58,16 @@ export function LeaderboardTable({
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (!searchQuery.trim()) return initialData;
 
     const query = searchQuery.toLowerCase();
-    return data.filter(
+    return initialData.filter(
       (row) =>
         row.studentName.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query) ||
         (row.program?.toLowerCase().includes(query) ?? false),
     );
-  }, [data, searchQuery]);
+  }, [initialData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -109,6 +110,7 @@ export function LeaderboardTable({
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to transfer adcoin");
       }
+      router.refresh();
     } catch (error) {
       console.error("Failed to transfer adcoin:", error);
       throw error;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -79,7 +80,7 @@ export function TrialTable({
   branches,
   courses,
 }: TrialTableProps) {
-  const [data] = useState<TrialRow[]>(initialData);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -90,16 +91,16 @@ export function TrialTable({
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (!searchQuery.trim()) return initialData;
 
     const query = searchQuery.toLowerCase();
-    return data.filter(
+    return initialData.filter(
       (row) =>
         row.parentName.toLowerCase().includes(query) ||
         row.childName.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query),
     );
-  }, [data, searchQuery]);
+  }, [initialData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -154,6 +155,7 @@ export function TrialTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to add trial");
     }
+    router.refresh();
   };
 
   // Handle edit
@@ -178,6 +180,7 @@ export function TrialTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to update trial");
     }
+    router.refresh();
   };
 
   // Handle delete
@@ -189,6 +192,7 @@ export function TrialTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to delete trial");
     }
+    router.refresh();
   };
 
   // Format date for display

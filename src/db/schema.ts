@@ -54,9 +54,22 @@ export interface User {
   cv_url: string | null;
   employed_date: string | null;
   status: TeamMemberStatus;
+  adcoin_balance: number;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+}
+
+/**
+ * AppSettings - Application configuration settings
+ */
+export interface AppSettings {
+  id: string;
+  key: string;
+  value: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -84,6 +97,7 @@ export type Gender = 'male' | 'female' | 'other';
  */
 export interface Student {
   id: string;
+  student_id: string | null;
   name: string;
   email: string | null;
   phone: string | null;
@@ -124,8 +138,11 @@ export interface ParentStudent {
   id: string;
   parent_id: string;
   student_id: string;
+  relationship: string | null;
   created_at: string;
 }
+
+export type ParentRelationship = 'mother' | 'father' | 'guardian' | 'grandparent' | 'other';
 
 /**
  * Course - Class/program offered at a branch
@@ -164,12 +181,15 @@ export interface Enrollment {
   student_id: string;
   course_id: string;
   package_id: string | null;
+  instructor_id: string | null;
   day_of_week: string | null;
   start_time: string | null;
   end_time: string | null;
+  schedule: string | null;
   enrolled_at: string;
   status: EnrollmentStatus;
   sessions_remaining: number;
+  period_start: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -177,10 +197,12 @@ export interface Enrollment {
 
 /**
  * Attendance - Record of student attendance
+ * Supports both enrollment and trial attendance
  */
 export interface Attendance {
   id: string;
-  enrollment_id: string;
+  enrollment_id: string | null;
+  trial_id: string | null;
   date: string;
   status: AttendanceStatus;
   instructor_name: string | null;
@@ -193,6 +215,7 @@ export interface Attendance {
   project_photos: string[] | null;
   notes: string | null;
   marked_by: string | null;
+  adcoin: number;
   created_at: string;
   updated_at: string;
 }
@@ -416,6 +439,13 @@ export interface UserInsert {
   cv_url?: string | null;
   employed_date?: string | null;
   status?: TeamMemberStatus;
+  adcoin_balance?: number;
+}
+
+export interface AppSettingsInsert {
+  key: string;
+  value: string;
+  description?: string | null;
 }
 
 export interface BranchInsert {
@@ -430,6 +460,7 @@ export interface BranchInsert {
 }
 
 export interface StudentInsert {
+  student_id?: string | null;
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -456,6 +487,7 @@ export interface ParentInsert {
 export interface ParentStudentInsert {
   parent_id: string;
   student_id: string;
+  relationship?: string | null;
 }
 
 export interface CourseInsert {
@@ -476,15 +508,19 @@ export interface EnrollmentInsert {
   student_id: string;
   course_id: string;
   package_id?: string | null;
+  instructor_id?: string | null;
   day_of_week?: string | null;
   start_time?: string | null;
   end_time?: string | null;
+  schedule?: string | null;
   status?: EnrollmentStatus;
   sessions_remaining?: number;
+  period_start?: string | null;
 }
 
 export interface AttendanceInsert {
-  enrollment_id: string;
+  enrollment_id?: string | null;
+  trial_id?: string | null;
   date: string;
   status: AttendanceStatus;
   instructor_name?: string | null;
@@ -497,6 +533,7 @@ export interface AttendanceInsert {
   project_photos?: string[] | null;
   notes?: string | null;
   marked_by?: string | null;
+  adcoin?: number;
 }
 
 export interface PaymentInsert {
@@ -582,6 +619,12 @@ export interface UserUpdate {
   cv_url?: string | null;
   employed_date?: string | null;
   status?: TeamMemberStatus;
+  adcoin_balance?: number;
+}
+
+export interface AppSettingsUpdate {
+  value?: string;
+  description?: string | null;
 }
 
 export interface BranchUpdate {
@@ -596,6 +639,7 @@ export interface BranchUpdate {
 }
 
 export interface StudentUpdate {
+  student_id?: string | null;
   name?: string;
   email?: string | null;
   phone?: string | null;
@@ -634,10 +678,14 @@ export interface PackageUpdate {
 
 export interface EnrollmentUpdate {
   status?: EnrollmentStatus;
+  package_id?: string | null;
+  instructor_id?: string | null;
   day_of_week?: string | null;
   start_time?: string | null;
   end_time?: string | null;
+  schedule?: string | null;
   sessions_remaining?: number;
+  period_start?: string | null;
 }
 
 export interface AttendanceUpdate {
@@ -652,6 +700,7 @@ export interface AttendanceUpdate {
   project_photos?: string[] | null;
   notes?: string | null;
   marked_by?: string | null;
+  adcoin?: number;
 }
 
 export interface PaymentUpdate {
@@ -794,6 +843,11 @@ export interface Database {
         Row: Trial;
         Insert: TrialInsert;
         Update: TrialUpdate;
+      };
+      app_settings: {
+        Row: AppSettings;
+        Insert: AppSettingsInsert;
+        Update: AppSettingsUpdate;
       };
     };
     Functions: {
@@ -1037,7 +1091,6 @@ export interface LessonProgressUpdate {
 
 export type ProgramType = 'course' | 'workshop' | 'bootcamp' | 'certification';
 export type CourseStatus = 'draft' | 'active' | 'archived';
-export type LessonContentType = 'video' | 'text' | 'quiz' | 'assignment';
 export type PricingPackageType = 'monthly' | 'session';
 
 /**
@@ -1137,15 +1190,24 @@ export interface CourseSection {
 }
 
 /**
+ * Lesson Mission item
+ */
+export interface LessonMission {
+  level: number | null;
+  url_mission: string | null;
+  url_answer: string | null;
+}
+
+/**
  * Course Lesson (within Section)
  */
 export interface CourseLesson {
   id: string;
   section_id: string;
   title: string;
-  description: string | null;
-  duration_minutes: number | null;
-  content_type: LessonContentType | null;
+  thumbnail_url: string | null;
+  url: string | null;
+  missions: LessonMission[];
   sort_order: number;
 }
 
@@ -1229,9 +1291,9 @@ export interface CourseSectionInsert {
 export interface CourseLessonInsert {
   section_id: string;
   title: string;
-  description?: string | null;
-  duration_minutes?: number | null;
-  content_type?: LessonContentType | null;
+  thumbnail_url?: string | null;
+  url?: string | null;
+  missions?: LessonMission[];
   sort_order?: number;
 }
 
@@ -1290,9 +1352,9 @@ export interface CourseSectionUpdate {
 
 export interface CourseLessonUpdate {
   title?: string;
-  description?: string | null;
-  duration_minutes?: number | null;
-  content_type?: LessonContentType | null;
+  thumbnail_url?: string | null;
+  url?: string | null;
+  missions?: LessonMission[];
   sort_order?: number;
 }
 
@@ -1328,7 +1390,32 @@ export interface ProgramTableRow {
   enrolled_count: number;
   lesson_count: number;
   branch_names: string[];
-  default_pricing: CoursePricing | null;
+  monthly_package_count: number;
+  session_package_count: number;
+  slot_counts: { branch_name: string; count: number }[];
+}
+
+/**
+ * Course Slot (time schedule)
+ */
+export interface CourseSlot {
+  id: string;
+  course_id: string;
+  branch_id: string;
+  day: string;
+  time: string;
+  duration: number;
+  limit_student: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/**
+ * Course Slot with teachers
+ */
+export interface CourseSlotWithTeachers extends CourseSlot {
+  teacher_ids: string[];
 }
 
 export interface ProgramFull extends CourseExtended {
@@ -1341,4 +1428,5 @@ export interface ProgramFull extends CourseExtended {
   faqs: CourseFaq[];
   sections: CourseSectionWithLessons[];
   pricing: CoursePricing[];
+  slots: CourseSlotWithTeachers[];
 }

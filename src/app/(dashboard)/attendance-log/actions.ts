@@ -13,6 +13,7 @@ export interface UpdateAttendanceLogData {
   lastActivity: string;
   notes: string;
   projectPhotos: string[];
+  adcoin?: number;
 }
 
 export async function updateAttendanceLogAction(
@@ -29,6 +30,7 @@ export async function updateAttendanceLogAction(
       last_activity: data.lastActivity || null,
       notes: data.notes || null,
       project_photos: data.projectPhotos.length > 0 ? data.projectPhotos : null,
+      adcoin: data.adcoin ?? 0,
     });
 
     if (!result) {

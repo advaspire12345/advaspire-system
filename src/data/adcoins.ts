@@ -41,7 +41,7 @@ async function getParticipantInfo(
       id: user.id,
       name: user.name,
       type: 'user',
-      adcoinBalance: 0, // Users don't have adcoin balance
+      adcoinBalance: user.adcoin_balance ?? 0,
     };
   }
 }
@@ -466,8 +466,7 @@ export async function refundTransaction(
 
 /**
  * Unified transfer that supports both students and users as participants
- * - Students have their balance updated
- * - Users (staff) can send/receive but don't have balance tracking
+ * - Both students and users have their balance updated
  */
 export async function unifiedTransfer(
   senderId: string,
@@ -486,8 +485,8 @@ export async function unifiedTransfer(
     return null;
   }
 
-  // Only check balance for student senders
-  if (senderType === 'student' && sender.adcoinBalance < amount) {
+  // Check balance for all senders (both students and users)
+  if (sender.adcoinBalance < amount) {
     console.error('Insufficient adcoin balance for transfer');
     return null;
   }
@@ -512,13 +511,24 @@ export async function unifiedTransfer(
     return null;
   }
 
-  // Update balances only for students
+  // Update sender balance
   if (senderType === 'student') {
     await updateAdcoinBalance(senderId, sender.adcoinBalance - amount);
+  } else {
+    // Update user balance
+    const { updateUserAdcoinBalance } = await import('./users');
+    await updateUserAdcoinBalance(senderId, sender.adcoinBalance - amount);
   }
+
+  // Update receiver balance
   if (receiverType === 'student') {
     const currentBalance = (await getStudentById(receiverId))?.adcoin_balance ?? 0;
     await updateAdcoinBalance(receiverId, currentBalance + amount);
+  } else {
+    // Update user balance
+    const { updateUserAdcoinBalance, getUserById: getUser } = await import('./users');
+    const currentBalance = (await getUser(receiverId))?.adcoin_balance ?? 0;
+    await updateUserAdcoinBalance(receiverId, currentBalance + amount);
   }
 
   return transaction;
@@ -705,12 +715,14 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
     return [];
   }
 
-  // Collect all unique student IDs
-  const studentIds = new Set<string>();
+  // Collect all unique participant IDs
+  const participantIds = new Set<string>();
   for (const t of transactions) {
-    if (t.sender_id) studentIds.add(t.sender_id);
-    if (t.receiver_id) studentIds.add(t.receiver_id);
+    if (t.sender_id) participantIds.add(t.sender_id);
+    if (t.receiver_id) participantIds.add(t.receiver_id);
   }
+
+  const idsArray = Array.from(participantIds);
 
   // Fetch all relevant students with their branches
   const { data: students, error: studentError } = await supabaseAdmin
@@ -723,14 +735,31 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
       adcoin_balance,
       branch:branches(id, name)
     `)
-    .in('id', Array.from(studentIds));
+    .in('id', idsArray);
 
   if (studentError) {
     console.error('Error fetching students:', studentError);
   }
 
-  // Create a lookup map for students
-  const studentMap = new Map<string, {
+  // Fetch all relevant users (for pool account like advaspire)
+  const { data: users, error: userError } = await supabaseAdmin
+    .from('users')
+    .select(`
+      id,
+      name,
+      photo,
+      branch_id,
+      adcoin_balance,
+      branch:branches!users_branch_id_branches_id_fk(id, name)
+    `)
+    .in('id', idsArray);
+
+  if (userError) {
+    console.error('Error fetching users:', userError);
+  }
+
+  // Create a lookup map for participants (students and users combined)
+  const participantMap = new Map<string, {
     id: string;
     name: string;
     photo: string | null;
@@ -739,13 +768,14 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
     level: number;
   }>();
 
+  // Add students to map
   for (const student of students ?? []) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const branchData = student.branch as any;
     // Calculate level: every 500 adcoin = 1 level, starting at 1
     const adcoinBalance = student.adcoin_balance ?? 0;
     const level = Math.floor(adcoinBalance / 500) + 1;
-    studentMap.set(student.id, {
+    participantMap.set(student.id, {
       id: student.id,
       name: student.name,
       photo: student.photo,
@@ -755,14 +785,33 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
     });
   }
 
+  // Add users to map (if not already present from students)
+  for (const user of users ?? []) {
+    if (!participantMap.has(user.id)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const branchData = user.branch as any;
+      // For users, calculate level based on their adcoin_balance too
+      const adcoinBalance = user.adcoin_balance ?? 0;
+      const level = Math.floor(adcoinBalance / 500) + 1;
+      participantMap.set(user.id, {
+        id: user.id,
+        name: user.name,
+        photo: user.photo,
+        branch_id: user.branch_id ?? '',
+        branchName: branchData?.name ?? 'Pool',
+        level,
+      });
+    }
+  }
+
   const rows: TransactionDisplayRow[] = [];
 
   for (const t of transactions) {
-    const sender = t.sender_id ? studentMap.get(t.sender_id) : null;
-    const receiver = t.receiver_id ? studentMap.get(t.receiver_id) : null;
+    const sender = t.sender_id ? participantMap.get(t.sender_id) : null;
+    const receiver = t.receiver_id ? participantMap.get(t.receiver_id) : null;
 
     // Determine branch from receiver or sender
-    const branchStudent = receiver ?? sender;
+    const branchParticipant = receiver ?? sender;
 
     rows.push({
       id: t.id,
@@ -778,8 +827,8 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
       receiverName: receiver?.name ?? null,
       receiverPhoto: receiver?.photo ?? null,
       receiverLevel: receiver?.level ?? 1,
-      branchId: branchStudent?.branch_id ?? '',
-      branchName: branchStudent?.branchName ?? 'Unknown',
+      branchId: branchParticipant?.branch_id ?? '',
+      branchName: branchParticipant?.branchName ?? 'Unknown',
     });
   }
 

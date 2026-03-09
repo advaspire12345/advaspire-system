@@ -4,7 +4,8 @@ import { Banner } from "@/components/ui/banner";
 import { StudentTable } from "@/components/student/student-table";
 import { getStudentsForTable } from "@/data/students";
 import { getAllBranches } from "@/data/branches";
-import { getAllCourses } from "@/data/courses";
+import { getAllCourses, getAllCoursePricing, getAllCourseSlots } from "@/data/courses";
+import { getAllParents } from "@/data/parents";
 import {
   createStudentAction,
   updateStudentAction,
@@ -19,10 +20,13 @@ export default async function StudentsPage() {
   }
 
   // Fetch real data from database
-  const [students, branchesData, coursesData] = await Promise.all([
+  const [students, branchesData, coursesData, pricingData, slotsData, parentsData] = await Promise.all([
     getStudentsForTable(user.email),
     getAllBranches(),
     getAllCourses(),
+    getAllCoursePricing(),
+    getAllCourseSlots(),
+    getAllParents(),
   ]);
 
   const branches = branchesData.map((b) => ({
@@ -33,6 +37,37 @@ export default async function StudentsPage() {
   const courses = coursesData.map((c) => ({
     id: c.id,
     name: c.name,
+    numberOfLevels: c.numberOfLevels,
+  }));
+
+  const coursePricing = pricingData.map((p) => ({
+    id: p.id,
+    courseId: p.courseId,
+    packageType: p.packageType,
+    price: p.price,
+    duration: p.duration,
+    description: p.description,
+    isDefault: p.isDefault,
+  }));
+
+  const courseSlots = slotsData.map((s) => ({
+    id: s.id,
+    courseId: s.courseId,
+    branchId: s.branchId,
+    day: s.day,
+    time: s.time,
+    duration: s.duration,
+    limitStudent: s.limitStudent,
+  }));
+
+  const parents = parentsData.map((p) => ({
+    id: p.id,
+    name: p.name,
+    email: p.email,
+    phone: p.phone,
+    address: p.address,
+    postcode: p.postcode,
+    city: p.city,
   }));
 
   return (
@@ -49,6 +84,9 @@ export default async function StudentsPage() {
           initialData={students}
           branches={branches}
           courses={courses}
+          coursePricing={coursePricing}
+          courseSlots={courseSlots}
+          parents={parents}
           onAdd={createStudentAction}
           onEdit={updateStudentAction}
           onDelete={deleteStudentAction}

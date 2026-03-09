@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,7 @@ const columns = [
 ];
 
 export function BranchTable({ initialData, admins }: BranchTableProps) {
-  const [data] = useState<BranchEntry[]>(initialData);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -51,16 +52,16 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (!searchQuery.trim()) return initialData;
 
     const query = searchQuery.toLowerCase();
-    return data.filter(
+    return initialData.filter(
       (row) =>
         row.branchName.toLowerCase().includes(query) ||
         row.branchCompany.toLowerCase().includes(query) ||
         row.adminName?.toLowerCase().includes(query),
     );
-  }, [data, searchQuery]);
+  }, [initialData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -112,6 +113,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
     if (!result.success) {
       throw new Error(result.error || "Failed to add branch");
     }
+    router.refresh();
   };
 
   // Handle edit
@@ -132,6 +134,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
     if (!result.success) {
       throw new Error(result.error || "Failed to update branch");
     }
+    router.refresh();
   };
 
   // Handle delete
@@ -143,6 +146,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
     if (!result.success) {
       throw new Error(result.error || "Failed to delete branch");
     }
+    router.refresh();
   };
 
   return (

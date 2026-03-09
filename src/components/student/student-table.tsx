@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,15 +11,18 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { StudentTableRow } from "@/data/students";
 import { BranchOption, CourseOption } from "@/components/trial/trial-modal";
-import { format, parseISO } from "date-fns";
+import { parseISO, format } from "date-fns";
 import { StudentModal } from "@/components/student/student-modal";
-import type { StudentFormData } from "@/components/student/student-modal";
+import type { StudentFormData, CoursePricingOption, CourseSlotOption, ParentOption } from "@/components/student/student-modal";
 import type { StudentFormPayload } from "@/app/(dashboard)/student/actions";
 
 interface StudentTableProps {
   initialData: StudentTableRow[];
   branches: BranchOption[];
   courses: CourseOption[];
+  coursePricing: CoursePricingOption[];
+  courseSlots: CourseSlotOption[];
+  parents: ParentOption[];
   onAdd: (payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
   onEdit: (studentId: string, payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
   onDelete: (studentId: string) => Promise<{ success: boolean; error?: string }>;
@@ -32,16 +36,24 @@ const columns: {
   width: string;
   align?: "center" | "right";
 }[] = [
-  { key: "photo", label: "Photo", width: "70px" },
-  { key: "name", label: "Student", width: "180px" },
-  { key: "email", label: "Email", width: "180px" },
-  { key: "branch", label: "Branch", width: "140px" },
-  { key: "program", label: "Program", width: "160px" },
-  { key: "schedule", label: "Schedule", width: "130px" },
-  { key: "enrollDate", label: "Enroll Date", width: "110px" },
-  { key: "adcoin", label: "AdCoins", width: "90px", align: "center" as const },
-  { key: "status", label: "Status", width: "90px", align: "center" as const },
-  { key: "action", label: "Action", width: "100px", align: "center" as const },
+  { key: "photo", label: "Photo", width: "60px" },
+  { key: "name", label: "Student", width: "140px" },
+  { key: "studentId", label: "Student ID", width: "100px" },
+  { key: "age", label: "Age", width: "50px", align: "center" as const },
+  { key: "schoolName", label: "School", width: "120px" },
+  { key: "branch", label: "Branch", width: "100px" },
+  { key: "program", label: "Program", width: "130px" },
+  { key: "level", label: "Level", width: "60px", align: "center" as const },
+  { key: "adcoin", label: "AdCoins", width: "80px", align: "center" as const },
+  { key: "packageType", label: "Package", width: "80px" },
+  { key: "periodActive", label: "Period Active", width: "140px" },
+  { key: "sessionCount", label: "Sessions", width: "80px", align: "center" as const },
+  { key: "paymentCount", label: "Payment", width: "120px" },
+  { key: "schedule", label: "Schedule", width: "110px" },
+  { key: "contact", label: "Contact", width: "110px" },
+  { key: "city", label: "City", width: "90px" },
+  { key: "status", label: "Status", width: "80px", align: "center" as const },
+  { key: "action", label: "Action", width: "90px", align: "center" as const },
 ];
 
 const ENROLLMENT_STATUS_STYLES: Record<string, string> = {
@@ -64,11 +76,14 @@ export function StudentTable({
   initialData,
   branches,
   courses,
+  coursePricing,
+  courseSlots,
+  parents,
   onAdd,
   onEdit,
   onDelete,
 }: StudentTableProps) {
-  const [data] = useState<StudentTableRow[]>(initialData);
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -80,7 +95,7 @@ export function StudentTable({
   );
 
   // Convert StudentFormData to StudentFormPayload
-  // Note: File uploads (studentImage, coverImage) need separate handling via upload endpoint
+  // Photos are uploaded immediately via API and URLs are stored in formData
   const convertToPayload = (formData: StudentFormData): StudentFormPayload => ({
     name: formData.name,
     email: formData.email,
@@ -89,16 +104,21 @@ export function StudentTable({
     dateOfBirth: formData.dateOfBirth,
     gender: formData.gender,
     schoolName: formData.schoolName,
-    coverPhotoUrl: null, // TODO: Handle file upload and get URL
+    coverPhotoUrl: formData.coverPhotoUrl,
+    studentId: formData.studentId,
+    level: formData.level,
+    adcoinBalance: formData.adcoinBalance,
     parentId: formData.parentId,
     parentName: formData.parentName,
     parentPhone: formData.parentPhone,
     parentEmail: formData.parentEmail,
+    parentRelationship: formData.parentRelationship,
     parentAddress: formData.parentAddress,
     parentPostcode: formData.parentPostcode,
     parentCity: formData.parentCity,
     branchId: formData.branchId,
     courseId: formData.courseId,
+    instructorId: formData.instructorId,
     packageId: formData.packageId,
     packageType: formData.packageType,
     numberOfMonths: formData.numberOfMonths,
@@ -113,6 +133,7 @@ export function StudentTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to create student");
     }
+    router.refresh();
   };
 
   const handleEdit = async (formData: StudentFormData) => {
@@ -122,6 +143,7 @@ export function StudentTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to update student");
     }
+    router.refresh();
   };
 
   const handleDelete = async () => {
@@ -130,21 +152,22 @@ export function StudentTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to delete student");
     }
+    router.refresh();
   };
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (!searchQuery.trim()) return initialData;
 
     const query = searchQuery.toLowerCase();
-    return data.filter(
+    return initialData.filter(
       (row) =>
         row.name.toLowerCase().includes(query) ||
         row.email?.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query) ||
         row.programName?.toLowerCase().includes(query),
     );
-  }, [data, searchQuery]);
+  }, [initialData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -178,26 +201,112 @@ export function StudentTable({
     setModalOpen(true);
   };
 
-  // Format date for display
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "-";
+  // Calculate age from date of birth
+  const calculateAge = (dateOfBirth: string | null) => {
+    if (!dateOfBirth) return "-";
     try {
-      return format(parseISO(dateStr), "dd MMM yyyy");
+      const birthDate = parseISO(dateOfBirth);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      return age;
     } catch {
-      return dateStr.split("T")[0];
+      return "-";
     }
   };
 
-  // Format schedule display
+  // Format schedule display as "Day: Time" for each entry
   const formatSchedule = (days: string[], time: string | null) => {
     if (days.length === 0 && !time) return "-";
-    const dayAbbr = days.map((d) => d.substring(0, 3)).join(", ");
+
+    // Parse times (comma-separated like "17:00:00, 09:00:00")
+    const times = time ? time.split(',').map((t) => t.trim()) : [];
+
+    // Format time to HH:MM (remove seconds)
+    const formatTime = (t: string) => {
+      if (!t) return "";
+      const parts = t.split(':');
+      return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : t;
+    };
+
+    // Capitalize first letter of day
+    const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+    // Build "Day: Time" entries
+    const entries = days.map((day, index) => {
+      const dayFormatted = capitalize(day.substring(0, 3));
+      const timeFormatted = formatTime(times[index] || "");
+      return timeFormatted ? `${dayFormatted}: ${timeFormatted}` : dayFormatted;
+    });
+
     return (
       <div className="space-y-0.5">
-        <div className="font-medium">{dayAbbr || "TBD"}</div>
-        {time && <div className="text-xs text-muted-foreground">{time}</div>}
+        {entries.map((entry, index) => (
+          <div key={index} className="text-sm">{entry}</div>
+        ))}
       </div>
     );
+  };
+
+  // Format period active display based on package type
+  const formatPeriodActive = (row: StudentTableRow) => {
+    if (!row.packageType) return "-";
+
+    const sessions = row.sessionsRemaining ?? 0;
+
+    // If sessions is 0 or negative, payment not approved yet (or used before payment)
+    if (sessions <= 0) {
+      const negativeCount = Math.abs(sessions);
+      return (
+        <div className="space-y-0.5">
+          <span className="text-amber-500 text-xs font-medium">Pending Payment</span>
+          {sessions < 0 && (
+            <div className="text-red-500 text-xs font-medium">
+              {sessions} session{negativeCount !== 1 ? "s" : ""}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (row.packageType === "session") {
+      // For session-based: show remaining sessions
+      return (
+        <span className="font-medium text-[#615DFA]">
+          {sessions} session{sessions !== 1 ? "s" : ""}
+        </span>
+      );
+    }
+
+    if (row.packageType === "monthly") {
+      // For monthly: sessions represents months remaining
+      if (!row.periodStart || !row.periodEnd) {
+        // Payment approved but no attendance yet
+        return (
+          <div className="text-xs space-y-0.5">
+            <span className="text-muted-foreground">Awaiting first session</span>
+            <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
+          </div>
+        );
+      }
+      try {
+        const startDate = parseISO(row.periodStart);
+        const endDate = parseISO(row.periodEnd);
+        return (
+          <div className="text-xs space-y-0.5">
+            <div>{format(startDate, "MMM d")} - {format(endDate, "MMM d, yyyy")}</div>
+            <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
+          </div>
+        );
+      } catch {
+        return "-";
+      }
+    }
+
+    return "-";
   };
 
   return (
@@ -223,7 +332,7 @@ export function StudentTable({
           {/* Table - EXACT STRUCTURE MATCH TO TRIAL TABLE */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1400px] w-full table-fixed border-separate border-spacing-0">
+            <table className="min-w-[1840px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
                   {columns.map((col, idx) => (
@@ -250,7 +359,7 @@ export function StudentTable({
             </table>
 
             {/* Body Table - EXACT STYLING MATCH */}
-            <table className="min-w-[1400px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="min-w-[1840px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
@@ -273,10 +382,10 @@ export function StudentTable({
                     >
                       {/* Photo */}
                       <td
-                        className="px-4 py-3"
+                        className="px-3 py-2"
                         style={{ width: columns[0].width }}
                       >
-                        <Avatar className="h-9 w-9">
+                        <Avatar className="h-8 w-8">
                           <AvatarImage
                             src={row.photo || undefined}
                             alt={row.name}
@@ -290,68 +399,139 @@ export function StudentTable({
 
                       {/* Student Name */}
                       <td
-                        className="px-4 py-3 font-bold"
+                        className="px-3 py-2 font-bold truncate"
                         style={{ width: columns[1].width }}
                       >
                         {row.name}
                       </td>
 
-                      {/* Email */}
+                      {/* Student ID */}
                       <td
-                        className="px-4 py-3 text-muted-foreground truncate"
+                        className="px-3 py-2 text-xs text-muted-foreground"
                         style={{ width: columns[2].width }}
                       >
-                        {row.email || "-"}
+                        {row.studentId || "-"}
+                      </td>
+
+                      {/* Age */}
+                      <td
+                        className="px-3 py-2 text-center"
+                        style={{ width: columns[3].width }}
+                      >
+                        {calculateAge(row.dateOfBirth)}
+                      </td>
+
+                      {/* School Name */}
+                      <td
+                        className="px-3 py-2 text-sm truncate"
+                        style={{ width: columns[4].width }}
+                      >
+                        {row.schoolName || "-"}
                       </td>
 
                       {/* Branch */}
                       <td
-                        className="px-4 py-3"
-                        style={{ width: columns[3].width }}
+                        className="px-3 py-2 text-sm"
+                        style={{ width: columns[5].width }}
                       >
                         {row.branchName}
                       </td>
 
                       {/* Program */}
                       <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[4].width }}
+                        className="px-3 py-2 font-medium text-sm truncate"
+                        style={{ width: columns[6].width }}
                       >
                         {row.programName ?? "-"}
                       </td>
 
-                      {/* Schedule */}
+                      {/* Level */}
                       <td
-                        className="px-4 py-3 text-sm"
-                        style={{ width: columns[5].width }}
+                        className="px-3 py-2 text-center"
+                        style={{ width: columns[7].width }}
                       >
-                        {formatSchedule(row.scheduleDays, row.scheduleTime)}
-                      </td>
-
-                      {/* Enroll Date */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[6].width }}
-                      >
-                        {formatDate(row.enrollDate)}
+                        {row.level}
                       </td>
 
                       {/* AdCoins */}
                       <td
-                        className="px-4 py-3 text-center font-bold text-[#615DFA]"
-                        style={{ width: columns[7].width }}
+                        className="px-3 py-2 text-center font-bold text-[#615DFA]"
+                        style={{ width: columns[8].width }}
                       >
                         {row.adcoinBalance.toLocaleString()}
                       </td>
 
+                      {/* Package Type */}
+                      <td
+                        className="px-3 py-2 text-sm capitalize"
+                        style={{ width: columns[9].width }}
+                      >
+                        {row.packageType || "-"}
+                      </td>
+
+                      {/* Period Active */}
+                      <td
+                        className="px-3 py-2 text-sm"
+                        style={{ width: columns[10].width }}
+                      >
+                        {formatPeriodActive(row)}
+                      </td>
+
+                      {/* Session Count */}
+                      <td
+                        className="px-3 py-2 text-center font-medium"
+                        style={{ width: columns[11].width }}
+                      >
+                        {row.sessionCount ?? 0}
+                      </td>
+
+                      {/* Payment Count */}
+                      <td
+                        className="px-3 py-2 text-xs"
+                        style={{ width: columns[12].width }}
+                      >
+                        <div className="space-y-0.5">
+                          <div className="font-medium text-green-600">
+                            RM{(row.paymentCount?.totalPaid ?? 0).toLocaleString()}
+                          </div>
+                          <div className="text-muted-foreground">
+                            {row.paymentCount?.totalSessionsBought ?? 0} sessions
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Schedule */}
+                      <td
+                        className="px-3 py-2 text-xs"
+                        style={{ width: columns[13].width }}
+                      >
+                        {formatSchedule(row.scheduleDays, row.scheduleTime)}
+                      </td>
+
+                      {/* Contact */}
+                      <td
+                        className="px-3 py-2 text-sm"
+                        style={{ width: columns[14].width }}
+                      >
+                        {row.parentPhone || "-"}
+                      </td>
+
+                      {/* City */}
+                      <td
+                        className="px-3 py-2 text-sm capitalize"
+                        style={{ width: columns[15].width }}
+                      >
+                        {row.parentCity || "-"}
+                      </td>
+
                       {/* Status */}
                       <td
-                        className="px-4 py-3 text-center"
-                        style={{ width: columns[8].width }}
+                        className="px-3 py-2 text-center"
+                        style={{ width: columns[16].width }}
                       >
                         <span
                           className={cn(
-                            "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+                            "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
                             row.enrollmentStatus
                               ? ENROLLMENT_STATUS_STYLES[row.enrollmentStatus] ?? "bg-gray-100 text-gray-700"
                               : "bg-gray-100 text-gray-700",
@@ -359,14 +539,14 @@ export function StudentTable({
                         >
                           {row.enrollmentStatus
                             ? ENROLLMENT_STATUS_LABELS[row.enrollmentStatus] ?? row.enrollmentStatus
-                            : "No Enrollment"}
+                            : "None"}
                         </span>
                       </td>
 
                       {/* Action */}
                       <td
-                        className="px-4 py-3"
-                        style={{ width: columns[9].width }}
+                        className="px-3 py-2"
+                        style={{ width: columns[17].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
                           <button
@@ -412,6 +592,9 @@ export function StudentTable({
         open={modalOpen}
         onOpenChange={setModalOpen}
         courses={courses}
+        coursePricing={coursePricing}
+        courseSlots={courseSlots}
+        parents={parents}
         mode={modalMode}
         record={selectedRecord}
         branches={branches}

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   CalendarCheck,
@@ -13,9 +13,7 @@ import {
   Building2,
   Trophy,
   ArrowLeftRight,
-  Settings,
   FlaskConical,
-  LogOut,
   FileUser,
   GraduationCap,
   Users,
@@ -23,10 +21,8 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -100,13 +96,6 @@ const navigationItems = [
   },
 ];
 
-const settingsItems = [
-  {
-    title: "Settings",
-    icon: Settings,
-    href: "/settings",
-  },
-];
 
 // Placeholder badges - replace with actual badge images
 const badges = [
@@ -131,7 +120,6 @@ interface UserProfile {
 }
 
 export function AppSidebar() {
-  const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<UserProfile | null>(null);
   const supabase = createClient();
@@ -154,12 +142,6 @@ export function AppSidebar() {
     }
     getUser();
   }, [supabase]);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/");
-    router.refresh();
-  };
 
   const userName = user?.name || "User";
   const userEmail = user?.email || "";
