@@ -303,7 +303,7 @@ export async function getAttendanceCount(
 // ============================================
 
 export async function createAttendance(attendanceData: AttendanceInsert): Promise<Attendance | null> {
-  console.log('Creating attendance with data:', JSON.stringify(attendanceData, null, 2));
+  console.log('[Create Attendance] Creating with data:', JSON.stringify(attendanceData, null, 2));
 
   const { data, error } = await supabaseAdmin
     .from('attendance')
@@ -312,11 +312,12 @@ export async function createAttendance(attendanceData: AttendanceInsert): Promis
     .single();
 
   if (error) {
-    console.error('Error creating attendance:', error);
-    console.error('Error details:', JSON.stringify(error, null, 2));
+    console.error('[Create Attendance] Error:', error);
+    console.error('[Create Attendance] Error details:', JSON.stringify(error, null, 2));
     return null;
   }
 
+  console.log('[Create Attendance] Success! ID:', data.id, 'Date:', data.date, 'Status:', data.status);
   return data;
 }
 
@@ -350,6 +351,8 @@ export interface MarkAttendanceData {
   notes?: string | null;
   markedBy?: string | null;
   adcoin?: number | null;
+  lesson?: string | null;
+  mission?: string | null;
 }
 
 export interface MarkAttendanceResult {
@@ -369,15 +372,70 @@ export async function markAttendance(
   console.log('markAttendance called with:', { enrollmentId, date, status, markedBy, notes, data });
 
   // Check if attendance already exists for this enrollment and date
-  const { data: existing, error: existingError } = await supabaseAdmin
+  const { data: existingRecords, error: existingError } = await supabaseAdmin
     .from('attendance')
-    .select('id, status')
+    .select('id, status, actual_start_time, actual_day')
     .eq('enrollment_id', enrollmentId)
-    .eq('date', date)
-    .single();
+    .eq('date', date);
 
   if (existingError && existingError.code !== 'PGRST116') {
     console.error('Error checking existing attendance:', existingError);
+  }
+
+  // Find an existing record that matches BOTH the day AND time slot
+  type ExistingRecord = { id: string; status: AttendanceStatus; actual_start_time: string | null; actual_day: string | null };
+  let existing: ExistingRecord | null = null;
+  const newStartTime = data?.actualStartTime || null;
+  const newActualDay = data?.actualDay || null;
+
+  // Helper to normalize time for comparison (e.g., "11:00" and "11:00:00" should match)
+  const normalizeTime = (time: string | null): string => {
+    if (!time) return '';
+    const parts = time.split(':');
+    if (parts.length >= 2) {
+      return `${parts[0].padStart(2, '0')}:${parts[1]}`;
+    }
+    return time;
+  };
+
+  // Helper to normalize day for comparison (case-insensitive)
+  const normalizeDay = (day: string | null): string => {
+    if (!day) return '';
+    return day.toLowerCase().trim();
+  };
+
+  if (existingRecords && existingRecords.length > 0) {
+    console.log('markAttendance: Found', existingRecords.length, 'existing records for this date');
+    console.log('markAttendance: Looking for match - day:', newActualDay, 'time:', newStartTime);
+
+    if (newStartTime && newActualDay) {
+      // Match by BOTH day AND time - this is the most specific match
+      const normalizedNewTime = normalizeTime(newStartTime);
+      const normalizedNewDay = normalizeDay(newActualDay);
+
+      const match = existingRecords.find(r => {
+        const recordTime = normalizeTime(r.actual_start_time);
+        const recordDay = normalizeDay(r.actual_day);
+        const timeMatch = recordTime === normalizedNewTime;
+        const dayMatch = recordDay === normalizedNewDay;
+        console.log('markAttendance: Comparing record', r.id, '- day:', r.actual_day, '(', recordDay, ') time:', r.actual_start_time, '(', recordTime, ') -> dayMatch:', dayMatch, 'timeMatch:', timeMatch);
+        return timeMatch && dayMatch;
+      });
+
+      existing = match ? (match as ExistingRecord) : null;
+      console.log('markAttendance: Day+Time match result:', existing?.id || 'none (will create new)');
+    } else if (newStartTime) {
+      // Only time provided - match by time only (legacy behavior)
+      const normalizedNewTime = normalizeTime(newStartTime);
+      const match = existingRecords.find(r => normalizeTime(r.actual_start_time) === normalizedNewTime);
+      existing = match ? (match as ExistingRecord) : null;
+      console.log('markAttendance: Time-only match:', normalizedNewTime, 'found:', existing?.id || 'none');
+    } else {
+      // If no time provided, only update if there's exactly one record for this date
+      if (existingRecords.length === 1) {
+        existing = existingRecords[0] as ExistingRecord;
+      }
+    }
   }
 
   const attendanceData: AttendanceInsert = {
@@ -394,25 +452,40 @@ export async function markAttendance(
     last_activity: data?.lastActivity ?? null,
     project_photos: data?.projectPhotos ?? null,
     adcoin: data?.adcoin ?? 0,
+    lesson: data?.lesson ?? null,
+    mission: data?.mission ?? null,
   };
 
   console.log('Prepared attendance data:', attendanceData);
 
   if (existing) {
-    console.log('Updating existing attendance:', existing.id, 'previous status:', existing.status);
+    console.log('markAttendance: UPDATING existing attendance:', existing.id, 'day:', existing.actual_day, 'time:', existing.actual_start_time, 'previous status:', existing.status);
     // Update existing - remove enrollment_id and date as they're not in update type
     const { enrollment_id: _, date: __, ...updateData } = attendanceData;
     const attendance = await updateAttendance(existing.id, updateData);
     return { attendance, isNew: false, previousStatus: existing.status as AttendanceStatus };
   }
 
-  console.log('Creating new attendance');
+  console.log('markAttendance: CREATING NEW attendance - day:', newActualDay, 'time:', newStartTime);
   // Create new
   const attendance = await createAttendance(attendanceData);
   return { attendance, isNew: true, previousStatus: null };
 }
 
 export async function deleteAttendance(attendanceId: string): Promise<boolean> {
+  // First get the attendance record to know enrollment_id and status
+  const { data: attendance, error: fetchError } = await supabaseAdmin
+    .from('attendance')
+    .select('id, enrollment_id, status, trial_id')
+    .eq('id', attendanceId)
+    .single();
+
+  if (fetchError || !attendance) {
+    console.error('Error fetching attendance for delete:', fetchError);
+    return false;
+  }
+
+  // Delete the attendance record
   const { error } = await supabaseAdmin
     .from('attendance')
     .delete()
@@ -423,7 +496,136 @@ export async function deleteAttendance(attendanceId: string): Promise<boolean> {
     return false;
   }
 
+  // If attendance was for a trial, no session tracking needed
+  if (attendance.trial_id) {
+    return true;
+  }
+
+  // If attendance was present or late, reverse the session deduction
+  if (attendance.status === 'present' || attendance.status === 'late') {
+    await reverseSessionDeduction(attendance.enrollment_id);
+  }
+
   return true;
+}
+
+/**
+ * Reverse a session deduction when attendance is deleted
+ * Adds 1 session back and removes pending payment if sessions become positive
+ */
+async function reverseSessionDeduction(enrollmentId: string): Promise<void> {
+  // Get enrollment with package info and pool_id
+  const { data: enrollment, error: enrollmentError } = await supabaseAdmin
+    .from('enrollments')
+    .select(`
+      id,
+      student_id,
+      course_id,
+      sessions_remaining,
+      pool_id,
+      package:course_pricing(id, package_type)
+    `)
+    .eq('id', enrollmentId)
+    .single();
+
+  if (enrollmentError || !enrollment) {
+    console.error('Error fetching enrollment for session reversal:', enrollmentError);
+    return;
+  }
+
+  // Check if this enrollment uses a shared session pool
+  if (enrollment.pool_id) {
+    // Add session back to the shared pool
+    const { data: pool } = await supabaseAdmin
+      .from('shared_session_pools')
+      .select('sessions_remaining')
+      .eq('id', enrollment.pool_id)
+      .single();
+
+    if (pool) {
+      const newPoolSessions = (pool.sessions_remaining ?? 0) + 1;
+
+      await supabaseAdmin
+        .from('shared_session_pools')
+        .update({
+          sessions_remaining: newPoolSessions,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', enrollment.pool_id);
+
+      // If pool sessions become positive, delete PENDING payment for this pool
+      // NOTE: Only delete payments with status='pending', never delete approved/paid payments
+      if (newPoolSessions > 0) {
+        const { data: pendingPoolPayment } = await supabaseAdmin
+          .from('payments')
+          .select('id, status')
+          .eq('pool_id', enrollment.pool_id)
+          .eq('status', 'pending')
+          .maybeSingle();
+
+        if (pendingPoolPayment) {
+          console.log(`[Session Reversal] Found pending pool payment to delete:`, pendingPoolPayment);
+          await supabaseAdmin
+            .from('payments')
+            .delete()
+            .eq('id', pendingPoolPayment.id)
+            .eq('status', 'pending'); // Double-check status to be safe
+        }
+      }
+    }
+    return;
+  }
+
+  // For regular enrollments, add 1 session back
+  const currentSessions = enrollment.sessions_remaining ?? 0;
+  const newSessionsRemaining = currentSessions + 1;
+
+  const { error: updateError } = await supabaseAdmin
+    .from('enrollments')
+    .update({
+      sessions_remaining: newSessionsRemaining,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', enrollmentId);
+
+  if (updateError) {
+    console.error('Error reversing session deduction:', updateError);
+    return;
+  }
+
+  console.log(`Session reversed for enrollment ${enrollmentId}. ${currentSessions} → ${newSessionsRemaining}`);
+
+  // If sessions become positive, delete any PENDING payment for this student/course
+  // NOTE: Only delete payments with status='pending', never delete approved/paid payments
+  if (newSessionsRemaining > 0) {
+    // First check if there's a pending payment to delete
+    const { data: pendingPayment } = await supabaseAdmin
+      .from('payments')
+      .select('id, status')
+      .eq('student_id', enrollment.student_id)
+      .eq('course_id', enrollment.course_id)
+      .eq('status', 'pending')
+      .is('pool_id', null)
+      .maybeSingle();
+
+    if (pendingPayment) {
+      console.log(`[Session Reversal] Found pending payment to delete:`, pendingPayment);
+
+      const { error: deletePaymentError } = await supabaseAdmin
+        .from('payments')
+        .delete()
+        .eq('id', pendingPayment.id)
+        .eq('status', 'pending'); // Double-check status to be safe
+
+      if (deletePaymentError) {
+        console.error('Error deleting pending payment:', deletePaymentError);
+      } else {
+        console.log(`[Session Reversal] Deleted pending payment ${pendingPayment.id} for student ${enrollment.student_id}`);
+      }
+    } else {
+      console.log(`[Session Reversal] No pending payment found for student ${enrollment.student_id}, course ${enrollment.course_id}`);
+    }
+  }
 }
 
 // ============================================
@@ -438,6 +640,7 @@ export interface AttendanceTableRow {
   studentPhoto: string | null;
   branchId: string;
   branchName: string;
+  courseId: string;
   courseName: string;
   packageName: string | null;
   dayOfWeek: string | null;
@@ -467,6 +670,8 @@ export interface AttendanceTableRow {
     projectPhotos: string[] | null;
     notes: string | null;
     adcoin: number;
+    lesson: string | null;
+    mission: string | null;
   } | null;
 }
 
@@ -495,6 +700,7 @@ export async function getEnrollmentsForAttendance(
   const selectQuery = `
     id,
     student_id,
+    course_id,
     day_of_week,
     schedule,
     start_time,
@@ -508,9 +714,9 @@ export async function getEnrollmentsForAttendance(
       deleted_at,
       branch:branches!inner(id, name)
     ),
-    course:courses!inner(name),
+    course:courses!inner(id, name),
     package:course_pricing(description),
-    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin)
+    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin, lesson, mission)
   `;
 
   let query = supabaseAdmin
@@ -572,7 +778,7 @@ export async function getEnrollmentsForAttendance(
       branch_id: string;
       branch: { id: string; name: string };
     };
-    const courseData = enrollment.course as unknown as { name: string };
+    const courseData = enrollment.course as unknown as { id: string; name: string };
     const pkgData = enrollment.package as unknown as { description: string } | null;
 
     // Full attendance record type
@@ -588,6 +794,8 @@ export async function getEnrollmentsForAttendance(
       project_photos: string[] | null;
       notes: string | null;
       adcoin: number;
+      lesson: string | null;
+      mission: string | null;
     }
     const attendanceRecords = (enrollment.attendance as unknown as AttendanceRecord[]) ?? [];
 
@@ -654,21 +862,32 @@ export async function getEnrollmentsForAttendance(
       return days[dayName.toLowerCase()] ?? -1;
     };
 
-    // Find attendance for current week
-    const currentWeekAttendance = attendanceRecords.find(a => {
+    // Get all attendance records for current week
+    const currentWeekAttendanceRecords = attendanceRecords.filter(a => {
       const dateStr = a.date.includes('T') ? a.date.split('T')[0] : a.date;
       return dateStr >= mondayStr && dateStr <= sundayStr;
     });
 
-    // Check if attendance is "complete" (has classType AND instructorName filled)
-    const isAttendanceComplete = currentWeekAttendance &&
-      currentWeekAttendance.class_type &&
-      currentWeekAttendance.instructor_name;
-
-    // If attendance is complete, skip all slots for this enrollment
-    if (isAttendanceComplete) {
-      continue;
+    // Debug: Log attendance records found for this enrollment
+    if (currentWeekAttendanceRecords.length > 0) {
+      console.log(`[Attendance Table] Enrollment ${enrollment.id} (${studentData.name}) has ${currentWeekAttendanceRecords.length} attendance records this week:`,
+        currentWeekAttendanceRecords.map(a => ({ id: a.id, date: a.date, time: a.actual_start_time, status: a.status, classType: a.class_type, instructor: a.instructor_name }))
+      );
     }
+
+    // Helper to normalize time for comparison (convert to HH:MM format)
+    const normalizeTime = (time: string | null | undefined): string => {
+      if (!time) return '';
+      // Remove seconds if present (e.g., "17:00:00" -> "17:00")
+      const parts = time.split(':');
+      if (parts.length >= 2) {
+        return `${parts[0].padStart(2, '0')}:${parts[1]}`;
+      }
+      return time;
+    };
+
+    // Track which attendance records have been matched to slots
+    const matchedAttendanceIds = new Set<string>();
 
     // Create a row for each schedule slot for the current week (Mon-Sun)
     for (let i = 0; i < scheduleSlots.length; i++) {
@@ -686,6 +905,112 @@ export async function getEnrollmentsForAttendance(
       slotDate.setDate(currentWeekMonday.getDate() + daysFromMonday);
       const slotDateStr = slotDate.toISOString().split('T')[0];
 
+      // Find attendance for THIS specific slot
+      // Match by time within the week (attendance might be saved with different date)
+      const normalizedSlotTime = normalizeTime(slotTime);
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      // Get all unmatched attendance records for this week
+      const availableAttendance = currentWeekAttendanceRecords.filter(a => {
+        if (matchedAttendanceIds.has(a.id)) return false;
+        return true;
+      });
+
+      let slotAttendance: AttendanceRecord | undefined;
+
+      // Try to match attendance to this slot
+      // Normalize slot day for comparison
+      const normalizedSlotDay = slotDay.toLowerCase().trim();
+
+      console.log(`[Slot Match] Looking for slot: day=${normalizedSlotDay}, time=${normalizedSlotTime}, date=${slotDateStr}`);
+      console.log(`[Slot Match] Available attendance (${availableAttendance.length}):`,
+        availableAttendance.map(a => ({
+          id: a.id.substring(0, 8),
+          actual_day: a.actual_day,
+          actual_start_time: a.actual_start_time,
+          lesson: a.lesson
+        }))
+      );
+
+      // First try: match by actual_day + time (most reliable since user explicitly selects the day)
+      slotAttendance = availableAttendance.find(a => {
+        const normalizedAttendanceDay = (a.actual_day || '').toLowerCase().trim();
+        const normalizedAttendanceTime = normalizeTime(a.actual_start_time);
+        const match = normalizedAttendanceDay === normalizedSlotDay && normalizedAttendanceTime === normalizedSlotTime;
+        if (match) console.log(`[Slot Match] Try1 MATCHED: day=${normalizedAttendanceDay}, time=${normalizedAttendanceTime}`);
+        return match;
+      });
+
+      // Second try: exact date + time match
+      if (!slotAttendance && normalizedSlotTime) {
+        slotAttendance = availableAttendance.find(a => {
+          const dateStr = a.date.includes('T') ? a.date.split('T')[0] : a.date;
+          const normalizedAttendanceTime = normalizeTime(a.actual_start_time);
+          const match = dateStr === slotDateStr && normalizedAttendanceTime === normalizedSlotTime;
+          if (match) console.log(`[Slot Match] Try2 MATCHED: date=${dateStr}, time=${normalizedAttendanceTime}`);
+          return match;
+        });
+      }
+
+      // Third try: match by actual_day only (if times don't match but day does)
+      if (!slotAttendance) {
+        slotAttendance = availableAttendance.find(a => {
+          const normalizedAttendanceDay = (a.actual_day || '').toLowerCase().trim();
+          const match = normalizedAttendanceDay === normalizedSlotDay;
+          if (match) console.log(`[Slot Match] Try3 MATCHED: day=${normalizedAttendanceDay}`);
+          return match;
+        });
+      }
+
+      // Fourth try: time match when there's only ONE unmatched record with this time
+      if (!slotAttendance && normalizedSlotTime) {
+        const timeMatches = availableAttendance.filter(a => {
+          const normalizedAttendanceTime = normalizeTime(a.actual_start_time);
+          return normalizedAttendanceTime === normalizedSlotTime;
+        });
+        if (timeMatches.length === 1) {
+          slotAttendance = timeMatches[0];
+          console.log(`[Slot Match] Try4 MATCHED: only one time match`);
+        }
+      }
+
+      console.log(`[Slot Match] Final result for ${slotDay} ${slotTime}:`, slotAttendance ? `FOUND (lesson=${slotAttendance.lesson})` : 'NOT FOUND');
+
+      // If no time match but there's only one attendance for the slot date, use it
+      if (!slotAttendance) {
+        const slotDateAttendance = availableAttendance.filter(a => {
+          const dateStr = a.date.includes('T') ? a.date.split('T')[0] : a.date;
+          return dateStr === slotDateStr;
+        });
+        if (slotDateAttendance.length === 1) {
+          slotAttendance = slotDateAttendance[0];
+        }
+      }
+
+      // Mark this attendance as matched so other slots won't use it
+      if (slotAttendance) {
+        matchedAttendanceIds.add(slotAttendance.id);
+        console.log(`[Attendance Table] Slot ${slotDay} ${slotTime} matched to attendance:`, {
+          id: slotAttendance.id,
+          date: slotAttendance.date,
+          status: slotAttendance.status,
+          classType: slotAttendance.class_type,
+          instructor: slotAttendance.instructor_name
+        });
+      } else {
+        console.log(`[Attendance Table] Slot ${slotDay} ${slotTime} (date: ${slotDateStr}) - NO attendance matched. Available: ${availableAttendance.length}`);
+      }
+
+      // Check if THIS slot's attendance is complete
+      const isSlotComplete = slotAttendance &&
+        slotAttendance.class_type &&
+        slotAttendance.instructor_name;
+
+      // Skip this slot only if its attendance is complete
+      if (isSlotComplete) {
+        continue;
+      }
+
       result.push({
         id: `${enrollment.id}-slot-${i}-${slotDateStr}`,
         enrollmentId: enrollment.id,
@@ -694,6 +1019,7 @@ export async function getEnrollmentsForAttendance(
         studentPhoto: studentData.photo,
         branchId: studentData.branch_id,
         branchName: studentData.branch.name,
+        courseId: courseData.id,
         courseName: courseData.name,
         packageName: pkgData?.description ?? null,
         dayOfWeek: enrollment.day_of_week,
@@ -701,24 +1027,107 @@ export async function getEnrollmentsForAttendance(
         slotTime: slotTime,
         startTime: enrollment.start_time,
         endTime: enrollment.end_time,
-        lastAttendanceDate: lastAttendance?.date ?? null,
-        lastAttendanceStatus: lastAttendance?.status ?? null,
+        // Use this slot's specific attendance date, not the enrollment's overall last attendance
+        lastAttendanceDate: slotAttendance?.date ?? null,
+        lastAttendanceStatus: slotAttendance?.status ?? null,
         sessionsRemaining: enrollment.sessions_remaining,
         type: 'enrollment',
         // Include existing attendance data if partially filled
-        existingAttendance: currentWeekAttendance ? {
-          id: currentWeekAttendance.id,
-          date: currentWeekAttendance.date,
-          status: currentWeekAttendance.status,
-          classType: currentWeekAttendance.class_type,
-          actualDay: currentWeekAttendance.actual_day,
-          actualStartTime: currentWeekAttendance.actual_start_time,
-          instructorName: currentWeekAttendance.instructor_name,
-          lastActivity: currentWeekAttendance.last_activity,
-          projectPhotos: currentWeekAttendance.project_photos,
-          notes: currentWeekAttendance.notes,
-          adcoin: currentWeekAttendance.adcoin ?? 0,
+        existingAttendance: slotAttendance ? {
+          id: slotAttendance.id,
+          date: slotAttendance.date,
+          status: slotAttendance.status,
+          classType: slotAttendance.class_type,
+          actualDay: slotAttendance.actual_day,
+          actualStartTime: slotAttendance.actual_start_time,
+          instructorName: slotAttendance.instructor_name,
+          lastActivity: slotAttendance.last_activity,
+          projectPhotos: slotAttendance.project_photos,
+          notes: slotAttendance.notes,
+          adcoin: slotAttendance.adcoin ?? 0,
+          lesson: slotAttendance.lesson,
+          mission: slotAttendance.mission,
         } : null,
+      });
+    }
+
+    // Also create rows for any UNMATCHED incomplete attendance records
+    // This handles cases where attendance was added manually without matching schedule slots
+    // But only if the day/time combination doesn't already exist in result
+    const unmatchedAttendance = currentWeekAttendanceRecords.filter(a =>
+      !matchedAttendanceIds.has(a.id)
+    );
+
+    // Track which day+time combinations we've already added for this enrollment
+    const addedSlots = new Set<string>();
+
+    // Add existing slots to the set
+    for (const row of result) {
+      if (row.enrollmentId === enrollment.id) {
+        const slotKey = `${row.slotDay}-${normalizeTime(row.slotTime)}`;
+        addedSlots.add(slotKey);
+      }
+    }
+
+    for (let j = 0; j < unmatchedAttendance.length; j++) {
+      const attendance = unmatchedAttendance[j];
+
+      // Check if this attendance is complete
+      const isComplete = attendance.class_type && attendance.instructor_name;
+      if (isComplete) {
+        continue; // Skip complete attendance
+      }
+
+      // Get the day name from the attendance date
+      const attendanceDate = new Date(attendance.date);
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const attendanceDayName = dayNames[attendanceDate.getDay()];
+      const attendanceDay = attendance.actual_day || attendanceDayName;
+      const attendanceTime = attendance.actual_start_time || enrollment.start_time;
+
+      // Check if this day+time already exists - if so, skip to avoid duplicates
+      const slotKey = `${attendanceDay}-${normalizeTime(attendanceTime)}`;
+      if (addedSlots.has(slotKey)) {
+        continue;
+      }
+      addedSlots.add(slotKey);
+
+      result.push({
+        id: `${enrollment.id}-attendance-${attendance.id}`,
+        enrollmentId: enrollment.id,
+        studentId: studentData.id,
+        studentName: studentData.name,
+        studentPhoto: studentData.photo,
+        branchId: studentData.branch_id,
+        branchName: studentData.branch.name,
+        courseId: courseData.id,
+        courseName: courseData.name,
+        packageName: pkgData?.description ?? null,
+        dayOfWeek: enrollment.day_of_week,
+        slotDay: attendanceDay,
+        slotTime: attendanceTime,
+        startTime: attendanceTime,
+        endTime: enrollment.end_time,
+        // Use this specific attendance's date, not the enrollment's overall last attendance
+        lastAttendanceDate: attendance.date,
+        lastAttendanceStatus: attendance.status,
+        sessionsRemaining: enrollment.sessions_remaining,
+        type: 'enrollment',
+        existingAttendance: {
+          id: attendance.id,
+          date: attendance.date,
+          status: attendance.status,
+          classType: attendance.class_type,
+          actualDay: attendance.actual_day,
+          actualStartTime: attendance.actual_start_time,
+          instructorName: attendance.instructor_name,
+          lastActivity: attendance.last_activity,
+          projectPhotos: attendance.project_photos,
+          notes: attendance.notes,
+          adcoin: attendance.adcoin ?? 0,
+          lesson: attendance.lesson,
+          mission: attendance.mission,
+        },
       });
     }
   }
@@ -741,7 +1150,7 @@ export async function getEnrollmentsForAttendance(
       scheduled_time,
       status,
       branch:branches!inner(id, name),
-      course:courses(name)
+      course:courses(id, name)
     `)
     .in('status', ['pending', 'confirmed'])
     .gte('scheduled_date', mondayStr)
@@ -759,7 +1168,7 @@ export async function getEnrollmentsForAttendance(
 
     for (const trial of filteredTrials) {
       const branchData = trial.branch as unknown as { id: string; name: string };
-      const courseData = trial.course as unknown as { name: string } | null;
+      const trialCourseData = trial.course as unknown as { id: string; name: string } | null;
 
       // Get day name from scheduled_date
       const trialDate = new Date(trial.scheduled_date);
@@ -774,7 +1183,8 @@ export async function getEnrollmentsForAttendance(
         studentPhoto: null,
         branchId: trial.branch_id,
         branchName: branchData.name,
-        courseName: courseData?.name ?? 'Trial Class',
+        courseId: trialCourseData?.id ?? '',
+        courseName: trialCourseData?.name ?? 'Trial Class',
         packageName: 'Trial',
         dayOfWeek: slotDay,
         slotDay: slotDay,
@@ -835,6 +1245,129 @@ export async function getBranchesForAttendance(
   }
 
   return data ?? [];
+}
+
+// ============================================
+// ALL STUDENTS FOR MANUAL ATTENDANCE
+// ============================================
+
+/**
+ * Get all active students with their enrollments for manual attendance.
+ * Unlike getEnrollmentsForAttendance, this does NOT filter out students
+ * with complete attendance - it returns ALL active students so they can
+ * be found in the manual "Take Attendance" search.
+ */
+export async function getAllStudentsForManualAttendance(
+  userEmail: string
+): Promise<AttendanceTableRow[]> {
+  const { getUserBranchIdByEmail } = await import("./users");
+  const userBranchId = await getUserBranchIdByEmail(userEmail);
+
+  const { data, error } = await supabaseAdmin
+    .from('enrollments')
+    .select(`
+      id,
+      student_id,
+      course_id,
+      day_of_week,
+      schedule,
+      start_time,
+      end_time,
+      sessions_remaining,
+      student:students!inner(
+        id,
+        name,
+        photo,
+        branch_id,
+        deleted_at,
+        branch:branches!inner(id, name)
+      ),
+      course:courses!inner(id, name),
+      package:course_pricing(description)
+    `)
+    .eq('status', 'active')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching all students for manual attendance:', error);
+    return [];
+  }
+
+  // Filter by branch and deleted students
+  const filteredData = (data ?? []).filter((enrollment) => {
+    const studentData = enrollment.student as unknown as {
+      deleted_at: string | null;
+      branch_id: string;
+    };
+    if (studentData.deleted_at) return false;
+    if (userBranchId && studentData.branch_id !== userBranchId) return false;
+    return true;
+  });
+
+  const result: AttendanceTableRow[] = [];
+
+  // Helper to format date as YYYY-MM-DD
+  const formatLocalDate = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const today = new Date();
+  const todayStr = formatLocalDate(today);
+
+  for (const enrollment of filteredData) {
+    const studentData = enrollment.student as unknown as {
+      id: string;
+      name: string;
+      photo: string | null;
+      branch_id: string;
+      branch: { id: string; name: string };
+    };
+    const courseData = enrollment.course as unknown as { id: string; name: string };
+    const pkgData = enrollment.package as unknown as { description: string } | null;
+
+    // Get start time from schedule or default
+    let slotTime = enrollment.start_time;
+    if (enrollment.schedule) {
+      try {
+        const parsed = JSON.parse(enrollment.schedule as string);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].time) {
+          slotTime = parsed[0].time;
+        }
+      } catch { /* ignore */ }
+    }
+
+    result.push({
+      id: `manual-${enrollment.id}`,
+      enrollmentId: enrollment.id,
+      studentId: studentData.id,
+      studentName: studentData.name,
+      studentPhoto: studentData.photo,
+      branchId: studentData.branch_id,
+      branchName: studentData.branch.name,
+      courseId: courseData.id,
+      courseName: courseData.name,
+      packageName: pkgData?.description ?? null,
+      dayOfWeek: enrollment.day_of_week,
+      slotDay: 'Manual',
+      slotTime: slotTime,
+      startTime: enrollment.start_time,
+      endTime: enrollment.end_time,
+      lastAttendanceDate: null,
+      lastAttendanceStatus: null,
+      sessionsRemaining: enrollment.sessions_remaining,
+      type: 'enrollment',
+      existingAttendance: null,
+    });
+  }
+
+  // Sort by student name
+  result.sort((a, b) => a.studentName.localeCompare(b.studentName));
+
+  return result;
 }
 
 // ============================================
@@ -1064,14 +1597,25 @@ export async function updateSessionTracking(
   enrollmentId: string,
   attendanceDate: string
 ): Promise<{ success: boolean; message?: string }> {
-  // Get enrollment with package info
+  console.log('');
+  console.log('========================================');
+  console.log('[Session Tracking] FUNCTION CALLED');
+  console.log('[Session Tracking] Enrollment ID:', enrollmentId);
+  console.log('[Session Tracking] Attendance Date:', attendanceDate);
+  console.log('========================================');
+
+  // Get enrollment with package info and pool_id
   const { data: enrollment, error: enrollmentError } = await supabaseAdmin
     .from('enrollments')
     .select(`
       id,
+      student_id,
+      course_id,
+      package_id,
       sessions_remaining,
       period_start,
-      package:course_pricing(id, package_type, duration)
+      pool_id,
+      package:course_pricing(id, package_type, duration, price)
     `)
     .eq('id', enrollmentId)
     .single();
@@ -1085,21 +1629,26 @@ export async function updateSessionTracking(
     id: string;
     package_type: 'session' | 'monthly';
     duration: number;
+    price: number;
   } | null;
 
+  console.log('[Session Tracking] Enrollment data:', {
+    id: enrollment.id,
+    student_id: enrollment.student_id,
+    course_id: enrollment.course_id,
+    sessions_remaining: enrollment.sessions_remaining,
+    pool_id: enrollment.pool_id,
+    package: packageData,
+  });
+
+  // If no package assigned, still track sessions and create pending payment if needed
   if (!packageData) {
-    return { success: true, message: 'No package assigned' };
-  }
-
-  // Get current sessions (can be negative if used before payment)
-  const currentSessions = enrollment.sessions_remaining ?? 0;
-
-  const packageType = packageData.package_type;
-  const duration = packageData.duration;
-
-  // Handle SESSION packages - simply deduct (allow negative for tracking)
-  if (packageType === 'session') {
+    console.log('[Session Tracking] No package assigned, treating as session-based');
+    // Deduct session and create pending payment if depleted
+    const currentSessions = enrollment.sessions_remaining ?? 0;
     const newSessionsRemaining = currentSessions - 1;
+
+    console.log('[Session Tracking] Deducting session (no package):', currentSessions, '→', newSessionsRemaining);
 
     const { error: updateError } = await supabaseAdmin
       .from('enrollments')
@@ -1110,8 +1659,213 @@ export async function updateSessionTracking(
       .eq('id', enrollmentId);
 
     if (updateError) {
-      console.error('Error updating sessions_remaining:', updateError);
+      console.error('[Session Tracking] Error updating sessions:', updateError);
       return { success: false, message: 'Failed to update sessions' };
+    }
+
+    console.log('[Session Tracking] Sessions updated successfully. New value:', newSessionsRemaining);
+
+    // Create pending payment if sessions depleted (0 or negative)
+    console.log('[Session Tracking] Checking if pending payment needed: newSessionsRemaining =', newSessionsRemaining, ', condition (<=0):', newSessionsRemaining <= 0);
+
+    if (newSessionsRemaining <= 0) {
+      console.log('[Session Tracking] *** SESSIONS DEPLETED (no package) *** Creating pending payment...');
+      const { createEnrollmentRenewalPayment } = await import("./payments");
+      const payment = await createEnrollmentRenewalPayment(enrollmentId);
+      if (payment) {
+        console.log('[Session Tracking] *** PENDING PAYMENT CREATED *** ID:', payment.id);
+      } else {
+        console.log('[Session Tracking] *** PENDING PAYMENT NOT CREATED - TRYING FORCE CREATE ***');
+
+        // Force create as safety check
+        const { data: existingPending } = await supabaseAdmin
+          .from('payments')
+          .select('id')
+          .eq('student_id', enrollment.student_id)
+          .eq('status', 'pending')
+          .is('pool_id', null)
+          .limit(1);
+
+        if (!existingPending || existingPending.length === 0) {
+          console.log('[Session Tracking] No pending payment found - FORCE CREATING');
+
+          // Get price from enrollment's package, fallback to course pricing
+          let price = 0;
+          if (enrollment.package_id) {
+            const { data: pkgPricing } = await supabaseAdmin
+              .from('course_pricing')
+              .select('price')
+              .eq('id', enrollment.package_id)
+              .maybeSingle();
+            price = pkgPricing?.price || 0;
+          }
+          if (price === 0 && enrollment.course_id) {
+            const { data: coursePricing } = await supabaseAdmin
+              .from('course_pricing')
+              .select('price')
+              .eq('course_id', enrollment.course_id)
+              .is('deleted_at', null)
+              .limit(1)
+              .maybeSingle();
+            price = coursePricing?.price || 0;
+          }
+
+          // Note: Don't set package_id - it references legacy 'packages' table, not 'course_pricing'
+          // Package is looked up by course_id + amount in getPendingPaymentsForTable
+          const { data: forcePayment, error: forceError } = await supabaseAdmin
+            .from('payments')
+            .insert({
+              student_id: enrollment.student_id,
+              course_id: enrollment.course_id,
+              amount: price,
+              payment_type: 'package',
+              status: 'pending',
+              notes: 'Auto-created pending payment',
+            })
+            .select()
+            .single();
+
+          if (forceError) {
+            console.error('[Session Tracking] FORCE CREATE ERROR:', forceError);
+          } else {
+            console.log('[Session Tracking] *** FORCE CREATED PAYMENT:', forcePayment.id, '***');
+          }
+        } else {
+          console.log('[Session Tracking] Pending payment already exists:', existingPending[0].id);
+        }
+      }
+    } else {
+      console.log('[Session Tracking] Sessions still positive, no pending payment needed');
+    }
+
+    return { success: true, message: `Session deducted (no package). ${newSessionsRemaining} remaining.` };
+  }
+
+  const packageType = packageData.package_type;
+
+  // Check if this enrollment uses a shared session pool
+  if (enrollment.pool_id) {
+    // Deduct from the shared pool - each sibling's attendance deducts 1 session
+    const { deductPoolSession, getPoolById } = await import("./pools");
+    const { createPoolRenewalPayment } = await import("./payments");
+
+    const newRemaining = await deductPoolSession(enrollment.pool_id);
+
+    if (newRemaining === null) {
+      return { success: false, message: 'Failed to deduct from shared pool' };
+    }
+
+    // If pool is depleted (0 or negative), create a renewal payment
+    if (newRemaining <= 0) {
+      const pool = await getPoolById(enrollment.pool_id);
+      if (pool) {
+        await createPoolRenewalPayment(enrollment.pool_id);
+      }
+    }
+
+    return {
+      success: true,
+      message: `Shared pool session deducted. ${newRemaining} remaining in pool.`
+    };
+  }
+
+  // Get current sessions (can be negative if used before payment)
+  const currentSessions = enrollment.sessions_remaining ?? 0;
+
+  console.log('[Session Tracking] Package type:', packageType, 'Current sessions:', currentSessions);
+
+  // Handle SESSION packages - simply deduct (allow negative for tracking)
+  if (packageType === 'session') {
+    const newSessionsRemaining = currentSessions - 1;
+
+    console.log('[Session Tracking] SESSION package: deducting', currentSessions, '→', newSessionsRemaining);
+
+    const { error: updateError } = await supabaseAdmin
+      .from('enrollments')
+      .update({
+        sessions_remaining: newSessionsRemaining,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', enrollmentId);
+
+    if (updateError) {
+      console.error('[Session Tracking] Error updating sessions_remaining:', updateError);
+      return { success: false, message: 'Failed to update sessions' };
+    }
+
+    console.log('[Session Tracking] Sessions updated successfully. New value:', newSessionsRemaining);
+
+    // If sessions depleted (0 or negative), create a pending payment
+    console.log('[Session Tracking] Checking if pending payment needed: newSessionsRemaining =', newSessionsRemaining, ', condition (<=0):', newSessionsRemaining <= 0);
+
+    if (newSessionsRemaining <= 0) {
+      console.log('[Session Tracking] *** SESSIONS DEPLETED *** Creating pending payment for enrollment:', enrollmentId);
+      const { createEnrollmentRenewalPayment, createPayment } = await import("./payments");
+      const payment = await createEnrollmentRenewalPayment(enrollmentId);
+      if (payment) {
+        console.log('[Session Tracking] *** PENDING PAYMENT CREATED *** ID:', payment.id);
+      } else {
+        console.log('[Session Tracking] *** PENDING PAYMENT NOT CREATED - TRYING FORCE CREATE ***');
+
+        // Force create as safety check
+        const { data: existingPending } = await supabaseAdmin
+          .from('payments')
+          .select('id')
+          .eq('student_id', enrollment.student_id)
+          .eq('status', 'pending')
+          .is('pool_id', null)
+          .limit(1);
+
+        if (!existingPending || existingPending.length === 0) {
+          console.log('[Session Tracking] No pending payment found - FORCE CREATING');
+
+          // Get price from enrollment's package (already fetched), fallback to course pricing
+          let price = packageData?.price || 0;
+          if (price === 0 && enrollment.package_id) {
+            const { data: pkgPricing } = await supabaseAdmin
+              .from('course_pricing')
+              .select('price')
+              .eq('id', enrollment.package_id)
+              .maybeSingle();
+            price = pkgPricing?.price || 0;
+          }
+          if (price === 0 && enrollment.course_id) {
+            const { data: coursePricing } = await supabaseAdmin
+              .from('course_pricing')
+              .select('price')
+              .eq('course_id', enrollment.course_id)
+              .is('deleted_at', null)
+              .limit(1)
+              .maybeSingle();
+            price = coursePricing?.price || 0;
+          }
+
+          // Note: Don't set package_id - it references legacy 'packages' table, not 'course_pricing'
+          // Package is looked up by course_id + amount in getPendingPaymentsForTable
+          const { data: forcePayment, error: forceError } = await supabaseAdmin
+            .from('payments')
+            .insert({
+              student_id: enrollment.student_id,
+              course_id: enrollment.course_id,
+              amount: price,
+              payment_type: 'package',
+              status: 'pending',
+              notes: 'Auto-created pending payment',
+            })
+            .select()
+            .single();
+
+          if (forceError) {
+            console.error('[Session Tracking] FORCE CREATE ERROR:', forceError);
+          } else {
+            console.log('[Session Tracking] *** FORCE CREATED PAYMENT:', forcePayment.id, '***');
+          }
+        } else {
+          console.log('[Session Tracking] Pending payment already exists:', existingPending[0].id);
+        }
+      }
+    } else {
+      console.log('[Session Tracking] Sessions still positive, no pending payment needed');
     }
 
     return { success: true, message: `Session deducted. ${newSessionsRemaining} remaining.` };
@@ -1184,6 +1938,12 @@ export async function updateSessionTracking(
         return { success: false, message: 'Failed to update period' };
       }
 
+      // If months depleted (0 or negative), create a pending payment
+      if (newSessionsRemaining <= 0) {
+        const { createEnrollmentRenewalPayment } = await import("./payments");
+        await createEnrollmentRenewalPayment(enrollmentId);
+      }
+
       return { success: true, message: `New period started from ${newPeriodStart}. ${newSessionsRemaining} months remaining.` };
     }
 
@@ -1206,6 +1966,7 @@ export interface AttendanceLogRow {
   studentLevel: number;
   branchId: string;
   branchName: string;
+  courseId: string;
   courseName: string;
   packageName: string | null;
   classType: 'Physical' | 'Online' | null;
@@ -1221,6 +1982,8 @@ export interface AttendanceLogRow {
   dayOfWeek: string | null;
   projectPhotos: string[] | null;
   adcoin: number;
+  lesson: string | null;
+  mission: string | null;
   // Type to distinguish between enrollment and trial attendance
   type: 'enrollment' | 'trial';
   trialId?: string;
@@ -1249,6 +2012,8 @@ export async function getAttendanceLog(
       notes,
       project_photos,
       adcoin,
+      lesson,
+      mission,
       created_at,
       trial_id,
       enrollment:enrollments!inner(
@@ -1263,7 +2028,7 @@ export async function getAttendanceLog(
           deleted_at,
           branch:branches!inner(id, name)
         ),
-        course:courses!inner(name),
+        course:courses!inner(id, name),
         package:course_pricing(description)
       )
     `)
@@ -1286,6 +2051,8 @@ export async function getAttendanceLog(
       notes,
       project_photos,
       adcoin,
+      lesson,
+      mission,
       created_at,
       trial_id,
       trial:trials!inner(
@@ -1295,7 +2062,7 @@ export async function getAttendanceLog(
         scheduled_date,
         scheduled_time,
         branch:branches!inner(id, name),
-        course:courses!inner(name)
+        course:courses!inner(id, name)
       )
     `)
     .not('trial_id', 'is', null)
@@ -1335,7 +2102,7 @@ export async function getAttendanceLog(
         branch_id: string;
         branch: { id: string; name: string };
       };
-      course: { name: string };
+      course: { id: string; name: string };
       package: { description: string } | null;
     };
 
@@ -1348,6 +2115,7 @@ export async function getAttendanceLog(
       studentLevel: 1,
       branchId: enrollment.student.branch_id,
       branchName: enrollment.student.branch.name,
+      courseId: enrollment.course.id,
       courseName: enrollment.course.name,
       packageName: enrollment.package?.description ?? null,
       classType: record.class_type as 'Physical' | 'Online' | null,
@@ -1363,6 +2131,8 @@ export async function getAttendanceLog(
       dayOfWeek: record.actual_day ?? enrollment.day_of_week,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
+      lesson: record.lesson,
+      mission: record.mission,
       type: 'enrollment' as const,
     };
   });
@@ -1383,7 +2153,7 @@ export async function getAttendanceLog(
       scheduled_date: string;
       scheduled_time: string;
       branch: { id: string; name: string };
-      course: { name: string };
+      course: { id: string; name: string };
     };
 
     return {
@@ -1395,6 +2165,7 @@ export async function getAttendanceLog(
       studentLevel: 0,
       branchId: trial.branch_id,
       branchName: trial.branch.name,
+      courseId: trial.course.id,
       courseName: trial.course.name,
       packageName: 'Trial',
       classType: record.class_type as 'Physical' | 'Online' | null,
@@ -1410,6 +2181,8 @@ export async function getAttendanceLog(
       dayOfWeek: record.actual_day ?? null,
       projectPhotos: record.project_photos,
       adcoin: 0,
+      lesson: record.lesson,
+      mission: record.mission,
       type: 'trial' as const,
       trialId: trial.id,
     };

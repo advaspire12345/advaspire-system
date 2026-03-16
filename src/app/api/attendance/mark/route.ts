@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { markAttendance, updateSessionTracking } from "@/data/attendance";
 import { getUserByAuthId, getUserByEmail } from "@/data/users";
@@ -18,6 +19,9 @@ interface MarkAttendanceRequest {
   lastActivity?: string;
   projectPhotos?: string[];
   adcoin?: number;
+  // Lesson and mission
+  lesson?: string;
+  mission?: string;
   // Trial-specific fields
   instructorFeedback?: string;
   isTrial?: boolean;
@@ -179,6 +183,8 @@ export async function POST(request: NextRequest) {
             notes: body.instructorFeedback || body.notes || null,
             marked_by: user.id,
             adcoin: 0, // Trials always have 0 adcoin
+            lesson: body.lesson || null,
+            mission: body.mission || null,
           })
           .select()
           .single();
@@ -206,6 +212,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    console.log('[API Mark Attendance] Received data:', {
+      enrollmentId: body.enrollmentId,
+      date: body.date,
+      actualDay: body.actualDay,
+      actualStartTime: body.actualStartTime,
+      lesson: body.lesson,
+      mission: body.mission,
+    });
+
     const result = await markAttendance(
       body.enrollmentId,
       body.date,
@@ -223,8 +238,16 @@ export async function POST(request: NextRequest) {
         notes: body.notes,
         markedBy: user.id,
         adcoin: body.adcoin ?? 0,
+        lesson: body.lesson,
+        mission: body.mission,
       }
     );
+
+    console.log('[API Mark Attendance] Result:', {
+      success: !!result.attendance,
+      attendanceId: result.attendance?.id,
+      isNew: result.isNew,
+    });
 
     if (!result.attendance) {
       return NextResponse.json(
@@ -241,11 +264,41 @@ export async function POST(request: NextRequest) {
     const isNowPresent = body.status === 'present' || body.status === 'late';
     const changedToPresent = !result.isNew && wasNotPresent && isNowPresent;
 
+    console.log('[Attendance Mark] Session tracking check:', {
+      enrollmentId: body.enrollmentId,
+      date: body.date,
+      isNew: result.isNew,
+      status: body.status,
+      previousStatus: result.previousStatus,
+      isNewPresent,
+      wasNotPresent,
+      isNowPresent,
+      changedToPresent,
+      shouldTrack: isNewPresent || changedToPresent
+    });
+
     if (isNewPresent || changedToPresent) {
+      console.log('[Attendance Mark] ====== CALLING SESSION TRACKING ======');
+      console.log('[Attendance Mark] Enrollment ID:', body.enrollmentId);
+      console.log('[Attendance Mark] Date:', body.date);
+
       const trackingResult = await updateSessionTracking(body.enrollmentId, body.date);
+
+      console.log('[Attendance Mark] Session tracking result:', trackingResult);
       if (!trackingResult.success) {
-        console.warn('Session tracking warning:', trackingResult.message);
+        console.warn('[Attendance Mark] Session tracking warning:', trackingResult.message);
       }
+
+      // ALWAYS revalidate affected pages after session tracking (even if no pending payment created)
+      // This ensures UI updates with the new session count
+      revalidatePath("/pending-payments");
+      revalidatePath("/student");
+      revalidatePath("/attendance");
+      revalidatePath("/attendance-log");
+      console.log('[Attendance Mark] Revalidated all paths');
+    } else {
+      console.log('[Attendance Mark] Skipping session tracking - conditions not met');
+      console.log('[Attendance Mark] Conditions: isNew=%s, status=%s, previousStatus=%s', result.isNew, body.status, result.previousStatus);
     }
 
     return NextResponse.json({ success: true, attendance: result.attendance, isNew: result.isNew });

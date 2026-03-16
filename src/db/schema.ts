@@ -35,6 +35,39 @@ export type TrialSource = 'walk_in' | 'phone' | 'online' | 'referral' | 'social_
 export type TrialStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
 
 // ============================================
+// SHARED SESSION POOL TYPES
+// ============================================
+
+/**
+ * SharedSessionPool - Tracks pooled sessions for siblings sharing packages
+ */
+export interface SharedSessionPool {
+  id: string;
+  name: string | null;
+  course_id: string;
+  package_id: string | null;
+  total_sessions: number;
+  sessions_remaining: number;
+  period_start: string | null;
+  period_months: number | null;
+  parent_id: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+/**
+ * PoolStudent - Junction table linking students to shared session pools
+ */
+export interface PoolStudent {
+  id: string;
+  pool_id: string;
+  student_id: string;
+  enrollment_id: string;
+  joined_at: string;
+}
+
+// ============================================
 // BASE TYPES (matching actual database columns)
 // ============================================
 
@@ -150,6 +183,7 @@ export type ParentRelationship = 'mother' | 'father' | 'guardian' | 'grandparent
 export interface Course {
   id: string;
   name: string;
+  code: string | null;
   description: string | null;
   branch_id: string;
   created_at: string;
@@ -190,6 +224,7 @@ export interface Enrollment {
   status: EnrollmentStatus;
   sessions_remaining: number;
   period_start: string | null;
+  pool_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -216,6 +251,8 @@ export interface Attendance {
   notes: string | null;
   marked_by: string | null;
   adcoin: number;
+  lesson: string | null;
+  mission: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -238,6 +275,7 @@ export interface Payment {
   paid_at: string | null;
   is_shared_package: boolean;
   shared_with: string[] | null;
+  pool_id: string | null;
   receipt_photo: string | null;
   notes: string | null;
   created_at: string;
@@ -410,6 +448,17 @@ export interface AttendanceFull extends Attendance {
   enrollment: EnrollmentFull;
 }
 
+export interface SharedSessionPoolWithStudents extends SharedSessionPool {
+  students: Student[];
+  course: Course;
+  parent: Parent | null;
+}
+
+export interface PoolStudentWithDetails extends PoolStudent {
+  student: Student;
+  enrollment: Enrollment;
+}
+
 export interface PaymentWithStudent extends Payment {
   student: StudentWithBranch;
 }
@@ -492,6 +541,7 @@ export interface ParentStudentInsert {
 
 export interface CourseInsert {
   name: string;
+  code?: string | null;
   description?: string | null;
   branch_id: string;
 }
@@ -516,6 +566,7 @@ export interface EnrollmentInsert {
   status?: EnrollmentStatus;
   sessions_remaining?: number;
   period_start?: string | null;
+  pool_id?: string | null;
 }
 
 export interface AttendanceInsert {
@@ -534,6 +585,8 @@ export interface AttendanceInsert {
   notes?: string | null;
   marked_by?: string | null;
   adcoin?: number;
+  lesson?: string | null;
+  mission?: string | null;
 }
 
 export interface PaymentInsert {
@@ -546,8 +599,11 @@ export interface PaymentInsert {
   payment_method?: PaymentMethod | null;
   invoice_number?: string | null;
   due_date?: string | null;
+  paid_at?: string | null;
   is_shared_package?: boolean;
   shared_with?: string[] | null;
+  pool_id?: string | null;
+  receipt_photo?: string | null;
   notes?: string | null;
 }
 
@@ -602,6 +658,23 @@ export interface TrialInsert {
   message?: string | null;
   status?: TrialStatus;
   created_by?: string | null;
+}
+
+export interface SharedSessionPoolInsert {
+  name?: string | null;
+  course_id: string;
+  package_id?: string | null;
+  total_sessions?: number;
+  sessions_remaining?: number;
+  period_start?: string | null;
+  period_months?: number | null;
+  parent_id?: string | null;
+}
+
+export interface PoolStudentInsert {
+  pool_id: string;
+  student_id: string;
+  enrollment_id: string;
 }
 
 // ============================================
@@ -664,6 +737,7 @@ export interface ParentUpdate {
 
 export interface CourseUpdate {
   name?: string;
+  code?: string | null;
   description?: string | null;
   branch_id?: string;
 }
@@ -686,6 +760,7 @@ export interface EnrollmentUpdate {
   schedule?: string | null;
   sessions_remaining?: number;
   period_start?: string | null;
+  pool_id?: string | null;
 }
 
 export interface AttendanceUpdate {
@@ -701,6 +776,8 @@ export interface AttendanceUpdate {
   notes?: string | null;
   marked_by?: string | null;
   adcoin?: number;
+  lesson?: string | null;
+  mission?: string | null;
 }
 
 export interface PaymentUpdate {
@@ -711,6 +788,7 @@ export interface PaymentUpdate {
   payment_method?: PaymentMethod | null;
   paid_at?: string | null;
   receipt_photo?: string | null;
+  pool_id?: string | null;
   notes?: string | null;
 }
 
@@ -750,6 +828,15 @@ export interface TrialUpdate {
   scheduled_time?: string;
   message?: string | null;
   status?: TrialStatus;
+}
+
+export interface SharedSessionPoolUpdate {
+  name?: string | null;
+  package_id?: string | null;
+  total_sessions?: number;
+  sessions_remaining?: number;
+  period_start?: string | null;
+  period_months?: number | null;
 }
 
 // ============================================
@@ -1377,6 +1464,7 @@ export interface CourseSectionWithLessons extends CourseSection {
 export interface ProgramTableRow {
   id: string;
   name: string;
+  code: string | null;
   short_description: string | null;
   category_id: string | null;
   category_name: string | null;
@@ -1429,4 +1517,106 @@ export interface ProgramFull extends CourseExtended {
   sections: CourseSectionWithLessons[];
   pricing: CoursePricing[];
   slots: CourseSlotWithTeachers[];
+}
+
+// ============================================
+// EXAMINATION TYPES
+// ============================================
+
+export type ExaminationStatus = 'eligible' | 'scheduled' | 'in_progress' | 'pass' | 'fail' | 'absent';
+
+/**
+ * Examination - Tracks student exam records
+ */
+export interface Examination {
+  id: string;
+  student_id: string;
+  enrollment_id: string | null;
+  exam_name: string;
+  exam_level: number;
+  reattempt_count: number;
+  mark: number | null;
+  notes: string | null;
+  examiner_id: string | null;
+  exam_date: string;
+  certificate_url: string | null;
+  certificate_number: string | null;
+  status: ExaminationStatus;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface ExaminationInsert {
+  student_id: string;
+  enrollment_id?: string | null;
+  exam_name: string;
+  exam_level?: number;
+  reattempt_count?: number;
+  mark?: number | null;
+  notes?: string | null;
+  examiner_id?: string | null;
+  exam_date: string;
+  certificate_url?: string | null;
+  certificate_number?: string | null;
+  status?: ExaminationStatus;
+}
+
+export interface ExaminationUpdate {
+  exam_name?: string;
+  exam_level?: number;
+  reattempt_count?: number;
+  mark?: number | null;
+  notes?: string | null;
+  examiner_id?: string | null;
+  exam_date?: string;
+  certificate_url?: string | null;
+  certificate_number?: string | null;
+  status?: ExaminationStatus;
+}
+
+/**
+ * ExaminationTableRow - Flattened view for the examination table
+ */
+export interface ExaminationTableRow {
+  id: string;
+  studentId: string;
+  studentName: string;
+  studentPhoto: string | null;
+  studentAge: number | null;
+  branchId: string;
+  branchName: string;
+  courseId: string;
+  courseName: string;
+  sessionAttend: number;
+  currentLevel: number;
+  examName: string;
+  examLevel: number;
+  reattemptCount: number;
+  mark: number | null;
+  notes: string | null;
+  examinerId: string | null;
+  examinerName: string | null;
+  examinerPhoto: string | null;
+  examDate: string;
+  certificateUrl: string | null;
+  certificateNumber: string | null;
+  status: ExaminationStatus;
+}
+
+/**
+ * EligibleStudent - Student eligible for examination
+ */
+export interface EligibleStudent {
+  studentId: string;
+  studentName: string;
+  studentPhoto: string | null;
+  branchId: string;
+  branchName: string;
+  enrollmentId: string;
+  courseId: string;
+  courseName: string;
+  currentLevel: number;
+  sessionsAttended: number;
+  sessionsRequired: number;
 }

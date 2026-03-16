@@ -2,7 +2,10 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { AttendanceTable } from "@/components/attendance/attendance-table";
-import { getEnrollmentsForAttendance } from "@/data/attendance";
+import {
+  getEnrollmentsForAttendance,
+  getAllStudentsForManualAttendance,
+} from "@/data/attendance";
 import { getAllInstructors } from "@/data/users";
 
 // Disable caching for this page to always get fresh data
@@ -17,8 +20,9 @@ export default async function AttendancePage() {
   }
 
   // Fetch data in parallel
-  const [enrollments, instructors] = await Promise.all([
+  const [enrollments, allStudentsForManual, instructors] = await Promise.all([
     getEnrollmentsForAttendance(user.email),
+    getAllStudentsForManualAttendance(user.email),
     getAllInstructors(),
   ]);
 
@@ -32,7 +36,11 @@ export default async function AttendancePage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <AttendanceTable initialData={enrollments} instructors={instructors} />
+        <AttendanceTable
+          initialData={enrollments}
+          allStudentsForManualAdd={allStudentsForManual}
+          instructors={instructors}
+        />
       </div>
     </main>
   );

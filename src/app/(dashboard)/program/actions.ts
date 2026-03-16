@@ -13,6 +13,7 @@ import type { ProgramFull } from "@/db/schema";
 export interface ProgramFormPayload {
   // Basic
   name: string;
+  code: string | null;
   description: string | null;
   short_description: string | null;
   category_id: string | null;

@@ -6,6 +6,10 @@ import { getCoursesAndPackages } from "@/data/courses";
 import { PendingPaymentTable } from "@/components/payments/pending-payment-table";
 import { Banner } from "@/components/ui/banner";
 
+// Force dynamic rendering to always get fresh data
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function PendingPaymentsPage() {
   const user = await getUser();
 

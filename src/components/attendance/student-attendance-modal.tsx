@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,16 @@ import { PhotoUpload } from "@/components/ui/photo-upload";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import type { AttendanceRow } from "@/components/attendance/attendance-table";
+
+interface CurriculumLesson {
+  id: string;
+  title: string;
+  missions: {
+    level: number | null;
+    url_mission: string | null;
+    url_answer: string | null;
+  }[];
+}
 
 export type ModalMode = "add" | "present" | "absent";
 
@@ -30,6 +40,8 @@ interface StudentAttendanceModalProps {
   selectedRow?: AttendanceRow | null;
   instructors: InstructorOption[];
   onSubmit: (formData: AttendanceFormData) => Promise<void>;
+  /** Function to fetch curriculum lessons for a course */
+  fetchCurriculumLessons?: (courseId: string) => Promise<CurriculumLesson[]>;
 }
 
 export interface AttendanceFormData {
@@ -44,6 +56,9 @@ export interface AttendanceFormData {
   adcoin: number;
   projectPhotos: string[];
   notes: string;
+  // Lesson and mission fields
+  lesson: string;
+  mission: string;
   // Trial-specific field
   instructorFeedback?: string;
   isTrial?: boolean;
@@ -77,6 +92,49 @@ function getCurrentDayOfWeek(): string {
   return days[new Date().getDay()];
 }
 
+/**
+ * Calculate the date for a given day name within the current week (Mon-Sun).
+ * Returns the date in YYYY-MM-DD format.
+ */
+function getDateForDayInCurrentWeek(dayName: string): string {
+  try {
+    const dayMap: Record<string, number> = {
+      'Sunday': 0,
+      'Monday': 1,
+      'Tuesday': 2,
+      'Wednesday': 3,
+      'Thursday': 4,
+      'Friday': 5,
+      'Saturday': 6,
+    };
+
+    const targetDayIndex = dayMap[dayName];
+    if (targetDayIndex === undefined) {
+      // If invalid day, return today
+      return format(new Date(), "yyyy-MM-dd");
+    }
+
+    // Calculate current week's Monday
+    const today = new Date();
+    const currentDayOfWeek = today.getDay(); // 0 = Sunday
+    const mondayOffset = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+    const currentWeekMonday = new Date(today);
+    currentWeekMonday.setDate(today.getDate() + mondayOffset);
+    currentWeekMonday.setHours(0, 0, 0, 0);
+
+    // Calculate the date for the target day within this week
+    // Sunday is at index 0, but in our week it's at position 6 (end of week)
+    const daysFromMonday = targetDayIndex === 0 ? 6 : targetDayIndex - 1;
+    const targetDate = new Date(currentWeekMonday);
+    targetDate.setDate(currentWeekMonday.getDate() + daysFromMonday);
+
+    return format(targetDate, "yyyy-MM-dd");
+  } catch (error) {
+    console.error('Error calculating date:', error);
+    return format(new Date(), "yyyy-MM-dd");
+  }
+}
+
 function formatTimeForInput(time: string | null): string {
   if (!time) return "";
   const parts = time.split(":");
@@ -86,6 +144,12 @@ function formatTimeForInput(time: string | null): string {
   return time;
 }
 
+// Competition missions constants
+const COMPETITION_MISSIONS = [
+  { value: "Preparation", label: "Preparation" },
+  { value: "Showcase", label: "Showcase" },
+];
+
 export function StudentAttendanceModal({
   open,
   onOpenChange,
@@ -94,6 +158,7 @@ export function StudentAttendanceModal({
   selectedRow,
   instructors,
   onSubmit,
+  fetchCurriculumLessons,
 }: StudentAttendanceModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState("");
@@ -107,6 +172,12 @@ export function StudentAttendanceModal({
   const [projectPhotos, setProjectPhotos] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [instructorFeedback, setInstructorFeedback] = useState("");
+
+  // Lesson and mission state
+  const [lesson, setLesson] = useState("");
+  const [mission, setMission] = useState("");
+  const [curriculumLessons, setCurriculumLessons] = useState<CurriculumLesson[]>([]);
+  const [isLoadingCurriculum, setIsLoadingCurriculum] = useState(false);
 
   // Check if the selected row is a trial
   const isTrial = selectedRow?.type === 'trial';
@@ -154,6 +225,9 @@ export function StudentAttendanceModal({
         setProjectPhotos([]);
         setReason("");
         setInstructorFeedback("");
+        setLesson("");
+        setMission("");
+        setCurriculumLessons([]);
       } else if (selectedRow) {
         // Present or Absent mode - pre-fill with selected row
         setSelectedStudentId(selectedRow.studentId);
@@ -170,6 +244,8 @@ export function StudentAttendanceModal({
           setAdcoin(existing.adcoin || 0);
           setProjectPhotos(existing.projectPhotos || []);
           setReason(existing.notes || "");
+          setLesson(existing.lesson || "");
+          setMission(existing.mission || "");
         } else {
           setClassType("Physical");
           setActualDay(selectedRow.slotDay || selectedRow.dayOfWeek || getCurrentDayOfWeek());
@@ -180,10 +256,66 @@ export function StudentAttendanceModal({
           setProjectPhotos([]);
           setReason("");
           setInstructorFeedback("");
+          setLesson("");
+          setMission("");
         }
       }
     }
   }, [open, mode, selectedRow]);
+
+  // Fetch curriculum when the course changes
+  useEffect(() => {
+    const fetchCurriculum = async () => {
+      // For present/absent mode, use selectedRow.courseId directly
+      // For add mode, use selectedEnrollment.courseId
+      let courseId: string | undefined;
+
+      if (mode === "add") {
+        courseId = selectedEnrollment?.courseId;
+      } else {
+        // present/absent mode - use selectedRow directly (more reliable)
+        courseId = selectedRow?.courseId;
+      }
+
+      if (!courseId) {
+        setCurriculumLessons([]);
+        return;
+      }
+
+      setIsLoadingCurriculum(true);
+      try {
+        // Use provided fetch function or fallback to API
+        if (fetchCurriculumLessons) {
+          const lessons = await fetchCurriculumLessons(courseId);
+          setCurriculumLessons(lessons);
+        } else {
+          // Fetch from API
+          const response = await fetch(`/api/curriculum?courseId=${courseId}`);
+          if (response.ok) {
+            const data = await response.json();
+            setCurriculumLessons(data.lessons || []);
+          } else {
+            console.error("Failed to fetch curriculum from API");
+            setCurriculumLessons([]);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch curriculum:", error);
+        setCurriculumLessons([]);
+      } finally {
+        setIsLoadingCurriculum(false);
+      }
+    };
+
+    if (open && (mode !== "add" ? selectedRow : true)) {
+      fetchCurriculum();
+    }
+  }, [open, mode, selectedEnrollment, selectedRow, fetchCurriculumLessons]);
+
+  // Reset mission when lesson changes
+  useEffect(() => {
+    setMission("");
+  }, [lesson]);
 
   // Update fields when student changes (for add mode)
   useEffect(() => {
@@ -211,7 +343,9 @@ export function StudentAttendanceModal({
 
     // Use existing attendance date if updating, otherwise use today's date
     const existingDate = selectedRow?.existingAttendance?.date;
-    const attendanceDate = existingDate || format(new Date(), "yyyy-MM-dd");
+    const attendanceDate = existingDate
+      ? (existingDate.includes('T') ? existingDate.split('T')[0] : existingDate)
+      : format(new Date(), "yyyy-MM-dd");
 
     setIsSubmitting(true);
     try {
@@ -227,6 +361,8 @@ export function StudentAttendanceModal({
         adcoin: mode === "absent" ? 0 : (isTrial ? 0 : adcoin),
         projectPhotos: mode === "absent" ? [] : projectPhotos,
         notes: mode === "absent" ? reason : "",
+        lesson: mode === "absent" ? "" : lesson,
+        mission: mode === "absent" ? "" : mission,
         instructorFeedback: isTrial ? instructorFeedback : undefined,
         isTrial: isTrial,
       });
@@ -279,6 +415,48 @@ export function StudentAttendanceModal({
     value: i.name,
     label: i.name,
   }));
+
+  // Lesson options: curriculum lessons + Competition
+  const lessonOptions = useMemo(() => {
+    const options = curriculumLessons.map((l) => ({
+      value: l.title,
+      label: l.title,
+    }));
+    // Add Competition option at the end
+    options.push({ value: "Competition", label: "Competition" });
+    return options;
+  }, [curriculumLessons]);
+
+  // Mission options: depends on selected lesson
+  const missionOptions = useMemo(() => {
+    if (!lesson) return [];
+
+    // If Competition is selected, show Preparation and Showcase
+    if (lesson === "Competition") {
+      return COMPETITION_MISSIONS;
+    }
+
+    // Find the selected lesson in curriculum
+    const selectedLesson = curriculumLessons.find((l) => l.title === lesson);
+    if (!selectedLesson || !selectedLesson.missions || selectedLesson.missions.length === 0) {
+      // Even if no missions defined, show Build Only option
+      return [{ value: "Build Only", label: "Build Only" }];
+    }
+
+    // Start with "Build Only" option for curriculum lessons
+    const options = [{ value: "Build Only", label: "Build Only" }];
+
+    // Map missions to options - use level as the display text if no other identifier
+    selectedLesson.missions.forEach((m, index) => {
+      const label = m.level !== null ? `Level ${m.level}` : `Mission ${index + 1}`;
+      options.push({
+        value: label,
+        label: label,
+      });
+    });
+
+    return options;
+  }, [lesson, curriculumLessons]);
 
   // Determine what's editable based on mode
   const isStudentEditable = mode === "add";
@@ -481,6 +659,31 @@ export function StudentAttendanceModal({
             {/* Activity Fields - Only for add/present modes */}
             {showActivityFields && (
               <>
+                {/* Lesson and Mission Selection */}
+                <div className="grid grid-cols-2 gap-4">
+                  <FloatingSelect
+                    id="select-lesson"
+                    label="Lesson"
+                    placeholder={isLoadingCurriculum ? "Loading..." : "Select lesson..."}
+                    value={lesson}
+                    onChange={setLesson}
+                    options={lessonOptions}
+                    disabled={isLoadingCurriculum}
+                    searchable
+                  />
+
+                  <FloatingSelect
+                    id="select-mission"
+                    label="Mission"
+                    placeholder={lesson ? "Select mission..." : "Select lesson first..."}
+                    value={mission}
+                    onChange={setMission}
+                    options={missionOptions}
+                    disabled={!lesson || missionOptions.length === 0}
+                    searchable
+                  />
+                </div>
+
                 <FloatingInput
                   id="activity-completed"
                   label="Activity Completed"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
 import {
   Dialog,
@@ -18,10 +18,26 @@ import type { AttendanceStatus } from "@/db/schema";
 
 export type LogModalMode = "edit" | "delete";
 
+interface CurriculumLesson {
+  id: string;
+  title: string;
+  missions: {
+    level: number | null;
+    url_mission: string | null;
+    url_answer: string | null;
+  }[];
+}
+
 interface InstructorOption {
   id: string;
   name: string;
 }
+
+// Competition missions constants
+const COMPETITION_MISSIONS = [
+  { value: "Preparation", label: "Preparation" },
+  { value: "Showcase", label: "Showcase" },
+];
 
 interface AttendanceLogModalProps {
   open: boolean;
@@ -43,6 +59,8 @@ export interface AttendanceLogFormData {
   adcoin: number;
   projectPhotos: string[];
   notes: string;
+  lesson: string;
+  mission: string;
 }
 
 const DAYS_OF_WEEK = [
@@ -95,6 +113,12 @@ export function AttendanceLogModal({
   const [adcoin, setAdcoin] = useState<number>(0);
   const [projectPhotos, setProjectPhotos] = useState<string[]>([]);
   const [reason, setReason] = useState("");
+  const [lesson, setLesson] = useState("");
+  const [mission, setMission] = useState("");
+
+  // Curriculum state
+  const [curriculumLessons, setCurriculumLessons] = useState<CurriculumLesson[]>([]);
+  const [isLoadingCurriculum, setIsLoadingCurriculum] = useState(false);
 
   // Reset form when modal opens or record changes
   useEffect(() => {
@@ -108,8 +132,100 @@ export function AttendanceLogModal({
       setAdcoin(record.adcoin ?? 0);
       setProjectPhotos(record.projectPhotos ?? []);
       setReason(record.notes ?? "");
+      setLesson(record.lesson ?? "");
+      setMission(record.mission ?? "");
     }
   }, [open, record]);
+
+  // Fetch curriculum when modal opens with a record
+  useEffect(() => {
+    const fetchCurriculum = async () => {
+      if (!record?.courseId) {
+        setCurriculumLessons([]);
+        return;
+      }
+
+      setIsLoadingCurriculum(true);
+      try {
+        const response = await fetch(`/api/curriculum?courseId=${record.courseId}`);
+        if (response.ok) {
+          const data = await response.json();
+          setCurriculumLessons(data.lessons || []);
+        } else {
+          console.error("Failed to fetch curriculum from API");
+          setCurriculumLessons([]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch curriculum:", error);
+        setCurriculumLessons([]);
+      } finally {
+        setIsLoadingCurriculum(false);
+      }
+    };
+
+    if (open && record) {
+      fetchCurriculum();
+    }
+  }, [open, record]);
+
+  // Reset mission when lesson changes (only if user changes it, not on initial load)
+  const [initialLoad, setInitialLoad] = useState(true);
+  useEffect(() => {
+    if (initialLoad) {
+      setInitialLoad(false);
+      return;
+    }
+    setMission("");
+  }, [lesson]);
+
+  // Reset initialLoad when modal opens
+  useEffect(() => {
+    if (open) {
+      setInitialLoad(true);
+    }
+  }, [open]);
+
+  // Lesson options: curriculum lessons + Competition
+  const lessonOptions = useMemo(() => {
+    const options = curriculumLessons.map((l) => ({
+      value: l.title,
+      label: l.title,
+    }));
+    // Add Competition option at the end
+    options.push({ value: "Competition", label: "Competition" });
+    return options;
+  }, [curriculumLessons]);
+
+  // Mission options: depends on selected lesson
+  const missionOptions = useMemo(() => {
+    if (!lesson) return [];
+
+    // If Competition is selected, show Preparation and Showcase
+    if (lesson === "Competition") {
+      return COMPETITION_MISSIONS;
+    }
+
+    // Find the selected lesson in curriculum
+    const selectedLesson = curriculumLessons.find((l) => l.title === lesson);
+    if (!selectedLesson || !selectedLesson.missions || selectedLesson.missions.length === 0) {
+      // Even if no missions defined, show Build Only option
+      return [{ value: "Build Only", label: "Build Only" }];
+    }
+
+    // Start with "Build Only" option for curriculum lessons
+    const options = [{ value: "Build Only", label: "Build Only" }];
+
+    // Map missions to options - use level as the display text if no other identifier
+    selectedLesson.missions.forEach((m, index) => {
+      const label = m.level !== null ? `Level ${m.level}` : `Mission ${index + 1}`;
+      options.push({
+        value: label,
+        label: label,
+      });
+    });
+
+    return options;
+  }, [lesson, curriculumLessons]);
 
   const handleSubmit = async () => {
     if (!record) return;
@@ -129,6 +245,8 @@ export function AttendanceLogModal({
           adcoin: status === "absent" ? 0 : adcoin,
           projectPhotos: status === "absent" ? [] : projectPhotos,
           notes: status === "absent" ? reason : "",
+          lesson: status === "absent" ? "" : lesson,
+          mission: status === "absent" ? "" : mission,
         });
       }
       onOpenChange(false);
@@ -383,6 +501,63 @@ export function AttendanceLogModal({
             ) : (
               /* Activity fields - shown when present/late/excused */
               <>
+                {/* Lesson and Mission */}
+                <div className="grid grid-cols-2 gap-4">
+                  {isReadonly ? (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        value={lesson || "-"}
+                        className={cn(
+                          "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                          readonlyFieldClass
+                        )}
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Lesson
+                      </label>
+                    </div>
+                  ) : (
+                    <FloatingSelect
+                      id="select-lesson"
+                      label="Lesson"
+                      placeholder={isLoadingCurriculum ? "Loading..." : "Select lesson..."}
+                      value={lesson}
+                      onChange={setLesson}
+                      options={lessonOptions}
+                      searchable
+                    />
+                  )}
+
+                  {isReadonly ? (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        value={mission || "-"}
+                        className={cn(
+                          "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                          readonlyFieldClass
+                        )}
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Mission
+                      </label>
+                    </div>
+                  ) : (
+                    <FloatingSelect
+                      id="select-mission"
+                      label="Mission"
+                      placeholder={!lesson ? "Select lesson first..." : "Select mission..."}
+                      value={mission}
+                      onChange={setMission}
+                      options={missionOptions}
+                      searchable
+                    />
+                  )}
+                </div>
+
                 {/* Activity Completed */}
                 {isReadonly ? (
                   <div className="relative">

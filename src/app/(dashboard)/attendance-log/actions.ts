@@ -59,7 +59,11 @@ export async function deleteAttendanceLogAction(
       return { success: false, error: "Failed to delete attendance record" };
     }
 
+    // Revalidate all affected pages
     revalidatePath("/attendance-log");
+    revalidatePath("/attendance");
+    revalidatePath("/pending-payments");
+    revalidatePath("/student");
     revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {

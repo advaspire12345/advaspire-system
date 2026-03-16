@@ -313,6 +313,7 @@ export function ProgramModal({
 
   // Basic tab state
   const [name, setName] = useState("");
+  const [code, setCode] = useState("");
   const [shortDescription, setShortDescription] = useState("");
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -344,6 +345,7 @@ export function ProgramModal({
     package_type: "monthly",
     price: 0,
     duration: 1,
+
     description: "",
     is_default: true,
   }]);
@@ -409,6 +411,7 @@ export function ProgramModal({
               setError(result.error || "Failed to load program data");
               // Fallback to basic data
               setName(record.name);
+              setCode(record.code || "");
               setShortDescription(record.short_description || "");
               setCategoryId(record.category_id || "");
               setStatus(record.status || "active");
@@ -435,6 +438,7 @@ export function ProgramModal({
 
     // Basic tab
     setName(data.name);
+    setCode(data.code || "");
     setShortDescription(data.short_description || "");
     setDescription(data.description || "");
     setCategoryId(data.category_id || "");
@@ -508,6 +512,7 @@ export function ProgramModal({
         package_type: "monthly",
         price: 0,
         duration: 1,
+    
         description: "",
         is_default: true,
       }]);
@@ -548,6 +553,7 @@ export function ProgramModal({
 
   const resetForm = () => {
     setName("");
+    setCode("");
     setShortDescription("");
     setDescription("");
     setCategoryId("");
@@ -570,6 +576,7 @@ export function ProgramModal({
       package_type: "monthly",
       price: 0,
       duration: 1,
+  
       description: "",
       is_default: true,
     }]);
@@ -585,6 +592,7 @@ export function ProgramModal({
       package_type: "monthly",
       price: 0,
       duration: 1,
+  
       description: "",
       is_default: pricing.length === 0,
     };
@@ -612,6 +620,7 @@ export function ProgramModal({
         package_type: "monthly",
         price: 0,
         duration: 1,
+    
         description: "",
         is_default: true,
       }]);
@@ -667,6 +676,7 @@ export function ProgramModal({
   const buildPayload = (): ProgramFormPayload => {
     return {
       name,
+      code: code || null,
       description: description || null,
       short_description: shortDescription || null,
       category_id: categoryId && categoryId !== "new" ? categoryId : null,
@@ -1085,12 +1095,20 @@ export function ProgramModal({
                     <h6 className="text-base font-bold">Basic Information</h6>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="md:col-span-2">
+                      <div className="md:col-span-1">
                         <FloatingInput
                           label="Program Name"
                           value={name}
                           onChange={(e) => setName(e.target.value)}
                           required
+                        />
+                      </div>
+
+                      <div className="md:col-span-1">
+                        <FloatingInput
+                          label="Program Code (e.g., SCR)"
+                          value={code}
+                          onChange={(e) => setCode(e.target.value.toUpperCase())}
                         />
                       </div>
 

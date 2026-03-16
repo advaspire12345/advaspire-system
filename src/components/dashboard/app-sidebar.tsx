@@ -17,6 +17,7 @@ import {
   FileUser,
   GraduationCap,
   Users,
+  Award,
 } from "lucide-react";
 import {
   Sidebar,
@@ -53,6 +54,11 @@ const navigationItems = [
     title: "Student",
     icon: FileUser,
     href: "/student",
+  },
+  {
+    title: "Examination",
+    icon: Award,
+    href: "/examination",
   },
   {
     title: "Program",

@@ -14,6 +14,46 @@ import { createPayment } from "@/data/payments";
 import { supabaseAdmin } from "@/db";
 import type { StudentInsert, StudentUpdate, EnrollmentInsert, ParentInsert, ParentUpdate, Gender, PaymentInsert, AdcoinTransactionInsert } from "@/db/schema";
 
+/**
+ * Generate the next student ID in format ADV + YY + 3-digit sequence
+ * e.g., ADV26001 for first student in 2026
+ */
+export async function generateNextStudentId(): Promise<string> {
+  const currentYear = new Date().getFullYear();
+  const yearSuffix = currentYear.toString().slice(-2); // e.g., "26" for 2026
+  const prefix = `ADV${yearSuffix}`;
+
+  // Find the highest student_id for this year
+  const { data: latestStudent, error } = await supabaseAdmin
+    .from('students')
+    .select('student_id')
+    .like('student_id', `${prefix}%`)
+    .order('student_id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching latest student ID:', error);
+    // Default to 001 if error
+    return `${prefix}001`;
+  }
+
+  if (!latestStudent?.student_id) {
+    // First student of this year
+    return `${prefix}001`;
+  }
+
+  // Extract the sequence number and increment
+  const latestId = latestStudent.student_id;
+  const sequenceStr = latestId.slice(-3); // Last 3 digits
+  const nextSequence = parseInt(sequenceStr, 10) + 1;
+
+  // Pad to 3 digits
+  const nextSequenceStr = nextSequence.toString().padStart(3, '0');
+
+  return `${prefix}${nextSequenceStr}`;
+}
+
 export interface StudentFormPayload {
   // Basic Info
   name: string;
@@ -49,6 +89,10 @@ export interface StudentFormPayload {
   numberOfMonths: number | null;
   numberOfSessions: number | null;
   scheduleEntries: { day: string; time: string }[];
+
+  // Sibling Sharing
+  shareWithSibling: boolean;
+  existingPoolId: string | null;
 
   // Notes
   notes: string | null;
@@ -97,9 +141,15 @@ export async function createStudentAction(
       }
     }
 
-    // 3. Create the student
+    // 3. Generate student ID if not provided
+    let studentId = payload.studentId?.trim() || null;
+    if (!studentId) {
+      studentId = await generateNextStudentId();
+    }
+
+    // 4. Create the student
     const studentData: StudentInsert = {
-      student_id: payload.studentId || null,
+      student_id: studentId,
       name: payload.name,
       email: payload.email?.trim() || null,
       phone: payload.phone || null,
@@ -119,7 +169,7 @@ export async function createStudentAction(
       return { success: false, error: "Failed to create student record" };
     }
 
-    // 4. Handle parent creation/linking if provided (email already validated above)
+    // 5. Handle parent creation/linking if provided (email already validated above)
     if (shouldHandleParent) {
       const parentEmail = payload.parentEmail?.trim() || `${payload.parentName!.toLowerCase().replace(/\s+/g, '.')}@placeholder.com`;
 
@@ -150,7 +200,7 @@ export async function createStudentAction(
       await linkParentToStudent(payload.parentId, student.id, payload.parentRelationship);
     }
 
-    // 5. Create enrollment if course is selected
+    // 6. Create enrollment if course is selected
     if (payload.courseId) {
       // Filter out empty schedule entries
       const validScheduleEntries = payload.scheduleEntries.filter(
@@ -170,12 +220,97 @@ export async function createStudentAction(
         schedule: JSON.stringify(validScheduleEntries),
         status: "active",
         sessions_remaining: 0, // Start with 0, will be set when payment approved
+        pool_id: payload.existingPoolId || null, // Link to pool if joining existing
       };
 
-      await createEnrollment(enrollmentData);
+      const enrollment = await createEnrollment(enrollmentData);
+      const enrollmentId = enrollment?.id;
 
-      // 6. Create pending payment if package is selected
-      if (payload.packageId) {
+      // 6a. Handle sibling session sharing
+      if (enrollmentId && payload.shareWithSibling && payload.parentId && payload.parentId !== "new") {
+        const { createPoolWithSiblings, addStudentToPool } = await import("@/data/pools");
+
+        // Check if joining existing pool or creating new
+        if (payload.existingPoolId) {
+          // Join existing pool
+          await addStudentToPool(payload.existingPoolId, student.id, enrollmentId);
+          console.log(`Student ${student.id} joined existing pool ${payload.existingPoolId}`);
+        } else {
+          // Need to create a new pool with first sibling
+          // Check if parent has other children enrolled in this course
+          const { data: parentStudents } = await supabaseAdmin
+            .from('parent_students')
+            .select('student_id')
+            .eq('parent_id', payload.parentId);
+
+          const siblingStudentIds = (parentStudents ?? []).map(ps => ps.student_id);
+
+          // Find sibling enrollment in same course
+          const { data: siblingEnrollmentData } = await supabaseAdmin
+            .from('enrollments')
+            .select('id, student_id')
+            .eq('course_id', payload.courseId)
+            .in('student_id', siblingStudentIds)
+            .neq('student_id', student.id)
+            .eq('status', 'active')
+            .is('deleted_at', null)
+            .maybeSingle();
+
+          if (siblingEnrollmentData) {
+            // Get parent name and course name for pool name
+            const { data: parentData } = await supabaseAdmin
+              .from('parents')
+              .select('name')
+              .eq('id', payload.parentId)
+              .single();
+
+            const { data: courseData } = await supabaseAdmin
+              .from('courses')
+              .select('name')
+              .eq('id', payload.courseId)
+              .single();
+
+            const pool = await createPoolWithSiblings(
+              payload.parentId,
+              payload.courseId,
+              payload.packageId,
+              parentData?.name || 'Family',
+              courseData?.name || 'Course',
+              { studentId: siblingEnrollmentData.student_id, enrollmentId: siblingEnrollmentData.id },
+              { studentId: student.id, enrollmentId: enrollmentId }
+            );
+
+            if (pool) {
+              console.log(`Created new sibling pool ${pool.id} with students`);
+
+              // If there's a pending payment for the first sibling, convert it to pool payment
+              const { data: siblingPendingPayment } = await supabaseAdmin
+                .from('payments')
+                .select('id')
+                .eq('student_id', siblingEnrollmentData.student_id)
+                .eq('course_id', payload.courseId)
+                .eq('status', 'pending')
+                .maybeSingle();
+
+              if (siblingPendingPayment) {
+                // Convert to shared pool payment
+                await supabaseAdmin
+                  .from('payments')
+                  .update({
+                    pool_id: pool.id,
+                    is_shared_package: true,
+                    shared_with: [siblingEnrollmentData.student_id, student.id],
+                    notes: `Shared package for ${parentData?.name || 'Family'} siblings`,
+                  })
+                  .eq('id', siblingPendingPayment.id);
+              }
+            }
+          }
+        }
+      }
+
+      // 7. Create pending payment if package is selected (and not sharing with sibling who has pending payment)
+      if (payload.packageId && !payload.shareWithSibling) {
         // Fetch the package price from course_pricing
         const { data: pricing, error: pricingError } = await supabaseAdmin
           .from('course_pricing')
@@ -208,7 +343,7 @@ export async function createStudentAction(
       }
     }
 
-    // 7. Create adcoin transaction if initial balance is provided
+    // 8. Create adcoin transaction if initial balance is provided
     if (payload.adcoinBalance > 0) {
       // Get pool account (advaspire) user ID for sender
       const { getSettings } = await import("@/data/settings");
@@ -396,56 +531,156 @@ export async function updateStudentAction(
         (e) => e.day && e.day.trim() !== ""
       );
 
-      // sessions_remaining is managed by payment approval, not here
-      // updateOrCreateEnrollment will preserve existing sessions if > 0
+      // sessions_remaining is managed by payment approval and attendance, not here
+      // updateOrCreateEnrollment will preserve existing sessions if != 0
+      // (both positive from payment or negative from attendance before payment)
       await updateOrCreateEnrollment(studentId, {
         course_id: payload.courseId,
         package_id: payload.packageId || null,
         instructor_id: payload.instructorId || null,
         schedule: validScheduleEntries,
-        sessions_remaining: 0, // Will be ignored if existing sessions > 0
+        sessions_remaining: 0, // Will be ignored if existing sessions != 0
       });
 
       // 5. Update pending payment if package changed
       if (payload.packageId) {
-        // Get the new package price
+        // Get the new package price and duration
         const { data: newPricing } = await supabaseAdmin
           .from('course_pricing')
-          .select('price, description')
+          .select('price, description, duration, package_type')
           .eq('id', payload.packageId)
           .is('deleted_at', null)
           .single();
 
         if (newPricing?.price) {
-          // Check if there's a pending payment for this student and course
-          const { data: existingPayment } = await supabaseAdmin
-            .from('payments')
-            .select('id')
+          // Check if this student is part of a shared pool
+          const { data: enrollmentWithPool } = await supabaseAdmin
+            .from('enrollments')
+            .select('id, pool_id')
             .eq('student_id', studentId)
             .eq('course_id', payload.courseId)
-            .eq('status', 'pending')
+            .eq('status', 'active')
+            .is('deleted_at', null)
             .maybeSingle();
 
-          if (existingPayment) {
-            // Update existing pending payment with new amount
+          const poolId = enrollmentWithPool?.pool_id;
+
+          if (poolId) {
+            // SHARED POOL: Update pool's package and sync all sibling enrollments
+            // Update the pool's package_id
             await supabaseAdmin
-              .from('payments')
+              .from('shared_session_pools')
               .update({
-                amount: newPricing.price,
-                notes: newPricing.description || 'Updated package payment',
+                package_id: payload.packageId,
+                updated_at: new Date().toISOString(),
               })
-              .eq('id', existingPayment.id);
+              .eq('id', poolId);
+
+            // Get all students in the pool
+            const { data: poolStudents } = await supabaseAdmin
+              .from('pool_students')
+              .select('student_id, enrollment_id')
+              .eq('pool_id', poolId);
+
+            const poolStudentIds = (poolStudents ?? []).map(ps => ps.student_id);
+            const poolEnrollmentIds = (poolStudents ?? []).map(ps => ps.enrollment_id);
+
+            // Update all sibling enrollments with the same package
+            if (poolEnrollmentIds.length > 0) {
+              await supabaseAdmin
+                .from('enrollments')
+                .update({ package_id: payload.packageId })
+                .in('id', poolEnrollmentIds);
+            }
+
+            // Update/create shared pending payment for the pool
+            // First check if there's already a pool payment
+            const { data: existingPoolPayment } = await supabaseAdmin
+              .from('payments')
+              .select('id')
+              .eq('pool_id', poolId)
+              .eq('status', 'pending')
+              .maybeSingle();
+
+            if (existingPoolPayment) {
+              // Update existing pool payment
+              await supabaseAdmin
+                .from('payments')
+                .update({
+                  amount: newPricing.price,
+                  notes: newPricing.description || 'Updated shared package payment',
+                  shared_with: poolStudentIds,
+                })
+                .eq('id', existingPoolPayment.id);
+            } else {
+              // Check if any sibling has a pending payment for this course and convert it
+              const { data: siblingPayment } = await supabaseAdmin
+                .from('payments')
+                .select('id')
+                .eq('course_id', payload.courseId)
+                .eq('status', 'pending')
+                .in('student_id', poolStudentIds)
+                .maybeSingle();
+
+              if (siblingPayment) {
+                // Convert to pool payment
+                await supabaseAdmin
+                  .from('payments')
+                  .update({
+                    amount: newPricing.price,
+                    pool_id: poolId,
+                    is_shared_package: true,
+                    shared_with: poolStudentIds,
+                    notes: newPricing.description || 'Shared package payment',
+                  })
+                  .eq('id', siblingPayment.id);
+              } else {
+                // Create new pool payment
+                const paymentData: PaymentInsert = {
+                  student_id: poolStudentIds[0], // Use first student as primary
+                  course_id: payload.courseId,
+                  amount: newPricing.price,
+                  payment_type: 'registration',
+                  status: 'pending',
+                  pool_id: poolId,
+                  is_shared_package: true,
+                  shared_with: poolStudentIds,
+                  notes: newPricing.description || 'Shared package payment',
+                };
+                await createPayment(paymentData);
+              }
+            }
           } else {
-            // Create new pending payment if none exists
-            const paymentData: PaymentInsert = {
-              student_id: studentId,
-              course_id: payload.courseId,
-              amount: newPricing.price,
-              payment_type: 'registration',
-              status: 'pending',
-              notes: newPricing.description || 'Registration payment for enrollment',
-            };
-            await createPayment(paymentData);
+            // NON-SHARED: Update just this student's payment
+            const { data: existingPayment } = await supabaseAdmin
+              .from('payments')
+              .select('id')
+              .eq('student_id', studentId)
+              .eq('course_id', payload.courseId)
+              .eq('status', 'pending')
+              .maybeSingle();
+
+            if (existingPayment) {
+              // Update existing pending payment with new amount
+              await supabaseAdmin
+                .from('payments')
+                .update({
+                  amount: newPricing.price,
+                  notes: newPricing.description || 'Updated package payment',
+                })
+                .eq('id', existingPayment.id);
+            } else {
+              // Create new pending payment if none exists
+              const paymentData: PaymentInsert = {
+                student_id: studentId,
+                course_id: payload.courseId,
+                amount: newPricing.price,
+                payment_type: 'registration',
+                status: 'pending',
+                notes: newPricing.description || 'Registration payment for enrollment',
+              };
+              await createPayment(paymentData);
+            }
           }
         }
       }

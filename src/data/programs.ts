@@ -61,6 +61,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
     .select(`
       id,
       name,
+      code,
       short_description,
       category_id,
       number_of_levels,
@@ -144,6 +145,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
     return {
       id: program.id,
       name: program.name,
+      code: program.code || null,
       short_description: program.short_description,
       category_id: program.category_id,
       category_name: program.course_categories?.name || null,
@@ -243,6 +245,7 @@ export async function getProgramById(programId: string): Promise<ProgramFull | n
 export interface CreateProgramPayload {
   // Basic
   name: string;
+  code: string | null;
   description: string | null;
   short_description: string | null;
   category_id: string | null;
@@ -308,6 +311,7 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
     .from("courses")
     .insert({
       name: payload.name,
+      code: payload.code,
       description: payload.description,
       short_description: payload.short_description,
       category_id: payload.category_id,
@@ -495,6 +499,7 @@ export async function updateProgram(
     .from("courses")
     .update({
       name: payload.name,
+      code: payload.code,
       description: payload.description,
       short_description: payload.short_description,
       category_id: payload.category_id,
@@ -716,6 +721,65 @@ export async function softDeleteProgram(programId: string): Promise<boolean> {
   }
 
   return true;
+}
+
+// ============================================
+// CURRICULUM QUERIES FOR ATTENDANCE
+// ============================================
+
+export interface CurriculumLesson {
+  id: string;
+  title: string;
+  missions: {
+    level: number | null;
+    url_mission: string | null;
+    url_answer: string | null;
+  }[];
+}
+
+/**
+ * Fetch curriculum lessons with missions for a course
+ * Used in attendance modal for lesson/mission selection
+ */
+export async function getCurriculumLessonsForCourse(courseId: string): Promise<CurriculumLesson[]> {
+  const { data: sections, error } = await supabaseAdmin
+    .from("course_sections")
+    .select(`
+      id,
+      title,
+      sort_order,
+      course_lessons(
+        id,
+        title,
+        missions,
+        sort_order
+      )
+    `)
+    .eq("course_id", courseId)
+    .order("sort_order");
+
+  if (error) {
+    console.error("Error fetching curriculum:", error);
+    return [];
+  }
+
+  // Flatten sections into lessons and return with their missions
+  const lessons: CurriculumLesson[] = [];
+
+  (sections ?? [])
+    .sort((a: any, b: any) => a.sort_order - b.sort_order)
+    .forEach((section: any) => {
+      const sectionLessons = (section.course_lessons ?? [])
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((lesson: any) => ({
+          id: lesson.id,
+          title: lesson.title,
+          missions: lesson.missions ?? [],
+        }));
+      lessons.push(...sectionLessons);
+    });
+
+  return lessons;
 }
 
 // ============================================
