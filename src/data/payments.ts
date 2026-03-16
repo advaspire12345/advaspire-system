@@ -263,6 +263,8 @@ export async function getTotalRevenue(startDate: string, endDate: string, branch
 // ============================================
 
 export async function createPayment(paymentData: PaymentInsert): Promise<Payment | null> {
+  console.log('[Create Payment] Inserting payment:', paymentData);
+
   const { data, error } = await supabaseAdmin
     .from('payments')
     .insert(paymentData)
@@ -270,10 +272,12 @@ export async function createPayment(paymentData: PaymentInsert): Promise<Payment
     .single();
 
   if (error) {
-    console.error('Error creating payment:', error);
+    console.error('[Create Payment] Error creating payment:', error);
+    console.error('[Create Payment] Error details:', JSON.stringify(error, null, 2));
     return null;
   }
 
+  console.log('[Create Payment] Payment created successfully:', data.id);
   return data;
 }
 
@@ -397,14 +401,22 @@ export interface PendingPaymentRow {
   receiptPhoto: string | null;
   createdAt: string;
   paidAt: string | null;
+  // Shared package info
+  isSharedPackage: boolean;
+  poolId: string | null;
+  sharedStudentNames: string[] | null; // All sibling names for shared packages
 }
 
 export async function getPendingPaymentsForTable(
   userEmail: string
 ): Promise<PendingPaymentRow[]> {
+  console.log('[getPendingPaymentsForTable] Starting query for user:', userEmail);
+
   // Import user helpers dynamically to avoid circular imports
   const { getUserBranchIdByEmail } = await import("./users");
   const userBranchId = await getUserBranchIdByEmail(userEmail);
+
+  console.log('[getPendingPaymentsForTable] User branch ID:', userBranchId);
 
   let query = supabaseAdmin
     .from('payments')
@@ -418,6 +430,8 @@ export async function getPendingPaymentsForTable(
       paid_at,
       course_id,
       package_id,
+      pool_id,
+      is_shared_package,
       student:students!inner(
         id,
         name,
@@ -428,7 +442,7 @@ export async function getPendingPaymentsForTable(
           parent:parents(id, name, phone)
         )
       ),
-      course:courses(name)
+      course:courses(name, code)
     `)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
@@ -439,9 +453,30 @@ export async function getPendingPaymentsForTable(
 
   const { data, error } = await query;
 
+  console.log('[getPendingPaymentsForTable] Query result - count:', data?.length || 0);
+
   if (error) {
-    console.error('Error fetching pending payments:', error);
+    console.error('[getPendingPaymentsForTable] Error fetching pending payments:', error);
     return [];
+  }
+
+  if (data && data.length > 0) {
+    console.log('[getPendingPaymentsForTable] Found payments:', data.map((p: any) => ({
+      id: p.id,
+      amount: p.amount,
+      status: p.status,
+      studentName: (p.student as any)?.name,
+    })));
+  } else {
+    console.log('[getPendingPaymentsForTable] No pending payments found');
+
+    // Debug: Check if there are ANY pending payments in the database
+    const { count: totalPending } = await supabaseAdmin
+      .from('payments')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending');
+
+    console.log('[getPendingPaymentsForTable] Total pending payments in DB:', totalPending);
   }
 
   // Get all course_pricing to match packages by course_id and amount
@@ -455,6 +490,31 @@ export async function getPendingPaymentsForTable(
     // Key by course_id + price for matching
     const key = `${p.course_id}-${p.price}`;
     pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
+  }
+
+  // Get all pool IDs from payments that have pool_id
+  const poolIds = (data ?? [])
+    .map((p) => (p as unknown as { pool_id: string | null }).pool_id)
+    .filter((id): id is string => id !== null);
+
+  // Fetch siblings for all pools in one query
+  const poolSiblingsMap = new Map<string, string[]>();
+  if (poolIds.length > 0) {
+    const { data: poolStudents } = await supabaseAdmin
+      .from('pool_students')
+      .select(`
+        pool_id,
+        student:students(name)
+      `)
+      .in('pool_id', poolIds);
+
+    // Group by pool_id
+    for (const ps of poolStudents ?? []) {
+      const studentData = ps.student as unknown as { name: string };
+      const existing = poolSiblingsMap.get(ps.pool_id) ?? [];
+      existing.push(studentData.name);
+      poolSiblingsMap.set(ps.pool_id, existing);
+    }
   }
 
   return (data ?? []).map((payment) => {
@@ -471,6 +531,8 @@ export async function getPendingPaymentsForTable(
     };
     const course = payment.course as unknown as { name: string } | null;
     const courseId = (payment as unknown as { course_id: string | null }).course_id;
+    const poolId = (payment as unknown as { pool_id: string | null }).pool_id;
+    const isSharedPackage = (payment as unknown as { is_shared_package: boolean }).is_shared_package ?? false;
 
     // Get parent info (first parent if multiple)
     const parentInfo = student.parent_students?.[0]?.parent;
@@ -486,6 +548,9 @@ export async function getPendingPaymentsForTable(
         packageName = `${pricing.duration} ${typeLabel}${plural}`;
       }
     }
+
+    // Get shared student names from pool
+    const sharedStudentNames = poolId ? (poolSiblingsMap.get(poolId) ?? null) : null;
 
     return {
       id: payment.id,
@@ -506,6 +571,10 @@ export async function getPendingPaymentsForTable(
       receiptPhoto: payment.receipt_photo,
       createdAt: payment.created_at,
       paidAt: payment.paid_at,
+      // Shared package info
+      isSharedPackage: isSharedPackage || !!poolId,
+      poolId,
+      sharedStudentNames,
     };
   });
 }
@@ -518,19 +587,101 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
     return null;
   }
 
-  // If payment has a course, look up the package from course_pricing
-  if (payment.course_id && payment.amount) {
-    const { data: pricingData } = await supabaseAdmin
-      .from('course_pricing')
-      .select('id, package_type, duration')
-      .eq('course_id', payment.course_id)
-      .eq('price', payment.amount)
-      .is('deleted_at', null)
-      .maybeSingle();
+  // IMPORTANT: Update payment status to 'paid' FIRST before any session tracking
+  // This prevents createEnrollmentRenewalPayment from finding this payment as "existing pending"
+  const updatedPayment = await updatePayment(paymentId, {
+    status: 'paid',
+    paid_at: new Date().toISOString(),
+  });
 
-    if (pricingData) {
-      // Get the enrollment - first try matching course_id
-      let { data: enrollment } = await supabaseAdmin
+  if (!updatedPayment) {
+    console.error('Failed to update payment status');
+    return null;
+  }
+
+  // Check if this is a pool payment (shared sibling package)
+  if (payment.pool_id) {
+    // Add sessions to the shared pool instead of individual enrollment
+    const { addPoolSessions, getPoolById } = await import("./pools");
+
+    // Get the pricing info to know how many sessions to add
+    if (payment.course_id && payment.amount) {
+      const { data: pricingData } = await supabaseAdmin
+        .from('course_pricing')
+        .select('id, package_type, duration')
+        .eq('course_id', payment.course_id)
+        .eq('price', payment.amount)
+        .is('deleted_at', null)
+        .maybeSingle();
+
+      if (pricingData) {
+        const sessionsToAdd = pricingData.duration;
+        const newRemaining = await addPoolSessions(payment.pool_id, sessionsToAdd);
+        console.log(`[Pool Payment] Added ${sessionsToAdd} sessions to pool ${payment.pool_id}. New remaining: ${newRemaining}`);
+
+        // Update pool's package_id if not set
+        const pool = await getPoolById(payment.pool_id);
+        if (pool && !pool.package_id) {
+          await supabaseAdmin
+            .from('shared_session_pools')
+            .update({ package_id: pricingData.id })
+            .eq('id', payment.pool_id);
+        }
+
+        // If pool sessions are still <= 0 after payment, create a new pending payment
+        if (newRemaining !== null && newRemaining <= 0) {
+          console.log(`[Pool Payment] Pool sessions still <= 0 after payment, creating renewal payment...`);
+          const renewalPayment = await createPoolRenewalPayment(payment.pool_id);
+          if (renewalPayment) {
+            console.log(`[Pool Payment] Renewal payment created: ${renewalPayment.id}`);
+          } else {
+            console.log(`[Pool Payment] Renewal payment not created (may already exist)`);
+          }
+        }
+      }
+    }
+  } else {
+    // Standard individual enrollment payment
+    console.log(`[Payment Approval] Processing individual payment for student: ${payment.student_id}`);
+
+    // Try to find pricing data by course_id and amount
+    let pricingData: { id: string; package_type: string; duration: number } | null = null;
+
+    if (payment.course_id && payment.amount) {
+      const { data: pricing } = await supabaseAdmin
+        .from('course_pricing')
+        .select('id, package_type, duration')
+        .eq('course_id', payment.course_id)
+        .eq('price', payment.amount)
+        .is('deleted_at', null)
+        .maybeSingle();
+
+      pricingData = pricing;
+      console.log(`[Payment Approval] Pricing data found:`, pricingData);
+    }
+
+    // If no exact price match, try to find any pricing for this course
+    if (!pricingData && payment.course_id) {
+      const { data: fallbackPricing } = await supabaseAdmin
+        .from('course_pricing')
+        .select('id, package_type, duration')
+        .eq('course_id', payment.course_id)
+        .is('deleted_at', null)
+        .order('price', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (fallbackPricing) {
+        pricingData = fallbackPricing;
+        console.log(`[Payment Approval] Using fallback pricing:`, pricingData);
+      }
+    }
+
+    // Get the enrollment - first try matching course_id
+    let enrollment: { id: string; sessions_remaining: number; package_id: string | null; course_id: string | null } | null = null;
+
+    if (payment.course_id) {
+      const { data: enrollmentData } = await supabaseAdmin
         .from('enrollments')
         .select('id, sessions_remaining, package_id, course_id')
         .eq('student_id', payment.student_id)
@@ -539,22 +690,27 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
         .is('deleted_at', null)
         .maybeSingle();
 
-      // If no enrollment found for payment's course, find any active enrollment for this student
-      // This handles the case where package was changed in pending payment modal
-      if (!enrollment) {
-        const { data: anyEnrollment } = await supabaseAdmin
-          .from('enrollments')
-          .select('id, sessions_remaining, package_id, course_id')
-          .eq('student_id', payment.student_id)
-          .eq('status', 'active')
-          .is('deleted_at', null)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      enrollment = enrollmentData;
+    }
 
-        if (anyEnrollment) {
-          enrollment = anyEnrollment;
-          // Also update the enrollment's course_id to match the payment
+    // If no enrollment found for payment's course, find any active enrollment for this student
+    if (!enrollment) {
+      const { data: anyEnrollment } = await supabaseAdmin
+        .from('enrollments')
+        .select('id, sessions_remaining, package_id, course_id')
+        .eq('student_id', payment.student_id)
+        .eq('status', 'active')
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (anyEnrollment) {
+        enrollment = anyEnrollment;
+        console.log(`[Payment Approval] Using fallback enrollment:`, enrollment.id);
+
+        // Also update the enrollment's course_id to match the payment if payment has one
+        if (payment.course_id) {
           await supabaseAdmin
             .from('enrollments')
             .update({
@@ -564,38 +720,49 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
             .eq('id', anyEnrollment.id);
         }
       }
+    }
 
-      if (enrollment) {
-        const currentSessions = enrollment.sessions_remaining || 0;
+    if (enrollment) {
+      const currentSessions = enrollment.sessions_remaining || 0;
+      let newSessions = currentSessions;
+      let sessionsToAdd = 0;
 
-        if (pricingData.package_type === 'session') {
-          // For session-based packages, add sessions to the enrollment
-          const newSessions = currentSessions + pricingData.duration;
+      if (pricingData) {
+        sessionsToAdd = pricingData.duration;
+        newSessions = currentSessions + sessionsToAdd;
 
-          await supabaseAdmin
-            .from('enrollments')
-            .update({
-              sessions_remaining: newSessions,
-              package_id: pricingData.id, // Also update package_id if not set
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', enrollment.id);
-        } else if (pricingData.package_type === 'monthly') {
-          // For monthly packages, set sessions to duration (e.g., 1 for 1 month)
-          // This represents the number of months paid
-          // period_start will be set on first attendance
-          const newSessions = currentSessions + pricingData.duration;
+        await supabaseAdmin
+          .from('enrollments')
+          .update({
+            sessions_remaining: newSessions,
+            package_id: pricingData.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', enrollment.id);
 
-          await supabaseAdmin
-            .from('enrollments')
-            .update({
-              sessions_remaining: newSessions,
-              package_id: pricingData.id, // Also update package_id if not set
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', enrollment.id);
-        }
+        console.log(`[Payment Approval] Sessions updated: ${currentSessions} + ${sessionsToAdd} = ${newSessions}`);
+      } else {
+        // No pricing found - just log and check if renewal needed based on current sessions
+        console.log(`[Payment Approval] No pricing data found, current sessions: ${currentSessions}`);
+        newSessions = currentSessions; // Don't change sessions if we don't know how many to add
       }
+
+      // ALWAYS check if sessions are still <= 0 and create renewal payment if needed
+      console.log(`[Payment Approval] Checking renewal: newSessions = ${newSessions}, condition (<=0): ${newSessions <= 0}`);
+
+      if (newSessions <= 0) {
+        console.log(`[Payment Approval] *** Sessions still <= 0 after payment, creating renewal payment ***`);
+        const renewalPayment = await createEnrollmentRenewalPayment(enrollment.id);
+        if (renewalPayment) {
+          console.log(`[Payment Approval] *** RENEWAL PAYMENT CREATED: ${renewalPayment.id} ***`);
+        } else {
+          console.log(`[Payment Approval] Renewal payment not created (may already exist or error)`);
+        }
+      } else {
+        console.log(`[Payment Approval] Sessions > 0, no renewal payment needed`);
+      }
+    } else {
+      console.log(`[Payment Approval] No enrollment found for student: ${payment.student_id}`);
     }
   }
 
@@ -614,48 +781,79 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
     const poolAmount = Math.floor(totalAdcoins * (poolPct / 100));
 
     console.log(`[Payment Approval] Amount: RM${payment.amount}, Total Adcoins: ${totalAdcoins}, Pool (${poolPct}%): ${poolAmount}`);
+    console.log(`[Payment Approval] Payment ID: ${paymentId}, Student ID: ${payment.student_id}, Pool ID: ${payment.pool_id}`);
 
-    if (poolAmount > 0 && payment.student_id) {
+    if (poolAmount > 0) {
       // Get pool account (advaspire@gmail.com)
       const poolUser = await getUserByEmail(poolEmail);
       if (!poolUser) {
         console.log(`[Payment Approval] Pool account ${poolEmail} not found`);
       }
 
-      // Get student's branch
-      const { data: student } = await supabaseAdmin
-        .from('students')
-        .select('branch_id')
-        .eq('id', payment.student_id)
-        .single();
+      // For shared packages, get student from pool if student_id not directly available
+      let studentId = payment.student_id;
 
-      console.log(`[Payment Approval] Student branch_id: ${student?.branch_id}`);
+      if (!studentId && payment.pool_id) {
+        // Get first student from the pool
+        const { data: poolStudent } = await supabaseAdmin
+          .from('pool_students')
+          .select('student_id')
+          .eq('pool_id', payment.pool_id)
+          .limit(1)
+          .maybeSingle();
 
-      if (student?.branch_id) {
-        // Get branch admin
-        const branch = await getBranchById(student.branch_id);
-        console.log(`[Payment Approval] Branch: ${branch?.name}, Admin ID: ${branch?.admin_id}`);
+        if (poolStudent) {
+          studentId = poolStudent.student_id;
+          console.log(`[Payment Approval] Got student ID from pool: ${studentId}`);
+        }
+      }
 
-        if (branch?.admin_id) {
-          const admin = await getUserById(branch.admin_id);
-          if (admin) {
-            const currentBalance = admin.adcoin_balance || 0;
-            const newBalance = currentBalance + poolAmount;
-            await updateUserAdcoinBalance(admin.id, newBalance);
+      if (!studentId) {
+        console.log(`[Payment Approval] No student ID found for payment`);
+      } else {
+        // Get student's branch
+        const { data: student, error: studentError } = await supabaseAdmin
+          .from('students')
+          .select('branch_id')
+          .eq('id', studentId)
+          .single();
 
-            console.log(`[Payment Approval] Admin ${admin.name} receives ${poolAmount} adcoins (${currentBalance} → ${newBalance})`);
+        if (studentError) {
+          console.error(`[Payment Approval] Error fetching student:`, studentError);
+        }
 
-            // Record transaction - from advaspire (pool) to branch admin
-            await supabaseAdmin.from('adcoin_transactions').insert({
-              sender_id: poolUser?.id || null,
-              receiver_id: admin.id,
-              amount: poolAmount,
-              type: 'transfer',
-              description: `Admin contribution from payment RM${payment.amount}`,
-            });
+        console.log(`[Payment Approval] Student branch_id: ${student?.branch_id}`);
+
+        if (student?.branch_id) {
+          // Get branch admin
+          const branch = await getBranchById(student.branch_id);
+          console.log(`[Payment Approval] Branch: ${branch?.name}, Admin ID: ${branch?.admin_id}`);
+
+          if (branch?.admin_id) {
+            const admin = await getUserById(branch.admin_id);
+            if (admin) {
+              const currentBalance = admin.adcoin_balance || 0;
+              const newBalance = currentBalance + poolAmount;
+              await updateUserAdcoinBalance(admin.id, newBalance);
+
+              console.log(`[Payment Approval] Admin ${admin.name} receives ${poolAmount} adcoins (${currentBalance} → ${newBalance})`);
+
+              // Record transaction - from advaspire (pool) to branch admin
+              await supabaseAdmin.from('adcoin_transactions').insert({
+                sender_id: poolUser?.id || null,
+                receiver_id: admin.id,
+                amount: poolAmount,
+                type: 'transfer',
+                description: `Admin contribution from payment RM${payment.amount}`,
+              });
+            } else {
+              console.log(`[Payment Approval] Admin user not found for ID: ${branch.admin_id}`);
+            }
+          } else {
+            console.log(`[Payment Approval] No admin set for branch ${branch?.name}`);
           }
         } else {
-          console.log(`[Payment Approval] No admin set for branch ${branch?.name}`);
+          console.log(`[Payment Approval] Student has no branch_id`);
         }
       }
     }
@@ -664,10 +862,107 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
     // Continue with payment approval even if contribution fails
   }
 
-  return updatePayment(paymentId, {
-    status: 'paid',
-    paid_at: new Date().toISOString(),
-  });
+  // ============================================
+  // FINAL SAFETY CHECK: Ensure pending payment exists if sessions <= 0
+  // ============================================
+  console.log('[Payment Approval] === FINAL SAFETY CHECK ===');
+
+  try {
+    // Get the student's active enrollment
+    const { data: finalEnrollment } = await supabaseAdmin
+      .from('enrollments')
+      .select('id, student_id, course_id, package_id, sessions_remaining')
+      .eq('student_id', payment.student_id)
+      .eq('status', 'active')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (finalEnrollment) {
+      console.log('[Payment Approval] Final enrollment check:', {
+        id: finalEnrollment.id,
+        sessions_remaining: finalEnrollment.sessions_remaining,
+      });
+
+      if (finalEnrollment.sessions_remaining <= 0) {
+        // Check if pending payment exists
+        const { data: existingPending } = await supabaseAdmin
+          .from('payments')
+          .select('id')
+          .eq('student_id', payment.student_id)
+          .eq('status', 'pending')
+          .is('pool_id', null)
+          .limit(1);
+
+        console.log('[Payment Approval] Existing pending payments:', existingPending?.length || 0);
+
+        if (!existingPending || existingPending.length === 0) {
+          console.log('[Payment Approval] *** NO PENDING PAYMENT EXISTS - FORCE CREATING ***');
+
+          // Get price from enrollment's package first, fallback to course pricing
+          let price = 0;
+          if (finalEnrollment.package_id) {
+            const { data: pkgPricing } = await supabaseAdmin
+              .from('course_pricing')
+              .select('price')
+              .eq('id', finalEnrollment.package_id)
+              .maybeSingle();
+            price = pkgPricing?.price || 0;
+          }
+          if (price === 0 && finalEnrollment.course_id) {
+            const { data: coursePricing } = await supabaseAdmin
+              .from('course_pricing')
+              .select('price')
+              .eq('course_id', finalEnrollment.course_id)
+              .is('deleted_at', null)
+              .order('price', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            price = coursePricing?.price || 0;
+          }
+
+          // Get student name
+          const { data: student } = await supabaseAdmin
+            .from('students')
+            .select('name')
+            .eq('id', payment.student_id)
+            .single();
+
+          // Force create the pending payment
+          // Note: Don't set package_id - it references legacy 'packages' table, not 'course_pricing'
+          // Package is looked up by course_id + amount in getPendingPaymentsForTable
+          const forcePaymentData: PaymentInsert = {
+            student_id: payment.student_id,
+            course_id: finalEnrollment.course_id,
+            amount: price,
+            payment_type: 'package',
+            status: 'pending',
+            notes: `Package renewal for ${student?.name || 'Student'}`,
+          };
+
+          console.log('[Payment Approval] Force creating payment:', forcePaymentData);
+
+          const { data: forceCreated, error: forceError } = await supabaseAdmin
+            .from('payments')
+            .insert(forcePaymentData)
+            .select()
+            .single();
+
+          if (forceError) {
+            console.error('[Payment Approval] FORCE CREATE ERROR:', forceError);
+          } else {
+            console.log('[Payment Approval] *** FORCE CREATED PAYMENT:', forceCreated.id, '***');
+          }
+        }
+      }
+    }
+  } catch (finalError) {
+    console.error('[Payment Approval] Final safety check error:', finalError);
+  }
+
+  // Return the already updated payment (status was set to 'paid' at the start)
+  return updatedPayment;
 }
 
 // ============================================
@@ -677,7 +972,11 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
 export interface PaymentRecordRow {
   id: string;
   parentName: string | null;
+  parentAddress: string | null;
+  parentPostcode: string | null;
+  parentCity: string | null;
   studentId: string;
+  courseCode: string | null;
   studentName: string;
   branchId: string;
   branchName: string;
@@ -691,11 +990,17 @@ export interface PaymentRecordRow {
   courseName: string | null;
   packageId: string | null;
   packageName: string | null;
+  packageDuration: number | null;
+  packageType: "monthly" | "session" | null;
   price: number;
   paymentMethod: PaymentMethod | null;
   paidAt: string | null;
   receiptPhoto: string | null;
   invoiceNumber: string | null;
+  // Shared package info
+  isSharedPackage: boolean;
+  poolId: string | null;
+  sharedStudentNames: string[] | null;
 }
 
 export async function getPaymentRecordsForTable(
@@ -718,16 +1023,18 @@ export async function getPaymentRecordsForTable(
       invoice_number,
       course_id,
       package_id,
+      pool_id,
+      is_shared_package,
       student:students!inner(
         id,
         name,
         branch_id,
         branch:branches!inner(id, name, company_name, address, phone, email, bank_name, bank_account),
         parent_students(
-          parent:parents(id, name)
+          parent:parents(id, name, address, postcode, city)
         )
       ),
-      course:courses(name)
+      course:courses(name, code)
     `)
     .eq('status', 'paid')
     .order('paid_at', { ascending: false });
@@ -737,14 +1044,16 @@ export async function getPaymentRecordsForTable(
   }
 
   if (startDate) {
-    query = query.gte('paid_at', startDate);
+    // Start of day
+    query = query.gte('paid_at', `${startDate}T00:00:00`);
   }
 
   if (endDate) {
-    // Add one day to include the end date fully
+    // End of day - include the full end date by going to next day
     const endDateObj = new Date(endDate);
     endDateObj.setDate(endDateObj.getDate() + 1);
-    query = query.lt('paid_at', endDateObj.toISOString().split('T')[0]);
+    const nextDay = endDateObj.toISOString().split('T')[0];
+    query = query.lt('paid_at', `${nextDay}T00:00:00`);
   }
 
   const { data, error } = await query;
@@ -767,6 +1076,31 @@ export async function getPaymentRecordsForTable(
     pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
   }
 
+  // Get all pool IDs from payments that have pool_id
+  const poolIds = (data ?? [])
+    .map((p) => (p as unknown as { pool_id: string | null }).pool_id)
+    .filter((id): id is string => id !== null);
+
+  // Fetch siblings for all pools in one query
+  const poolSiblingsMap = new Map<string, string[]>();
+  if (poolIds.length > 0) {
+    const { data: poolStudents } = await supabaseAdmin
+      .from('pool_students')
+      .select(`
+        pool_id,
+        student:students(name)
+      `)
+      .in('pool_id', poolIds);
+
+    // Group by pool_id
+    for (const ps of poolStudents ?? []) {
+      const studentData = ps.student as unknown as { name: string };
+      const existing = poolSiblingsMap.get(ps.pool_id) ?? [];
+      existing.push(studentData.name);
+      poolSiblingsMap.set(ps.pool_id, existing);
+    }
+  }
+
   return (data ?? []).map((payment) => {
     // Handle nested relations
     const student = payment.student as unknown as {
@@ -784,17 +1118,25 @@ export async function getPaymentRecordsForTable(
         bank_account: string | null;
       };
       parent_students: Array<{
-        parent: { id: string; name: string } | null;
+        parent: { id: string; name: string; address: string | null; postcode: string | null; city: string | null } | null;
       }>;
     };
-    const course = payment.course as unknown as { name: string } | null;
+    const course = payment.course as unknown as { name: string; code: string | null } | null;
     const courseId = (payment as unknown as { course_id: string | null }).course_id;
+    const poolId = (payment as unknown as { pool_id: string | null }).pool_id;
+    const isSharedPackage = (payment as unknown as { is_shared_package: boolean }).is_shared_package ?? false;
 
     // Get parent info (first parent if multiple)
     const parentInfo = student.parent_students?.[0]?.parent;
+    const parentAddress = parentInfo?.address ?? null;
+    const parentPostcode = parentInfo?.postcode ?? null;
+    const parentCity = parentInfo?.city ?? null;
+    const courseCode = course?.code ?? null;
 
     // Look up package from course_pricing by course_id and amount
     let packageName: string | null = null;
+    let packageDuration: number | null = null;
+    let packageType: "monthly" | "session" | null = null;
     if (courseId) {
       const key = `${courseId}-${payment.amount}`;
       const pricing = pricingMap.get(key);
@@ -802,13 +1144,22 @@ export async function getPaymentRecordsForTable(
         const typeLabel = pricing.packageType === 'monthly' ? 'Month' : 'Session';
         const plural = pricing.duration > 1 ? 's' : '';
         packageName = `${pricing.duration} ${typeLabel}${plural}`;
+        packageDuration = pricing.duration;
+        packageType = pricing.packageType as "monthly" | "session";
       }
     }
+
+    // Get shared student names from pool
+    const sharedStudentNames = poolId ? (poolSiblingsMap.get(poolId) ?? null) : null;
 
     return {
       id: payment.id,
       parentName: parentInfo?.name ?? null,
+      parentAddress,
+      parentPostcode,
+      parentCity,
       studentId: student.id,
+      courseCode,
       studentName: student.name,
       branchId: student.branch_id,
       branchName: student.branch.name,
@@ -822,11 +1173,243 @@ export async function getPaymentRecordsForTable(
       courseName: course?.name ?? null,
       packageId: (payment as unknown as { package_id: string | null }).package_id,
       packageName,
+      packageDuration,
+      packageType,
       price: payment.amount,
       paymentMethod: payment.payment_method as PaymentMethod | null,
       paidAt: payment.paid_at,
       receiptPhoto: payment.receipt_photo,
       invoiceNumber: payment.invoice_number,
+      // Shared package info
+      isSharedPackage: isSharedPackage || !!poolId,
+      poolId,
+      sharedStudentNames,
     };
   });
+}
+
+// ============================================
+// POOL RENEWAL PAYMENTS
+// ============================================
+
+/**
+ * Create a pending payment for a shared session pool when sessions are depleted
+ */
+export async function createPoolRenewalPayment(poolId: string): Promise<Payment | null> {
+  const { getPoolWithStudents } = await import("./pools");
+
+  const pool = await getPoolWithStudents(poolId);
+  if (!pool) {
+    console.error('Pool not found for renewal payment:', poolId);
+    return null;
+  }
+
+  // Check if there's already a pending payment for this pool
+  const { data: existingPayment } = await supabaseAdmin
+    .from('payments')
+    .select('id')
+    .eq('pool_id', poolId)
+    .eq('status', 'pending')
+    .maybeSingle();
+
+  if (existingPayment) {
+    console.log('Pending pool payment already exists:', existingPayment.id);
+    return null;
+  }
+
+  // Get the package price
+  let price = 0;
+  if (pool.package_id) {
+    const { data: pricing } = await supabaseAdmin
+      .from('course_pricing')
+      .select('price')
+      .eq('id', pool.package_id)
+      .single();
+
+    if (pricing) {
+      price = pricing.price;
+    }
+  }
+
+  // Use the first student in the pool as the payment student
+  // (payment is for the pool, but needs a student_id for the table)
+  const firstStudent = pool.students[0];
+  if (!firstStudent) {
+    console.error('No students in pool for renewal payment');
+    return null;
+  }
+
+  // Get all student IDs for shared_with
+  const studentIds = pool.students.map(s => s.id);
+
+  const paymentData: PaymentInsert = {
+    student_id: firstStudent.id,
+    course_id: pool.course_id,
+    package_id: pool.package_id,
+    pool_id: poolId,
+    amount: price,
+    payment_type: 'package',
+    status: 'pending',
+    is_shared_package: true,
+    shared_with: studentIds,
+    notes: `Shared package renewal for ${pool.name || 'Sibling Pool'} (${studentIds.length} students)`,
+  };
+
+  return createPayment(paymentData);
+}
+
+/**
+ * Create a pending payment for an enrollment when sessions are depleted
+ */
+export async function createEnrollmentRenewalPayment(enrollmentId: string): Promise<Payment | null> {
+  console.log('[Renewal Payment] ====== STARTING ======');
+  console.log('[Renewal Payment] Enrollment ID:', enrollmentId);
+
+  // Get enrollment with student, course, and package info (don't use !inner to avoid query failures)
+  const { data: enrollment, error } = await supabaseAdmin
+    .from('enrollments')
+    .select(`
+      id,
+      student_id,
+      course_id,
+      package_id,
+      student:students(id, name),
+      course:courses(id, name),
+      package:course_pricing(id, price, description)
+    `)
+    .eq('id', enrollmentId)
+    .single();
+
+  if (error) {
+    console.error('[Renewal Payment] Error fetching enrollment:', error);
+    return null;
+  }
+
+  if (!enrollment) {
+    console.error('[Renewal Payment] Enrollment not found:', enrollmentId);
+    return null;
+  }
+
+  if (!enrollment.student_id) {
+    console.error('[Renewal Payment] Enrollment has no student_id:', enrollmentId);
+    return null;
+  }
+
+  console.log('[Renewal Payment] Found enrollment:', {
+    id: enrollment.id,
+    student_id: enrollment.student_id,
+    course_id: enrollment.course_id,
+    package_id: enrollment.package_id,
+  });
+
+  // Check if there's already a pending payment for this student
+  // Use limit(1) instead of maybeSingle() to avoid errors when multiple exist
+  const { data: existingPayments, error: existingError } = await supabaseAdmin
+    .from('payments')
+    .select('id, amount, created_at, course_id, status')
+    .eq('student_id', enrollment.student_id)
+    .eq('status', 'pending')
+    .is('pool_id', null)
+    .limit(10); // Get up to 10 to see what exists
+
+  console.log('[Renewal Payment] Existing pending payments query result:', {
+    error: existingError,
+    count: existingPayments?.length || 0,
+    payments: existingPayments,
+  });
+
+  if (existingError) {
+    console.error('[Renewal Payment] Error checking existing payment:', existingError);
+    // Continue anyway - we'll try to create a payment
+  }
+
+  // Check if any existing payment matches this course
+  const matchingPayment = existingPayments?.find(p =>
+    !enrollment.course_id || p.course_id === enrollment.course_id
+  );
+
+  if (matchingPayment) {
+    console.log('[Renewal Payment] Found matching pending payment:', matchingPayment);
+    return null;
+  }
+
+  console.log('[Renewal Payment] No matching pending payment found, creating new one...');
+
+  // Get the package price - if no package assigned, try to get from course_pricing
+  const packageData = enrollment.package as unknown as { id: string; price: number; description: string } | null;
+  let price = packageData?.price ?? 0;
+
+  // If no package price, try to find a default package for this course
+  if (price === 0 && enrollment.course_id) {
+    console.log('[Renewal Payment] No package price found, looking up course pricing...');
+    const { data: defaultPricing } = await supabaseAdmin
+      .from('course_pricing')
+      .select('id, price, description')
+      .eq('course_id', enrollment.course_id)
+      .is('deleted_at', null)
+      .order('price', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (defaultPricing) {
+      price = defaultPricing.price;
+      console.log('[Renewal Payment] Using default pricing:', defaultPricing);
+    }
+  }
+
+  // If still no price, set a default of 0 (admin can update later)
+  if (price === 0) {
+    console.log('[Renewal Payment] No pricing found, using 0 as placeholder');
+  }
+
+  const studentData = enrollment.student as unknown as { id: string; name: string } | null;
+  const courseData = enrollment.course as unknown as { id: string; name: string } | null;
+
+  const studentName = studentData?.name || 'Student';
+  const courseName = courseData?.name || 'Course';
+
+  // Note: Don't set package_id - it references legacy 'packages' table, not 'course_pricing'
+  // Package is looked up by course_id + amount in getPendingPaymentsForTable
+  const paymentData: PaymentInsert = {
+    student_id: enrollment.student_id,
+    course_id: enrollment.course_id,
+    amount: price,
+    payment_type: 'package',
+    status: 'pending',
+    notes: `Package renewal for ${studentName} - ${courseName}`,
+  };
+
+  console.log('[Renewal Payment] Creating payment with data:', JSON.stringify(paymentData, null, 2));
+
+  const payment = await createPayment(paymentData);
+
+  if (payment) {
+    console.log('[Renewal Payment] ====== SUCCESS ====== Payment ID:', payment.id);
+
+    // Verify the payment was actually created by querying it back
+    const { data: verifyPayment, error: verifyError } = await supabaseAdmin
+      .from('payments')
+      .select('id, student_id, course_id, status, amount')
+      .eq('id', payment.id)
+      .single();
+
+    if (verifyError) {
+      console.error('[Renewal Payment] VERIFY ERROR:', verifyError);
+    } else {
+      console.log('[Renewal Payment] VERIFIED payment exists:', verifyPayment);
+    }
+
+    // Also count total pending payments for this student
+    const { count } = await supabaseAdmin
+      .from('payments')
+      .select('id', { count: 'exact', head: true })
+      .eq('student_id', enrollment.student_id)
+      .eq('status', 'pending');
+
+    console.log('[Renewal Payment] Total pending payments for student:', count);
+  } else {
+    console.error('[Renewal Payment] ====== FAILED ====== Could not create payment!');
+  }
+
+  return payment;
 }

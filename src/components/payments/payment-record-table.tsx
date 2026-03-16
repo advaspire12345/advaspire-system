@@ -147,29 +147,26 @@ export function PaymentRecordTable({
 
   // Apply date filter
   const applyDateFilter = useCallback(() => {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams();
 
     if (startDate) {
       params.set("startDate", format(startDate, "yyyy-MM-dd"));
-    } else {
-      params.delete("startDate");
     }
 
     if (endDate) {
       params.set("endDate", format(endDate, "yyyy-MM-dd"));
-    } else {
-      params.delete("endDate");
     }
 
-    router.push(`/payment-record?${params.toString()}`);
-  }, [startDate, endDate, router, searchParams]);
+    const queryString = params.toString();
+    window.location.href = `/payment-record${queryString ? `?${queryString}` : ""}`;
+  }, [startDate, endDate]);
 
   // Clear date filter
   const clearDateFilter = useCallback(() => {
     setStartDate(undefined);
     setEndDate(undefined);
-    router.push("/payment-record");
-  }, [router]);
+    window.location.href = "/payment-record";
+  }, []);
 
   // Open modal with specific mode
   const openModal = (mode: PaymentRecordModalMode, record: PaymentRecordRow) => {
@@ -464,7 +461,17 @@ export function PaymentRecordTable({
                         className="px-4 py-3 font-bold text-[#23d2e2]"
                         style={{ width: columns[1].width }}
                       >
-                        <TruncatedText text={row.studentName} maxLength={12} />
+                        {row.isSharedPackage && row.sharedStudentNames && row.sharedStudentNames.length > 1 ? (
+                          <div className="space-y-0.5">
+                            {row.sharedStudentNames.map((name, idx) => (
+                              <div key={idx} className="truncate">
+                                {name.length > 12 ? `${name.slice(0, 12)}...` : name}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <TruncatedText text={row.studentName} maxLength={12} />
+                        )}
                       </td>
 
                       {/* Branch */}
@@ -627,18 +634,60 @@ export function PaymentRecordTable({
           open={receiptModalOpen}
           onOpenChange={setReceiptModalOpen}
           billToName={receiptRecord.parentName ?? receiptRecord.studentName}
+          billToAddress={(() => {
+            const parts: string[] = [];
+            if (receiptRecord.parentAddress) {
+              parts.push(receiptRecord.parentAddress);
+            }
+            const postcodeCity = [receiptRecord.parentPostcode, receiptRecord.parentCity]
+              .filter(Boolean)
+              .join(" ");
+            if (postcodeCity) {
+              parts.push(postcodeCity);
+            }
+            return parts.length > 0 ? parts.join("\n") : undefined;
+          })()}
           billToContact={undefined}
           date={receiptRecord.paidAt ? new Date(receiptRecord.paidAt) : new Date()}
           receiptNo={receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
           invoiceNo={receiptRecord.invoiceNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
-          items={[
-            {
-              code: receiptRecord.packageId?.slice(0, 8).toUpperCase() ?? "PKG",
-              product: `${receiptRecord.courseName ?? "Course"} - ${receiptRecord.packageName ?? "Package"}`,
-              qty: 1,
-              rate: receiptRecord.price,
-            },
-          ]}
+          items={(() => {
+            const items: { code: string; product: string; qty: number; rate: number }[] = [];
+            const packageCode = receiptRecord.courseCode ?? receiptRecord.packageId?.slice(0, 8).toUpperCase() ?? "PKG";
+            const duration = receiptRecord.packageDuration ?? 1;
+            // Check packageName or packageType for "session" (case-insensitive)
+            const isSession =
+              receiptRecord.packageName?.toLowerCase().includes("session") ||
+              receiptRecord.packageType?.toLowerCase() === "session";
+            const unitLabel = isSession ? "Session" : "Month";
+
+            // Check if this is a shared package with multiple students
+            if (receiptRecord.isSharedPackage && receiptRecord.sharedStudentNames && receiptRecord.sharedStudentNames.length > 1) {
+              const siblingCount = receiptRecord.sharedStudentNames.length;
+              const splitSessions = Math.floor(duration / siblingCount);
+              const splitPrice = receiptRecord.price / siblingCount;
+
+              // Add a full item row for each student with their split session allocation
+              receiptRecord.sharedStudentNames.forEach((name) => {
+                items.push({
+                  code: packageCode,
+                  product: `${receiptRecord.courseName ?? "Course"} - ${splitSessions} ${unitLabel}${splitSessions > 1 ? "s" : ""}\n(${name})`,
+                  qty: 1,
+                  rate: splitPrice,
+                });
+              });
+            } else {
+              // Single student - course, sessions, and student name in brackets on new line
+              items.push({
+                code: packageCode,
+                product: `${receiptRecord.courseName ?? "Course"} - ${duration} ${unitLabel}${duration > 1 ? "s" : ""}\n(${receiptRecord.studentName})`,
+                qty: 1,
+                rate: receiptRecord.price,
+              });
+            }
+
+            return items;
+          })()}
           total={receiptRecord.price}
           branch={{
             name: receiptRecord.branchName,

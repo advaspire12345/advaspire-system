@@ -64,6 +64,8 @@ const columns = [
     width: "90px",
     align: "center" as const,
   },
+  { key: "lesson", label: "Lesson", width: "120px" },
+  { key: "mission", label: "Mission", width: "100px" },
   { key: "activity", label: "Activity", width: "120px" },
   { key: "adcoin", label: "Adcoin", width: "70px", align: "center" as const },
   { key: "pic", label: "PIC", width: "100px" },
@@ -84,6 +86,8 @@ const csvColumns = [
   { key: "dayOfWeek", label: "Day" },
   { key: "actualStartTime", label: "Time" },
   { key: "status", label: "Attendance" },
+  { key: "lesson", label: "Lesson" },
+  { key: "mission", label: "Mission" },
   { key: "lastActivity", label: "Activity" },
   { key: "adcoin", label: "Adcoin" },
   { key: "instructorName", label: "Instructor" },
@@ -518,10 +522,26 @@ export function AttendanceLogTable({
                         {getStatusBadge(row.status)}
                       </td>
 
-                      {/* Activity */}
+                      {/* Lesson */}
                       <td
                         className="px-4 py-3"
                         style={{ width: columns[9].width }}
+                      >
+                        <TruncatedText text={row.lesson} maxLength={15} />
+                      </td>
+
+                      {/* Mission */}
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[10].width }}
+                      >
+                        <TruncatedText text={row.mission} maxLength={12} />
+                      </td>
+
+                      {/* Activity */}
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[11].width }}
                       >
                         <TruncatedText text={row.lastActivity} maxLength={15} />
                       </td>
@@ -529,7 +549,7 @@ export function AttendanceLogTable({
                       {/* Adcoin */}
                       <td
                         className="px-4 py-3 text-center font-bold text-[#23d2e2]"
-                        style={{ width: columns[10].width }}
+                        style={{ width: columns[12].width }}
                       >
                         {row.adcoin ?? 0}
                       </td>
@@ -537,7 +557,7 @@ export function AttendanceLogTable({
                       {/* PIC (Instructor/Marked By) */}
                       <td
                         className="px-4 py-3"
-                        style={{ width: columns[11].width }}
+                        style={{ width: columns[13].width }}
                       >
                         <TruncatedText
                           text={row.instructorName ?? row.markedBy}
@@ -548,7 +568,7 @@ export function AttendanceLogTable({
                       {/* Actions */}
                       <td
                         className="px-4 py-3"
-                        style={{ width: columns[12].width }}
+                        style={{ width: columns[14].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
                           {/* Edit Button */}

@@ -59,17 +59,28 @@ export async function approvePaymentAction(
   paymentId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    console.log('[approvePaymentAction] Starting approval for payment:', paymentId);
+
     const result = await approvePayment(paymentId);
 
     if (!result) {
+      console.error('[approvePaymentAction] approvePayment returned null');
       return { success: false, error: "Failed to approve payment" };
     }
 
+    console.log('[approvePaymentAction] Payment approved successfully, revalidating paths...');
+
+    // Revalidate ALL affected pages to ensure UI updates
     revalidatePath("/pending-payments");
+    revalidatePath("/student");
+    revalidatePath("/attendance");
+    revalidatePath("/payment-record");
     revalidateTag("dashboard", "max");
+
+    console.log('[approvePaymentAction] All paths revalidated');
     return { success: true };
   } catch (error) {
-    console.error("Error approving payment:", error);
+    console.error("[approvePaymentAction] Error approving payment:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",
@@ -110,12 +121,15 @@ export async function addPendingPaymentAction(
       student_id: data.studentId,
       course_id: data.courseId || null,
       amount: data.price,
+      payment_type: "package",
       status: "pending",
       payment_method: data.paymentMethod,
+      paid_at: data.paidAt || null,
+      receipt_photo: data.receiptPhoto || null,
     });
 
     if (!result) {
-      return { success: false, error: "Failed to create payment" };
+      return { success: false, error: "Failed to create payment - check server logs" };
     }
 
     revalidatePath("/pending-payments");

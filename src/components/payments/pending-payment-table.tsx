@@ -169,7 +169,7 @@ export function PendingPaymentTable({
         const newRow: PendingPaymentRow = {
           id: result.payment.id,
           parentName: student?.parentName ?? null,
-          parentPhone: null,
+          parentPhone: student?.parentPhone ?? null,
           studentId: formData.studentId,
           studentName: student?.name ?? "",
           studentPhone: null,
@@ -185,6 +185,9 @@ export function PendingPaymentTable({
           receiptPhoto: formData.receiptPhoto,
           createdAt: new Date().toISOString(),
           paidAt: formData.paidAt,
+          isSharedPackage: false,
+          poolId: null,
+          sharedStudentNames: null,
         };
         setData((prev) => [newRow, ...prev]);
       } else {
@@ -428,12 +431,22 @@ export function PendingPaymentTable({
                         <TruncatedText text={row.parentName} maxLength={12} />
                       </td>
 
-                      {/* Student Name */}
+                      {/* Student Name - Show all siblings for shared packages */}
                       <td
                         className="px-4 py-3 font-bold text-[#23d2e2]"
                         style={{ width: columns[1].width }}
                       >
-                        <TruncatedText text={row.studentName} maxLength={12} />
+                        {row.isSharedPackage && row.sharedStudentNames && row.sharedStudentNames.length > 1 ? (
+                          <div className="space-y-0.5">
+                            {row.sharedStudentNames.map((name, idx) => (
+                              <div key={idx} className="truncate">
+                                {name}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <TruncatedText text={row.studentName} maxLength={12} />
+                        )}
                       </td>
 
                       {/* Branch */}

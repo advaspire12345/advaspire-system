@@ -19,11 +19,18 @@ import type { PaymentMethod } from "@/db/schema";
 
 export type PaymentModalMode = "add" | "edit" | "approve" | "delete";
 
+export interface StudentEnrollment {
+  courseId: string;
+  courseName: string;
+}
+
 export interface StudentOption {
   id: string;
   name: string;
   branchName: string;
   parentName: string | null;
+  parentPhone: string | null;
+  enrollments: StudentEnrollment[];
 }
 
 export interface CourseOption {
@@ -107,6 +114,14 @@ export function PendingPaymentModal({
   // Get selected student details
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
 
+  // Filter courses based on selected student's enrollments (for add mode)
+  const filteredCourses = useMemo(() => {
+    if (!selectedStudent || !selectedStudent.enrollments?.length) return [];
+    // Get unique course IDs from student enrollments
+    const enrolledCourseIds = new Set(selectedStudent.enrollments.map((e) => e.courseId));
+    return courses.filter((c) => enrolledCourseIds.has(c.id));
+  }, [selectedStudent, courses]);
+
   // Filter packages based on selected course
   const filteredPackages = useMemo(() => {
     if (!selectedCourseId) return [];
@@ -116,6 +131,21 @@ export function PendingPaymentModal({
   // Get selected package price
   const selectedPackage = filteredPackages.find((p) => p.id === selectedPackageId);
   const price = selectedPackage?.price ?? 0;
+
+  // Handle student change: reset selections and auto-select if only one enrollment
+  useEffect(() => {
+    if (mode === "add" && selectedStudentId) {
+      // Reset package when student changes
+      setSelectedPackageId("");
+
+      // Auto-select course if student has only one enrollment
+      if (filteredCourses.length === 1) {
+        setSelectedCourseId(filteredCourses[0].id);
+      } else {
+        setSelectedCourseId("");
+      }
+    }
+  }, [mode, selectedStudentId, filteredCourses]);
 
   // Reset form when modal opens or record changes
   useEffect(() => {
@@ -208,7 +238,12 @@ export function PendingPaymentModal({
   };
 
   const getSubtitleText = () => {
-    if (mode === "add") return "Create a new payment record";
+    if (mode === "add") {
+      if (!selectedStudentId) return "Please select a student";
+      if (!selectedCourseId) return "Please select a program";
+      if (!selectedPackageId) return "Please select a package";
+      return "Create a new payment record";
+    }
     if (mode === "approve") return "Mark this payment as paid";
     if (mode === "delete") return "This action cannot be undone";
     return "Update payment details";
@@ -221,6 +256,13 @@ export function PendingPaymentModal({
   const studentOptions = students.map((s) => ({
     value: s.id,
     label: s.name,
+  }));
+
+  // In add mode, use filtered courses based on student enrollments
+  // In edit mode, use all courses
+  const courseOptionsForAdd = filteredCourses.map((c) => ({
+    value: c.id,
+    label: c.name,
   }));
 
   const courseOptions = courses.map((c) => ({
@@ -262,14 +304,23 @@ export function PendingPaymentModal({
             {isAddMode ? (
               <>
                 {/* Student Select */}
-                <FloatingSelect
-                  id="select-student"
-                  label="Student"
-                  placeholder="Select student..."
-                  value={selectedStudentId}
-                  onChange={setSelectedStudentId}
-                  options={studentOptions}
-                />
+                {studentOptions.length === 0 ? (
+                  <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
+                    <p className="text-sm text-amber-700">
+                      No students available. Please add students first.
+                    </p>
+                  </div>
+                ) : (
+                  <FloatingSelect
+                    id="select-student"
+                    label="Student"
+                    placeholder="Select student..."
+                    value={selectedStudentId}
+                    onChange={setSelectedStudentId}
+                    options={studentOptions}
+                    searchable
+                  />
+                )}
 
                 {/* Parent Name (auto-filled based on student) */}
                 <div className="relative">
@@ -304,17 +355,50 @@ export function PendingPaymentModal({
                     </label>
                   </div>
 
-                  <FloatingSelect
-                    id="select-course"
-                    label="Program"
-                    placeholder="Select program..."
-                    value={selectedCourseId}
-                    onChange={(val) => {
-                      setSelectedCourseId(val);
-                      setSelectedPackageId(""); // Reset package when course changes
-                    }}
-                    options={courseOptions}
-                  />
+                  {!selectedStudentId ? (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        value="Select student first"
+                        className={cn(
+                          "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-muted-foreground flex items-center",
+                          readonlyFieldClass
+                        )}
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Program
+                      </label>
+                    </div>
+                  ) : courseOptionsForAdd.length === 0 ? (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        value="No enrollments"
+                        className={cn(
+                          "peer w-full h-[58px] rounded-[10px] border border-amber-300 px-4 text-base font-bold text-amber-600 flex items-center",
+                          readonlyFieldClass
+                        )}
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-amber-500">
+                        Program
+                      </label>
+                    </div>
+                  ) : (
+                    <FloatingSelect
+                      id="select-course"
+                      label="Program"
+                      placeholder="Select program..."
+                      value={selectedCourseId}
+                      onChange={(val) => {
+                        setSelectedCourseId(val);
+                        setSelectedPackageId(""); // Reset package when course changes
+                      }}
+                      options={courseOptionsForAdd}
+                      searchable
+                    />
+                  )}
                 </div>
 
                 {/* Package and Price on same row */}
@@ -566,7 +650,7 @@ export function PendingPaymentModal({
           <div className="mt-12">
             <Button
               onClick={handleSubmit}
-              disabled={isSubmitting || (isAddMode && (!selectedStudentId || !selectedPackageId))}
+              disabled={isSubmitting || (isAddMode && (!selectedStudentId || !selectedCourseId || !selectedPackageId))}
               className={cn(
                 "w-full h-[50px] text-white font-bold rounded-[10px]",
                 mode === "delete" && "bg-[#fd434f] hover:bg-[#e03a45]",

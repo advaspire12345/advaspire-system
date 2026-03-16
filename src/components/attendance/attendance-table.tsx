@@ -32,6 +32,7 @@ export interface AttendanceRow {
   studentPhoto: string | null;
   branchId: string;
   branchName: string;
+  courseId: string;
   courseName: string;
   packageName: string | null;
   dayOfWeek: string | null;
@@ -61,6 +62,8 @@ export interface AttendanceRow {
     projectPhotos: string[] | null;
     notes: string | null;
     adcoin: number;
+    lesson: string | null;
+    mission: string | null;
   } | null;
 }
 
@@ -69,9 +72,23 @@ interface InstructorOption {
   name: string;
 }
 
+interface CurriculumLesson {
+  id: string;
+  title: string;
+  missions: {
+    level: number | null;
+    url_mission: string | null;
+    url_answer: string | null;
+  }[];
+}
+
 interface AttendanceTableProps {
   initialData: AttendanceRow[];
+  /** All active students for manual "Take Attendance" search (not filtered by slot completion) */
+  allStudentsForManualAdd?: AttendanceRow[];
   instructors?: InstructorOption[];
+  /** Function to fetch curriculum lessons for a course */
+  fetchCurriculumLessons?: (courseId: string) => Promise<CurriculumLesson[]>;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -83,6 +100,8 @@ const columns = [
   { key: "program", label: "Program", width: "140px" },
   { key: "day", label: "Day", width: "80px" },
   { key: "time", label: "Time", width: "100px" },
+  { key: "lesson", label: "Lesson", width: "120px" },
+  { key: "mission", label: "Mission", width: "100px" },
   { key: "lastActivity", label: "Last Activity", width: "140px" },
   {
     key: "attendance",
@@ -94,7 +113,9 @@ const columns = [
 
 export function AttendanceTable({
   initialData,
+  allStudentsForManualAdd,
   instructors = [],
+  fetchCurriculumLessons,
 }: AttendanceTableProps) {
   const router = useRouter();
   const [data, setData] = useState<AttendanceRow[]>(initialData);
@@ -165,6 +186,9 @@ export function AttendanceTable({
             ? formData.projectPhotos
             : undefined,
         adcoin: formData.adcoin || 0,
+        // Lesson and mission
+        lesson: formData.lesson || undefined,
+        mission: formData.mission || undefined,
         // Trial-specific fields
         instructorFeedback: formData.instructorFeedback || undefined,
         isTrial: formData.isTrial || false,
@@ -179,8 +203,32 @@ export function AttendanceTable({
 
       if (response.ok) {
         const result = await response.json();
-        // Only remove the row if attendance is complete (server will filter it out anyway on refresh)
-        // For now, just refresh to let server decide what to show
+
+        // Optimistically update local data so lesson/mission show immediately
+        if (selectedRow) {
+          setData(prev => prev.map(row => {
+            if (row.id !== selectedRow.id) return row;
+            return {
+              ...row,
+              existingAttendance: {
+                id: row.existingAttendance?.id || result.attendance?.id || '',
+                date: row.existingAttendance?.date || formData.date,
+                status: formData.status as AttendanceStatus,
+                classType: formData.classType as 'Physical' | 'Online' | null,
+                actualDay: formData.actualDay || null,
+                actualStartTime: formData.actualStartTime || null,
+                instructorName: formData.instructorName || null,
+                lastActivity: formData.lastActivity || null,
+                projectPhotos: formData.projectPhotos.length > 0 ? formData.projectPhotos : null,
+                notes: formData.notes || null,
+                adcoin: formData.adcoin || 0,
+                lesson: formData.lesson || null,
+                mission: formData.mission || null,
+              },
+            };
+          }));
+        }
+
         router.refresh();
       } else {
         const errorData = await response.json();
@@ -316,7 +364,12 @@ export function AttendanceTable({
                     </td>
                   </tr>
                 ) : (
-                  paginatedData.map((row, rowIdx) => (
+                  paginatedData.map((row, rowIdx) => {
+                    // Check if attendance exists but is incomplete
+                    const hasIncompleteAttendance = row.existingAttendance &&
+                      (!row.existingAttendance.classType || !row.existingAttendance.instructorName);
+
+                    return (
                     <tr
                       key={row.id}
                       className={cn(
@@ -324,6 +377,7 @@ export function AttendanceTable({
                         rowIdx === paginatedData.length - 1 &&
                           "rounded-bl-lg rounded-br-lg",
                         row.type === 'trial' && "bg-purple-50/50",
+                        hasIncompleteAttendance && "bg-amber-50/50",
                       )}
                     >
                       {/* Photo */}
@@ -398,10 +452,26 @@ export function AttendanceTable({
                         {formatTime(row.slotTime, null)}
                       </td>
 
-                      {/* Last Activity */}
+                      {/* Lesson */}
                       <td
                         className="px-4 py-3"
                         style={{ width: columns[6].width }}
+                      >
+                        {row.existingAttendance?.lesson ?? "-"}
+                      </td>
+
+                      {/* Mission */}
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[7].width }}
+                      >
+                        {row.existingAttendance?.mission ?? "-"}
+                      </td>
+
+                      {/* Last Activity */}
+                      <td
+                        className="px-4 py-3"
+                        style={{ width: columns[8].width }}
                       >
                         <span className="font-bold">
                           {formatLastActivity(
@@ -415,7 +485,7 @@ export function AttendanceTable({
                       {/* Attendance Actions */}
                       <td
                         className="px-4 py-3"
-                        style={{ width: columns[7].width }}
+                        style={{ width: columns[9].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
                           {/* Mark Present Button */}
@@ -442,7 +512,8 @@ export function AttendanceTable({
                         </div>
                       </td>
                     </tr>
-                  ))
+                  );
+                  })
                 )}
               </tbody>
             </table>
@@ -489,10 +560,11 @@ export function AttendanceTable({
         open={modalOpen}
         onOpenChange={setModalOpen}
         mode={modalMode}
-        allStudents={data}
+        allStudents={modalMode === 'add' ? (allStudentsForManualAdd ?? data) : data}
         selectedRow={selectedRow}
         instructors={instructors}
         onSubmit={handleModalSubmit}
+        fetchCurriculumLessons={fetchCurriculumLessons}
       />
     </>
   );

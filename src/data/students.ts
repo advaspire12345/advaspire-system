@@ -147,11 +147,18 @@ export async function getAllStudents(): Promise<Student[]> {
   return data ?? [];
 }
 
+export interface StudentEnrollmentForPayment {
+  courseId: string;
+  courseName: string;
+}
+
 export interface StudentForPayment {
   id: string;
   name: string;
   branchName: string;
   parentName: string | null;
+  parentPhone: string | null;
+  enrollments: StudentEnrollmentForPayment[];
 }
 
 export async function getStudentsForPayment(userEmail: string): Promise<StudentForPayment[]> {
@@ -166,7 +173,12 @@ export async function getStudentsForPayment(userEmail: string): Promise<StudentF
       name,
       branch:branches!inner(name),
       parent_students(
-        parent:parents(name)
+        parent:parents(name, phone)
+      ),
+      enrollments(
+        id,
+        course_id,
+        course:courses(id, name)
       )
     `)
     .is('deleted_at', null)
@@ -186,15 +198,32 @@ export async function getStudentsForPayment(userEmail: string): Promise<StudentF
   return (data ?? []).map((student) => {
     const branch = student.branch as unknown as { name: string };
     const parentStudents = student.parent_students as unknown as Array<{
-      parent: { name: string } | null;
+      parent: { name: string; phone: string | null } | null;
     }>;
     const parentName = parentStudents?.[0]?.parent?.name ?? null;
+    const parentPhone = parentStudents?.[0]?.parent?.phone ?? null;
+
+    // Extract enrollments with course info
+    const enrollmentsData = student.enrollments as unknown as Array<{
+      id: string;
+      course_id: string;
+      course: { id: string; name: string } | null;
+    }>;
+
+    const enrollments: StudentEnrollmentForPayment[] = (enrollmentsData ?? [])
+      .filter((e) => e.course !== null)
+      .map((e) => ({
+        courseId: e.course!.id,
+        courseName: e.course!.name,
+      }));
 
     return {
       id: student.id,
       name: student.name,
       branchName: branch.name,
       parentName,
+      parentPhone,
+      enrollments,
     };
   });
 }
@@ -439,6 +468,11 @@ export interface StudentTableRow {
   periodStart: string | null;
   periodEnd: string | null;
   packageDuration: number | null;
+  // Pool info (for sibling sharing)
+  isPooled: boolean;
+  poolId: string | null;
+  poolName: string | null;
+  poolSiblings: string[] | null; // Sibling names in the pool
   // Session count - total attended sessions
   sessionCount: number;
   // Payment info - total paid and sessions bought
@@ -500,8 +534,10 @@ export async function getStudentsForTable(
         schedule,
         package_id,
         instructor_id,
+        pool_id,
         course:courses(id, name),
         package:course_pricing(id, package_type, duration),
+        pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
         attendance(date, status)
       ),
       parent_students(
@@ -589,39 +625,63 @@ export async function getStudentsForTable(
     const packageDuration: number | null = activeEnrollment?.package?.duration || null;
     const packageType = activeEnrollment?.package?.package_type || null;
 
+    // Check if enrollment is part of a shared sibling pool
+    const isPooled = activeEnrollment?.pool_id && activeEnrollment?.pool;
+    const poolInfo = isPooled ? activeEnrollment.pool as unknown as {
+      id: string;
+      sessions_remaining: number;
+      total_sessions: number;
+      name: string | null;
+      sibling_count?: number;
+    } : null;
+
     if (activeEnrollment) {
-      // sessions_remaining from enrollment represents:
-      // - For session packages: number of sessions remaining
-      // - For monthly packages: number of months remaining
-      // Value of 0 means payment not approved yet
-      const enrollmentSessions = activeEnrollment.sessions_remaining ?? 0;
+      // For pooled enrollments, calculate INDIVIDUAL session remaining
+      // Each sibling's remaining = (pool.total_sessions / sibling_count) - their_attendance_count
+      if (isPooled && poolInfo) {
+        // Count this student's attendance (present/late)
+        const attendanceRecords = (activeEnrollment.attendance || []) as Array<{ date: string; status: string }>;
+        const thisStudentAttendance = attendanceRecords.filter(
+          (a) => a.status === 'present' || a.status === 'late'
+        ).length;
 
-      if (packageType === 'session') {
-        // For session-based: show remaining sessions directly
-        // 0 means payment not approved or all sessions used
-        sessionsRemaining = enrollmentSessions;
-      } else if (packageType === 'monthly') {
-        // For monthly: sessions_remaining represents months remaining
-        // period_start is set when first attendance is marked
-        const dbPeriodStart = activeEnrollment.period_start;
+        // Get sibling count from pool (default to 2 if not available)
+        const siblingCount = poolInfo.sibling_count || 2;
 
-        if (dbPeriodStart && enrollmentSessions > 0) {
-          periodStart = dbPeriodStart;
-          // Calculate end date: start + 1 month (per period)
-          const endDate = new Date(dbPeriodStart);
-          endDate.setMonth(endDate.getMonth() + 1);
-          const endDateStr = endDate.toISOString().split('T')[0];
-          periodEnd = endDateStr;
+        // Calculate this student's allocation
+        const thisStudentAllocation = Math.floor(poolInfo.total_sessions / siblingCount);
 
-          // Show months remaining
+        // This student's remaining = allocation - their attendance
+        sessionsRemaining = thisStudentAllocation - thisStudentAttendance;
+      } else {
+        // Non-pooled: use enrollment's sessions_remaining
+        const enrollmentSessions = activeEnrollment.sessions_remaining ?? 0;
+
+        if (packageType === 'session') {
+          // For session-based: show remaining sessions directly
           sessionsRemaining = enrollmentSessions;
-        } else if (enrollmentSessions > 0) {
-          // Payment approved but no attendance yet
-          // Show months remaining, waiting for first attendance
+        } else if (packageType === 'monthly') {
+          // For monthly: sessions_remaining represents months remaining
+          // period_start is set when first attendance is marked
+          const dbPeriodStart = activeEnrollment.period_start;
+
+          // Always set sessions remaining
           sessionsRemaining = enrollmentSessions;
+
+          // If period_start exists, always show the date range (even if sessions <= 0)
+          if (dbPeriodStart) {
+            periodStart = dbPeriodStart;
+            // Calculate end date: start + 1 month (per period)
+            const endDate = new Date(dbPeriodStart);
+            endDate.setMonth(endDate.getMonth() + 1);
+            const endDateStr = endDate.toISOString().split('T')[0];
+            periodEnd = endDateStr;
+          }
+          // If no period_start and sessions > 0, they're waiting for first attendance
+          // If no period_start and sessions <= 0, pending payment before any attendance
         } else {
-          // No payment approved yet - show 0
-          sessionsRemaining = 0;
+          // No package type specified, use enrollment sessions
+          sessionsRemaining = enrollmentSessions;
         }
       }
     }
@@ -684,6 +744,11 @@ export async function getStudentsForTable(
       periodStart,
       periodEnd,
       packageDuration,
+      // Pool info (for sibling sharing)
+      isPooled: !!isPooled,
+      poolId: activeEnrollment?.pool_id || null,
+      poolName: poolInfo?.name || null,
+      poolSiblings: null, // Will be populated via separate query if needed
       // Session count
       sessionCount,
       // Payment info
@@ -708,17 +773,19 @@ export async function getStudentsForTable(
 // ENROLLMENT OPERATIONS
 // ============================================
 
-export async function createEnrollment(enrollmentData: EnrollmentInsert): Promise<boolean> {
-  const { error } = await supabaseAdmin
+export async function createEnrollment(enrollmentData: EnrollmentInsert): Promise<{ id: string } | null> {
+  const { data, error } = await supabaseAdmin
     .from('enrollments')
-    .insert(enrollmentData);
+    .insert(enrollmentData)
+    .select('id')
+    .single();
 
   if (error) {
     console.error('Error creating enrollment:', error);
-    return false;
+    return null;
   }
 
-  return true;
+  return data;
 }
 
 export async function updateOrCreateEnrollment(
@@ -755,8 +822,15 @@ export async function updateOrCreateEnrollment(
 
   if (sameCourseEnrollment) {
     // Update existing enrollment for the same course
-    // Keep existing sessions_remaining if it has value (payment was approved)
-    const keepSessions = sameCourseEnrollment.sessions_remaining > 0;
+    // Keep existing sessions_remaining if it has any value (positive from payment, or negative from attendance)
+    // Only reset if it's exactly 0 (brand new enrollment with no activity)
+    const keepSessions = sameCourseEnrollment.sessions_remaining !== 0;
+    console.log('[updateOrCreateEnrollment] Updating enrollment:', {
+      enrollmentId: sameCourseEnrollment.id,
+      existingSessions: sameCourseEnrollment.sessions_remaining,
+      keepSessions,
+      scheduleOnly: true, // This is a schedule-only update
+    });
     const { error: updateError } = await supabaseAdmin
       .from('enrollments')
       .update({
@@ -765,7 +839,7 @@ export async function updateOrCreateEnrollment(
         day_of_week: days.length > 0 ? JSON.stringify(days) : null,
         start_time: firstEntry?.time || null,
         schedule: JSON.stringify(enrollmentData.schedule),
-        // Only update sessions if existing is 0 (no payment approved yet)
+        // Only update sessions if existing is exactly 0 (no payment or attendance yet)
         ...(keepSessions ? {} : { sessions_remaining: 0 }),
         updated_at: new Date().toISOString(),
       })

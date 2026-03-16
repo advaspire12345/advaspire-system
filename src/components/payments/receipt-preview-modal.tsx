@@ -195,8 +195,8 @@ export function ReceiptPreviewModal({
 
                 {/* Row 2: address, same value column under the name */}
                 {billToAddress && (
-                  <div className="mt-1 ml-[58px]">
-                    <p>{billToAddress}</p>
+                  <div className="mt-1 ml-[58px] whitespace-pre-line">
+                    {billToAddress}
                   </div>
                 )}
 
@@ -260,27 +260,32 @@ export function ReceiptPreviewModal({
                 </tr>
               </thead>
               <tbody>
-                {items.map((item, idx) => (
-                  <tr key={idx}>
-                    <td className="px-1 py-1 align-top text-center">
-                      {idx + 1}
-                    </td>
-                    <td className="px-1 py-1 align-top">{item.code}</td>
-                    <td className="px-1 py-1 align-top">{item.product}</td>
-                    <td className="px-1 py-1 text-right align-top text-center">
-                      {item.qty}
-                    </td>
-                    <td className="px-1 py-1 text-right align-top text-center">
-                      {item.rate.toFixed(2)}
-                    </td>
-                    <td className="px-1 py-1 text-right align-top text-center">
-                      RM
-                    </td>
-                    <td className="px-1 py-1 text-right align-top text-center">
-                      {(item.qty * item.rate).toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
+                {items.map((item, idx) => {
+                  // Check if this is a detail/sub-item row (no qty/rate)
+                  const isDetailRow = item.qty === 0 && item.rate === 0;
+
+                  return (
+                    <tr key={idx}>
+                      <td className="px-1 py-1 align-top text-center">
+                        {isDetailRow ? "" : idx + 1}
+                      </td>
+                      <td className="px-1 py-1 align-top">{item.code}</td>
+                      <td className="px-1 py-1 align-top whitespace-pre-line">{item.product}</td>
+                      <td className="px-1 py-1 text-right align-top text-center">
+                        {isDetailRow ? "" : item.qty}
+                      </td>
+                      <td className="px-1 py-1 text-right align-top text-center">
+                        {isDetailRow ? "" : item.rate.toFixed(2)}
+                      </td>
+                      <td className="px-1 py-1 text-right align-top text-center">
+                        {isDetailRow ? "" : "RM"}
+                      </td>
+                      <td className="px-1 py-1 text-right align-top text-center">
+                        {isDetailRow ? "" : (item.qty * item.rate).toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 

@@ -45,10 +45,10 @@ const columns: {
   { key: "program", label: "Program", width: "130px" },
   { key: "level", label: "Level", width: "60px", align: "center" as const },
   { key: "adcoin", label: "AdCoins", width: "80px", align: "center" as const },
-  { key: "packageType", label: "Package", width: "80px" },
+  { key: "packageType", label: "Package", width: "110px" },
   { key: "periodActive", label: "Period Active", width: "140px" },
-  { key: "sessionCount", label: "Sessions", width: "80px", align: "center" as const },
-  { key: "paymentCount", label: "Payment", width: "120px" },
+  { key: "attend", label: "Attend", width: "70px", align: "center" as const },
+  { key: "paymentCount", label: "Payment Settled", width: "120px" },
   { key: "schedule", label: "Schedule", width: "110px" },
   { key: "contact", label: "Contact", width: "110px" },
   { key: "city", label: "City", width: "90px" },
@@ -124,6 +124,8 @@ export function StudentTable({
     numberOfMonths: formData.numberOfMonths,
     numberOfSessions: formData.numberOfSessions,
     scheduleEntries: formData.scheduleEntries,
+    shareWithSibling: formData.shareWithSibling,
+    existingPoolId: formData.existingPoolId,
     notes: formData.notes,
   });
 
@@ -257,52 +259,81 @@ export function StudentTable({
 
     const sessions = row.sessionsRemaining ?? 0;
 
-    // If sessions is 0 or negative, payment not approved yet (or used before payment)
-    if (sessions <= 0) {
-      const negativeCount = Math.abs(sessions);
-      return (
-        <div className="space-y-0.5">
-          <span className="text-amber-500 text-xs font-medium">Pending Payment</span>
-          {sessions < 0 && (
-            <div className="text-red-500 text-xs font-medium">
-              {sessions} session{negativeCount !== 1 ? "s" : ""}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    if (row.packageType === "session") {
-      // For session-based: show remaining sessions
-      return (
-        <span className="font-medium text-[#615DFA]">
-          {sessions} session{sessions !== 1 ? "s" : ""}
-        </span>
-      );
-    }
-
+    // For MONTHLY packages, always show date range if period exists
     if (row.packageType === "monthly") {
-      // For monthly: sessions represents months remaining
-      if (!row.periodStart || !row.periodEnd) {
-        // Payment approved but no attendance yet
-        return (
-          <div className="text-xs space-y-0.5">
-            <span className="text-muted-foreground">Awaiting first session</span>
-            <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
-          </div>
-        );
+      if (row.periodStart && row.periodEnd) {
+        try {
+          const startDate = parseISO(row.periodStart);
+          const endDate = parseISO(row.periodEnd);
+          const dateRange = `${format(startDate, "d/M")} - ${format(endDate, "d/M")}`;
+
+          if (sessions < 0) {
+            // Negative months - pending payment with date range
+            return (
+              <div className="text-xs space-y-0.5">
+                <div className="font-medium">{dateRange}</div>
+                <div className="text-amber-500 font-medium">Pending Payment</div>
+              </div>
+            );
+          } else if (sessions === 0) {
+            // Zero months - pending payment with date range
+            return (
+              <div className="text-xs space-y-0.5">
+                <div className="font-medium">{dateRange}</div>
+                <div className="text-amber-500 font-medium">Pending Payment</div>
+              </div>
+            );
+          } else {
+            // Positive months remaining
+            return (
+              <div className="text-xs space-y-0.5">
+                <div className="font-medium">{dateRange}</div>
+                <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
+              </div>
+            );
+          }
+        } catch {
+          return "-";
+        }
+      } else {
+        // No period start - waiting for first attendance or pending payment
+        if (sessions > 0) {
+          return (
+            <div className="text-xs space-y-0.5">
+              <span className="text-muted-foreground">Awaiting first session</span>
+              <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
+            </div>
+          );
+        } else {
+          return (
+            <span className="text-amber-500 text-xs font-medium">Pending Payment</span>
+          );
+        }
       }
-      try {
-        const startDate = parseISO(row.periodStart);
-        const endDate = parseISO(row.periodEnd);
+    }
+
+    // For SESSION packages
+    if (row.packageType === "session") {
+      if (sessions < 0) {
+        const owedCount = Math.abs(sessions);
         return (
-          <div className="text-xs space-y-0.5">
-            <div>{format(startDate, "MMM d")} - {format(endDate, "MMM d, yyyy")}</div>
-            <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
+          <div className="space-y-0.5">
+            <span className="text-red-500 font-bold">
+              {sessions} session{owedCount !== 1 ? "s" : ""}
+            </span>
+            <div className="text-amber-500 text-xs font-medium">Pending Payment</div>
           </div>
         );
-      } catch {
-        return "-";
+      } else if (sessions === 0) {
+        return (
+          <span className="text-amber-500 text-xs font-medium">Pending Payment</span>
+        );
+      } else {
+        return (
+          <span className="font-medium text-[#615DFA]">
+            {sessions} session{sessions !== 1 ? "s" : ""}
+          </span>
+        );
       }
     }
 
@@ -332,7 +363,7 @@ export function StudentTable({
           {/* Table - EXACT STRUCTURE MATCH TO TRIAL TABLE */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1840px] w-full table-fixed border-separate border-spacing-0">
+            <table className="min-w-[1830px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
                   {columns.map((col, idx) => (
@@ -359,7 +390,7 @@ export function StudentTable({
             </table>
 
             {/* Body Table - EXACT STYLING MATCH */}
-            <table className="min-w-[1840px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="min-w-[1830px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
@@ -463,10 +494,19 @@ export function StudentTable({
 
                       {/* Package Type */}
                       <td
-                        className="px-3 py-2 text-sm capitalize"
+                        className="px-3 py-2 text-sm"
                         style={{ width: columns[9].width }}
                       >
-                        {row.packageType || "-"}
+                        {row.packageType && row.packageDuration ? (
+                          <span className="font-medium">
+                            {row.packageDuration} {row.packageType === "session" ? "session" : "month"}
+                            {row.packageDuration !== 1 ? "s" : ""}
+                          </span>
+                        ) : row.packageType ? (
+                          <span className="capitalize">{row.packageType}</span>
+                        ) : (
+                          "-"
+                        )}
                       </td>
 
                       {/* Period Active */}
@@ -477,15 +517,15 @@ export function StudentTable({
                         {formatPeriodActive(row)}
                       </td>
 
-                      {/* Session Count */}
+                      {/* Attend - Total sessions attended */}
                       <td
-                        className="px-3 py-2 text-center font-medium"
+                        className="px-3 py-2 text-center font-medium text-[#23D2E2]"
                         style={{ width: columns[11].width }}
                       >
-                        {row.sessionCount ?? 0}
+                        {row.sessionCount}
                       </td>
 
-                      {/* Payment Count */}
+                      {/* Payment Settled */}
                       <td
                         className="px-3 py-2 text-xs"
                         style={{ width: columns[12].width }}

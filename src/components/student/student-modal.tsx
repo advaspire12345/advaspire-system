@@ -10,6 +10,7 @@ import {
   Plus,
   Minus,
   Loader2,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
@@ -213,8 +214,36 @@ export interface StudentFormData {
   numberOfSessions: number | null;
   scheduleEntries: { day: string; time: string }[];
 
+  // Sibling Sharing
+  shareWithSibling: boolean;
+  existingPoolId: string | null;
+
   // Notes
   notes: string | null;
+}
+
+// Sibling pool info from API
+export interface SiblingPoolCheckResult {
+  hasPool: boolean;
+  hasSiblingInCourse?: boolean;
+  poolInfo?: {
+    poolId: string;
+    poolName: string | null;
+    courseId: string;
+    courseName: string;
+    sessionsRemaining: number;
+    totalSessions: number;
+    packageId: string | null;
+    packageType: "monthly" | "session" | null;
+    packageDuration: number | null;
+    siblings: { studentId: string; studentName: string }[];
+  } | null;
+  siblings?: { studentId: string; studentName: string; enrollmentId: string }[];
+  siblingPackageInfo?: {
+    packageId: string | null;
+    packageType: string | null;
+    packageDuration: number | null;
+  } | null;
 }
 
 interface StudentModalProps {
@@ -272,6 +301,19 @@ export function StudentModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Sibling pool state
+  const [siblingPoolCheck, setSiblingPoolCheck] = useState<SiblingPoolCheckResult | null>(null);
+  const [isCheckingPool, setIsCheckingPool] = useState(false);
+  const [poolSiblings, setPoolSiblings] = useState<string[]>([]);
+  const [isGeneratingId, setIsGeneratingId] = useState(false);
+
+  // Store sibling's package info for restoring when switching package types
+  const [siblingPackage, setSiblingPackage] = useState<{
+    packageId: string | null;
+    packageType: "monthly" | "session" | null;
+    packageDuration: number | null;
+  } | null>(null);
+
   // Form state
   const [formData, setFormData] = useState<StudentFormData>({
     name: "",
@@ -303,6 +345,8 @@ export function StudentModal({
     numberOfMonths: null,
     numberOfSessions: null,
     scheduleEntries: [],
+    shareWithSibling: false,
+    existingPoolId: null,
     notes: "",
   });
 
@@ -385,9 +429,166 @@ export function StudentModal({
     }));
   }, [selectedCourse]);
 
+  // Check for sibling pools when parent and course are selected (add mode only)
+  useEffect(() => {
+    console.log("[SiblingCheck] useEffect triggered - mode:", mode, "parentId:", formData.parentId, "courseId:", formData.courseId);
+
+    const checkSiblingPool = async () => {
+      // Only check in add mode when both parent (not "new") and course are selected
+      if (
+        mode !== "add" ||
+        !formData.parentId ||
+        formData.parentId === "new" ||
+        !formData.courseId
+      ) {
+        console.log("[SiblingCheck] Skipping - conditions not met");
+        setSiblingPoolCheck(null);
+        return;
+      }
+
+      console.log("[SiblingCheck] Checking for parentId:", formData.parentId, "courseId:", formData.courseId);
+      setIsCheckingPool(true);
+      try {
+        const response = await fetch(
+          `/api/pools/check-sibling?parentId=${formData.parentId}&courseId=${formData.courseId}`
+        );
+        const data = await response.json();
+        console.log("[SiblingCheck] API Response:", data);
+
+        if (response.ok) {
+          setSiblingPoolCheck(data);
+
+          // If there's an existing pool or sibling in course, auto-set shared and package
+          if (data.hasPool && data.poolInfo) {
+            // Use pool's package info
+            const pkgType = data.poolInfo.packageType || "session";
+            const pkgDuration = data.poolInfo.packageDuration || null;
+            const pkgId = data.poolInfo.packageId || null;
+
+            // Store sibling's package for restoring later
+            setSiblingPackage({
+              packageId: pkgId,
+              packageType: pkgType as "monthly" | "session",
+              packageDuration: pkgDuration,
+            });
+
+            setFormData((prev) => ({
+              ...prev,
+              shareWithSibling: true,
+              existingPoolId: data.poolInfo.poolId,
+              packageType: pkgType,
+              packageId: pkgId,
+              numberOfMonths: pkgType === "monthly" ? pkgDuration : null,
+              numberOfSessions: pkgType === "session" ? pkgDuration : null,
+            }));
+          } else if (data.hasSiblingInCourse && data.siblingPackageInfo) {
+            // Use sibling's package info (no pool yet)
+            const pkgType = data.siblingPackageInfo.packageType || "session";
+            const pkgDuration = data.siblingPackageInfo.packageDuration || null;
+            const pkgId = data.siblingPackageInfo.packageId || null;
+
+            // Store sibling's package for restoring later
+            setSiblingPackage({
+              packageId: pkgId,
+              packageType: pkgType as "monthly" | "session",
+              packageDuration: pkgDuration,
+            });
+
+            setFormData((prev) => ({
+              ...prev,
+              shareWithSibling: true,
+              existingPoolId: null,
+              packageType: pkgType as "monthly" | "session",
+              packageId: pkgId,
+              numberOfMonths: pkgType === "monthly" ? pkgDuration : null,
+              numberOfSessions: pkgType === "session" ? pkgDuration : null,
+            }));
+          }
+        } else {
+          console.error("[SiblingCheck] API Error:", data.error);
+          setSiblingPoolCheck(null);
+        }
+      } catch (error) {
+        console.error("[SiblingCheck] Fetch error:", error);
+        setSiblingPoolCheck(null);
+      } finally {
+        setIsCheckingPool(false);
+      }
+    };
+
+    checkSiblingPool();
+  }, [mode, formData.parentId, formData.courseId]);
+
+  // Auto-generate student ID when opening add modal
+  useEffect(() => {
+    const generateStudentId = async () => {
+      if (mode === "add" && open) {
+        setIsGeneratingId(true);
+        try {
+          const response = await fetch('/api/student/generate-id');
+          const data = await response.json();
+          if (response.ok && data.studentId) {
+            setFormData((prev) => ({
+              ...prev,
+              studentId: data.studentId,
+            }));
+          }
+        } catch (error) {
+          console.error("Error generating student ID:", error);
+        } finally {
+          setIsGeneratingId(false);
+        }
+      }
+    };
+
+    generateStudentId();
+  }, [mode, open]);
+
+  // Fetch pool siblings for edit mode when student is pooled
+  useEffect(() => {
+    const fetchPoolSiblings = async () => {
+      if (mode === "edit" && record?.isPooled && record?.poolId) {
+        try {
+          const response = await fetch(
+            `/api/pools/check-sibling?poolId=${record.poolId}`
+          );
+          const data = await response.json();
+          if (response.ok && data.poolInfo) {
+            // Filter out current student from siblings list
+            const siblingNames = data.poolInfo.siblings
+              ?.filter((s: { studentId: string }) => s.studentId !== record.id)
+              .map((s: { studentName: string }) => s.studentName) || [];
+            setPoolSiblings(siblingNames);
+
+            // Store sibling's package info for restoring when switching
+            if (data.poolInfo.packageId || data.poolInfo.packageType) {
+              setSiblingPackage({
+                packageId: data.poolInfo.packageId,
+                packageType: data.poolInfo.packageType,
+                packageDuration: data.poolInfo.packageDuration,
+              });
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching pool siblings:", error);
+        }
+      }
+    };
+
+    if (open && mode === "edit" && record?.isPooled) {
+      fetchPoolSiblings();
+    }
+  }, [open, mode, record?.isPooled, record?.poolId, record?.id]);
+
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open) {
+      // Reset sibling pool check state
+      setSiblingPoolCheck(null);
+      setIsCheckingPool(false);
+      setPoolSiblings([]);
+      setSiblingPackage(null);
+
       if (mode === "add") {
         setFormData({
           name: "",
@@ -419,6 +620,8 @@ export function StudentModal({
           numberOfMonths: null,
           numberOfSessions: null,
           scheduleEntries: [],
+          shareWithSibling: false,
+          existingPoolId: null,
           notes: "",
         });
         setActiveTab("basic");
@@ -465,6 +668,8 @@ export function StudentModal({
                 }));
               })()
             : [],
+          shareWithSibling: record.isPooled || false,
+          existingPoolId: record.poolId || null,
           notes: "",
         });
         setActiveTab("basic");
@@ -738,13 +943,14 @@ export function StudentModal({
                       />
                       <FloatingInput
                         label="Student ID"
-                        value={formData.studentId || ""}
+                        value={isGeneratingId ? "Generating..." : (formData.studentId || "")}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
                             studentId: e.target.value,
                           })
                         }
+                        disabled={isGeneratingId}
                       />
                       <div className="md:col-span-2">
                         <FloatingInput
@@ -1105,20 +1311,43 @@ export function StudentModal({
                     {/* Package Type Selection - Only show if program has pricing */}
                     {formData.courseId && (hasMonthlyPricing || hasSessionPricing) ? (
                       <div className="space-y-4">
-                        <label className="text-sm font-bold text-foreground">
-                          Package Type
-                        </label>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm font-bold text-foreground">
+                            Package Type
+                          </label>
+                          {mode === "add" && isCheckingPool && (
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          )}
+                        </div>
+                        {/* Show 3 columns if siblings detected (add mode) or student is pooled (edit mode) */}
+                        <div className={cn(
+                          "grid gap-4",
+                          (mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse))
+                            || (mode === "edit" && record?.isPooled)
+                            ? "grid-cols-3"
+                            : "grid-cols-2"
+                        )}>
                           {hasMonthlyPricing && (
                             <button
                               type="button"
-                              onClick={() =>
-                                setFormData({
-                                  ...formData,
-                                  packageType: "monthly",
-                                  numberOfSessions: null,
-                                })
-                              }
+                              onClick={() => {
+                                // If sibling has monthly package, restore it
+                                if (formData.shareWithSibling && siblingPackage?.packageType === "monthly") {
+                                  setFormData({
+                                    ...formData,
+                                    packageType: "monthly",
+                                    numberOfSessions: null,
+                                    numberOfMonths: siblingPackage.packageDuration,
+                                    packageId: siblingPackage.packageId,
+                                  });
+                                } else {
+                                  setFormData({
+                                    ...formData,
+                                    packageType: "monthly",
+                                    numberOfSessions: null,
+                                  });
+                                }
+                              }}
                               className={cn(
                                 "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
                                 formData.packageType === "monthly"
@@ -1136,13 +1365,24 @@ export function StudentModal({
                           {hasSessionPricing && (
                             <button
                               type="button"
-                              onClick={() =>
-                                setFormData({
-                                  ...formData,
-                                  packageType: "session",
-                                  numberOfMonths: null,
-                                })
-                              }
+                              onClick={() => {
+                                // If sibling has session package, restore it
+                                if (formData.shareWithSibling && siblingPackage?.packageType === "session") {
+                                  setFormData({
+                                    ...formData,
+                                    packageType: "session",
+                                    numberOfMonths: null,
+                                    numberOfSessions: siblingPackage.packageDuration,
+                                    packageId: siblingPackage.packageId,
+                                  });
+                                } else {
+                                  setFormData({
+                                    ...formData,
+                                    packageType: "session",
+                                    numberOfMonths: null,
+                                  });
+                                }
+                              }}
                               className={cn(
                                 "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
                                 formData.packageType === "session"
@@ -1154,6 +1394,71 @@ export function StudentModal({
                               <span className="font-bold">Session</span>
                               <span className="text-xs text-muted-foreground">
                                 Pay per session
+                              </span>
+                            </button>
+                          )}
+                          {/* Shared button - show in add mode when siblings detected, or edit mode when student is pooled */}
+                          {((mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse))
+                            || (mode === "edit" && record?.isPooled)) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Toggle shared off if already active
+                                if (formData.shareWithSibling) {
+                                  setFormData({
+                                    ...formData,
+                                    shareWithSibling: false,
+                                    existingPoolId: null,
+                                  });
+                                  return;
+                                }
+
+                                // For edit mode with pooled student
+                                if (mode === "edit" && record?.isPooled) {
+                                  setFormData({
+                                    ...formData,
+                                    shareWithSibling: true,
+                                    existingPoolId: record.poolId,
+                                  });
+                                  return;
+                                }
+
+                                // Get sibling's package info from pool or from siblingPackageInfo
+                                const siblingPackageId = siblingPoolCheck?.poolInfo?.packageId
+                                  || siblingPoolCheck?.siblingPackageInfo?.packageId
+                                  || null;
+                                const siblingPackageType = siblingPoolCheck?.poolInfo?.packageType
+                                  || siblingPoolCheck?.siblingPackageInfo?.packageType
+                                  || "session";
+                                const siblingPackageDuration = siblingPoolCheck?.poolInfo?.packageDuration
+                                  || siblingPoolCheck?.siblingPackageInfo?.packageDuration
+                                  || null;
+
+                                setFormData({
+                                  ...formData,
+                                  packageType: siblingPackageType as "monthly" | "session",
+                                  numberOfMonths: siblingPackageType === "monthly" ? siblingPackageDuration : null,
+                                  numberOfSessions: siblingPackageType === "session" ? siblingPackageDuration : null,
+                                  packageId: siblingPackageId,
+                                  shareWithSibling: true,
+                                  existingPoolId: siblingPoolCheck?.poolInfo?.poolId || null,
+                                });
+                              }}
+                              className={cn(
+                                "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
+                                formData.shareWithSibling
+                                  ? "border-[#615DFA] bg-[#615DFA]/10"
+                                  : "border-border hover:border-[#615DFA]/50",
+                              )}
+                            >
+                              <Users className="h-6 w-6 mb-2 text-[#615DFA]" />
+                              <span className="font-bold">Shared</span>
+                              <span className="text-xs text-muted-foreground text-center truncate max-w-full">
+                                ({mode === "edit" && record?.isPooled
+                                  ? poolSiblings.join(", ") || "Loading..."
+                                  : siblingPoolCheck?.hasPool && siblingPoolCheck?.poolInfo
+                                    ? siblingPoolCheck.poolInfo.siblings.map(s => s.studentName).join(", ")
+                                    : siblingPoolCheck?.siblings?.map(s => s.studentName).join(", ") || ""})
                               </span>
                             </button>
                           )}
