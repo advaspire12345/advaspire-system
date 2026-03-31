@@ -4,6 +4,7 @@ import { Banner } from "@/components/ui/banner";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { getSettings } from "@/data/settings";
 import { updateSettingsAction } from "./actions";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 export default async function SettingsPage() {
   const user = await getUser();
@@ -11,6 +12,9 @@ export default async function SettingsPage() {
   if (!user?.email) {
     redirect("/login");
   }
+
+  const permData = await getCurrentUserPermissions();
+  if (permData?.role !== 'super_admin' && permData?.role !== 'admin') redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   const settings = await getSettings();
 

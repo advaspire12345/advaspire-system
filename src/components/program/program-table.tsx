@@ -30,12 +30,13 @@ interface ProgramTableProps {
   branches: BranchOption[];
   instructors: InstructorOption[];
   categories: CategoryOption[];
-  onAdd: (payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
-  onEdit: (programId: string, payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
-  onDelete: (programId: string) => Promise<{ success: boolean; error?: string }>;
-  onCreateCategory: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
+  hideBranch?: boolean;
+  onAdd?: (payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
+  onEdit?: (programId: string, payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
+  onDelete?: (programId: string) => Promise<{ success: boolean; error?: string }>;
+  onCreateCategory?: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
   onFetchProgram: (programId: string) => Promise<{ success: boolean; data?: ProgramFull; error?: string }>;
-  onUploadCoverImage: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
+  onUploadCoverImage?: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -97,6 +98,7 @@ export function ProgramTable({
   branches,
   instructors,
   categories,
+  hideBranch,
   onAdd,
   onEdit,
   onDelete,
@@ -114,6 +116,7 @@ export function ProgramTable({
   const [selectedRecord, setSelectedRecord] = useState<ProgramTableRow | null>(null);
 
   const handleAdd = async (payload: ProgramFormPayload) => {
+    if (!onAdd) return;
     const result = await onAdd(payload);
     if (!result.success) {
       throw new Error(result.error || "Failed to create program");
@@ -122,6 +125,7 @@ export function ProgramTable({
   };
 
   const handleEdit = async (payload: ProgramFormPayload) => {
+    if (!onEdit) return;
     if (!selectedRecord) return;
     const result = await onEdit(selectedRecord.id, payload);
     if (!result.success) {
@@ -131,6 +135,7 @@ export function ProgramTable({
   };
 
   const handleDelete = async () => {
+    if (!onDelete) return;
     if (!selectedRecord) return;
     const result = await onDelete(selectedRecord.id);
     if (!result.success) {
@@ -194,13 +199,15 @@ export function ProgramTable({
               onChange={handleSearchChange}
               placeholder="Search by name, category, or branch..."
             />
-            <Button
-              onClick={openAddModal}
-              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Program
-            </Button>
+            {onAdd && (
+              <Button
+                onClick={openAddModal}
+                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Program
+              </Button>
+            )}
           </div>
 
           {/* Table */}
@@ -217,7 +224,9 @@ export function ProgramTable({
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.align === "right" && "text-right"
+                        col.align === "right" && "text-right",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "action" && !onEdit && !onDelete && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -238,7 +247,7 @@ export function ProgramTable({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No programs found.
@@ -330,7 +339,7 @@ export function ProgramTable({
 
                         {/* Branch - Show all branches with different colors */}
                         <td
-                          className="px-4 py-3"
+                          className={cn("px-4 py-3", hideBranch && "hidden")}
                           style={{ width: columns[6].width }}
                         >
                           {row.branch_names.length === 0 ? (
@@ -418,28 +427,32 @@ export function ProgramTable({
 
                         {/* Action */}
                         <td
-                          className="px-4 py-3"
+                          className={cn("px-4 py-3", !onEdit && !onDelete && "hidden")}
                           style={{ width: columns[11].width }}
                         >
                           <div className="flex items-center justify-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                              aria-label={`Edit program ${row.name}`}
-                              title="Edit"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openDeleteModal(row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                              aria-label={`Delete program ${row.name}`}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {onEdit && (
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(row)}
+                                className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                                aria-label={`Edit program ${row.name}`}
+                                title="Edit"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                            )}
+                            {onDelete && (
+                              <button
+                                type="button"
+                                onClick={() => openDeleteModal(row)}
+                                className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                                aria-label={`Delete program ${row.name}`}
+                                title="Delete"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

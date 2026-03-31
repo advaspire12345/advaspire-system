@@ -7,7 +7,13 @@ import {
   softDeleteTeamMember,
 } from "@/data/team";
 import { supabaseAdmin } from "@/db";
-import type { UserInsert, UserUpdate, UserRole, TeamMemberStatus } from "@/db/schema";
+import type { UserInsert, UserUpdate, UserRole, TeamMemberStatus, PermissionResource, ResourcePermission } from "@/db/schema";
+import {
+  bulkUpsertUserPermissions,
+  getPermissionsForUser,
+  getUserPermissionRows,
+  authorizeAction,
+} from "@/data/permissions";
 
 export interface TeamMemberFormPayload {
   name: string;
@@ -27,6 +33,8 @@ export async function createTeamMemberAction(
   payload: TeamMemberFormPayload
 ): Promise<{ success: boolean; error?: string; userId?: string }> {
   try {
+    await authorizeAction('team', 'can_create');
+
     // Validate password is provided for new team members
     if (!payload.password || payload.password.length < 6) {
       return { success: false, error: "Password must be at least 6 characters" };
@@ -91,6 +99,8 @@ export async function updateTeamMemberAction(
   payload: TeamMemberFormPayload
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('team', 'can_edit');
+
     const updateData: UserUpdate = {
       name: payload.name,
       email: payload.email,
@@ -125,6 +135,8 @@ export async function deleteTeamMemberAction(
   userId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('team', 'can_delete');
+
     const success = await softDeleteTeamMember(userId);
 
     if (!success) {
@@ -139,5 +151,49 @@ export async function deleteTeamMemberAction(
       success: false,
       error: error instanceof Error ? error.message : "An unexpected error occurred",
     };
+  }
+}
+
+export async function saveUserPermissionsAction(
+  userId: string,
+  permissions: { resource: PermissionResource; can_view: boolean; can_create: boolean; can_edit: boolean; can_delete: boolean }[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await authorizeAction("team", "can_edit");
+
+    const success = await bulkUpsertUserPermissions(userId, permissions);
+    if (!success) {
+      return { success: false, error: "Failed to save permissions" };
+    }
+
+    revalidatePath("/team");
+    return { success: true };
+  } catch (error) {
+    console.error("Error in saveUserPermissionsAction:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
+export async function loadUserPermissionsAction(
+  userId: string
+): Promise<{ permissions: Record<PermissionResource, ResourcePermission>; role: string } | null> {
+  try {
+    // Get the user's role
+    const { data: user, error } = await supabaseAdmin
+      .from("users")
+      .select("role")
+      .eq("id", userId)
+      .single();
+
+    if (error || !user) return null;
+
+    const permissions = await getPermissionsForUser(userId, user.role as UserRole);
+    return { permissions, role: user.role };
+  } catch (error) {
+    console.error("Error loading user permissions:", error);
+    return null;
   }
 }

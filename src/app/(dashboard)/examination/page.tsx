@@ -5,15 +5,13 @@ import { ExaminationTable } from "@/components/examination/examination-table";
 import {
   getExaminationsForTable,
   getEligibleStudentsForExam,
+  getAllStudentsForExam,
   getExaminers,
 } from "@/data/examinations";
 import { getAllBranches } from "@/data/branches";
 import { getAllCourses } from "@/data/courses";
-import {
-  createExaminationAction,
-  updateExaminationAction,
-  deleteExaminationAction,
-} from "./actions";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
+import { getUserBranchIds } from "@/data/users";
 
 export default async function ExaminationPage() {
   const user = await getUser();
@@ -22,19 +20,47 @@ export default async function ExaminationPage() {
     redirect("/login");
   }
 
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.examinations;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+
   // Fetch data in parallel
-  const [examinations, eligibleStudents, examiners, branches, courses] =
+  const [examinations, eligibleStudents, allStudents, examiners, branches, courses] =
     await Promise.all([
       getExaminationsForTable(user.email),
       getEligibleStudentsForExam(user.email),
+      getAllStudentsForExam(user.email),
       getExaminers(user.email),
       getAllBranches(),
       getAllCourses(),
     ]);
 
-  const branchOptions = branches.map((b) => ({
+  // Filter branches based on role
+  const useCityName = permData!.role !== "super_admin";
+  let filteredBranches = branches;
+  if (useCityName) {
+    const branchIds = await getUserBranchIds(user.email);
+    if (branchIds && branchIds.length > 0) {
+      if (permData!.role === "admin") {
+        const companyIds = new Set<string>();
+        for (const b of branches) {
+          if (branchIds.includes(b.id)) {
+            if (b.type === "company") companyIds.add(b.id);
+            else if (b.parent_id) companyIds.add(b.parent_id);
+          }
+        }
+        filteredBranches = branches.filter(
+          (b) => b.type !== "company" && b.parent_id && companyIds.has(b.parent_id)
+        );
+      } else {
+        filteredBranches = branches.filter((b) => branchIds.includes(b.id));
+      }
+    }
+  }
+
+  const branchOptions = filteredBranches.map((b) => ({
     id: b.id,
-    name: b.name,
+    name: useCityName ? (b.city || b.name) : b.name,
   }));
 
   const courseOptions = courses.map((c) => ({
@@ -62,12 +88,14 @@ export default async function ExaminationPage() {
         <ExaminationTable
           initialData={examinations}
           eligibleStudents={eligibleStudents}
+          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          allStudents={allStudents}
           examiners={examinerOptions}
           branches={branchOptions}
           courses={courseOptions}
-          onAdd={createExaminationAction}
-          onEdit={updateExaminationAction}
-          onDelete={deleteExaminationAction}
+          canCreate={perms?.can_create}
+          canEdit={perms?.can_edit}
+          canDelete={perms?.can_delete}
         />
       </div>
     </main>

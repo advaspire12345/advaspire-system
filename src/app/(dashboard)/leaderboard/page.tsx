@@ -4,6 +4,7 @@ import { Banner } from "@/components/ui/banner";
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { getLeaderboardData } from "@/data/leaderboard";
 import { getTransferParticipants } from "@/data/users";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 export default async function LeaderboardPage() {
   const user = await getUser();
@@ -12,8 +13,12 @@ export default async function LeaderboardPage() {
     redirect("/login");
   }
 
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.leaderboard;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+
   const [leaderboardData, participants] = await Promise.all([
-    getLeaderboardData(),
+    getLeaderboardData(user.email),
     getTransferParticipants(),
   ]);
 
@@ -27,7 +32,7 @@ export default async function LeaderboardPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <LeaderboardTable initialData={leaderboardData} participants={participants} />
+        <LeaderboardTable initialData={leaderboardData} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} canTransfer={permData?.permissions.transactions?.can_create} currentUserId={permData!.userId} />
       </div>
     </main>
   );

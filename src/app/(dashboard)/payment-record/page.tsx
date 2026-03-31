@@ -4,6 +4,7 @@ import { getPaymentRecordsForTable } from "@/data/payments";
 import { getCoursesAndPackages } from "@/data/courses";
 import { PaymentRecordTable } from "@/components/payments/payment-record-table";
 import { Banner } from "@/components/ui/banner";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 interface PageProps {
   searchParams: Promise<{
@@ -18,6 +19,10 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
   if (!user) {
     redirect("/login");
   }
+
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.payment_record;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   const params = await searchParams;
   const startDate = params.startDate;
@@ -42,9 +47,12 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
         <PaymentRecordTable
           initialData={payments}
           initialStartDate={startDate}
+          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
           initialEndDate={endDate}
           courses={courses}
           packages={packages}
+          canEdit={perms?.can_edit}
+          canDelete={perms?.can_delete}
         />
       </div>
     </main>

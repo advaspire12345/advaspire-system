@@ -181,6 +181,39 @@ export async function getUserBranchIdByEmail(email: string): Promise<string | nu
   return user.branch_id ?? null;
 }
 
+/**
+ * Get all branch IDs a user has access to.
+ * Returns null for super_admin (sees everything).
+ * Returns array of branch IDs for admin (from admin_branches table),
+ * or single-element array for branch_admin/instructor.
+ */
+export async function getUserBranchIds(email: string): Promise<string[] | null> {
+  const user = await getUserByEmail(email);
+
+  if (!user) {
+    return [];
+  }
+
+  // Super admin sees everything
+  if (isSuperAdmin(email) || isSuperAdminRole(user.role)) {
+    return null;
+  }
+
+  // Admin: check admin_branches table
+  if (isAdminRole(user.role) && user.role === 'admin') {
+    const { getAdminBranchIds } = await import("./permissions");
+    const branchIds = await getAdminBranchIds(user.id);
+    // If admin has no branches assigned, fall back to their own branch_id
+    if (branchIds.length > 0) return branchIds;
+    if (user.branch_id) return [user.branch_id];
+    return [];
+  }
+
+  // Branch admin / instructor: their own branch
+  if (user.branch_id) return [user.branch_id];
+  return [];
+}
+
 export async function getUserBranchIdByAuthId(authId: string): Promise<string | null> {
   const user = await getUserByAuthId(authId);
 
@@ -349,6 +382,46 @@ export async function getAllInstructors(): Promise<InstructorOption[]> {
 
   if (error) {
     console.error('Error fetching all instructors:', error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+/**
+ * Get instructors and branch admins filtered by branch.
+ * Used when branch_admin logs in — only show staff from same branch.
+ */
+export async function getInstructorsByBranchForAttendance(branchId: string): Promise<InstructorOption[]> {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('id, name')
+    .in('role', ['instructor', 'branch_admin'])
+    .eq('branch_id', branchId)
+    .is('deleted_at', null)
+    .order('name');
+
+  if (error) {
+    console.error('Error fetching branch instructors:', error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+/**
+ * Get all instructors and branch admins (for admin role).
+ */
+export async function getAllInstructorsForAttendance(): Promise<InstructorOption[]> {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('id, name')
+    .in('role', ['instructor', 'branch_admin'])
+    .is('deleted_at', null)
+    .order('name');
+
+  if (error) {
+    console.error('Error fetching instructors for attendance:', error);
     return [];
   }
 

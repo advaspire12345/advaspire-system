@@ -20,6 +20,9 @@ import type { TransferParticipant } from "@/data/users";
 interface LeaderboardTableProps {
   initialData: LeaderboardEntry[];
   participants: TransferParticipant[];
+  hideBranch?: boolean;
+  canTransfer?: boolean;
+  currentUserId?: string;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -45,6 +48,9 @@ const columns = [
 export function LeaderboardTable({
   initialData,
   participants,
+  hideBranch,
+  canTransfer = true,
+  currentUserId,
 }: LeaderboardTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -145,13 +151,15 @@ export function LeaderboardTable({
             />
 
             {/* Transfer Adcoin Button */}
-            <Button
-              onClick={() => openTransferModal()}
-              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-            >
-              <Plus className="h-4 w-4" />
-              Transfer Adcoin
-            </Button>
+            {canTransfer && (
+              <Button
+                onClick={() => openTransferModal()}
+                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+              >
+                <Plus className="h-4 w-4" />
+                Transfer Adcoin
+              </Button>
+            )}
           </div>
 
           {/* Table */}
@@ -169,6 +177,8 @@ export function LeaderboardTable({
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
                         col.align === "right" && "text-right",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "action" && !canTransfer && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -189,7 +199,7 @@ export function LeaderboardTable({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No students found.
@@ -254,7 +264,7 @@ export function LeaderboardTable({
 
                       {/* Branch */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", hideBranch && "hidden")}
                         style={{ width: columns[3].width }}
                       >
                         {row.branchName}
@@ -329,7 +339,7 @@ export function LeaderboardTable({
 
                       {/* Action */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", !canTransfer && "hidden")}
                         style={{ width: columns[9].width }}
                       >
                         <div className="flex items-center justify-center">
@@ -368,6 +378,7 @@ export function LeaderboardTable({
         onOpenChange={setModalOpen}
         participants={participants}
         recipientId={selectedRecipientId}
+        defaultSenderId={currentUserId}
         onSubmit={handleTransferSubmit}
       />
     </>

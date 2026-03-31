@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/db";
 import { getUserByAuthId } from "@/data/users";
 import { unifiedTransfer, unifiedAward, unifiedAdjust, type ParticipantType } from "@/data/adcoins";
 
@@ -58,9 +61,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify password using Supabase Auth
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: authUser.email,
+    // Default to student type if not specified (for backwards compatibility)
+    const senderType: ParticipantType = body.senderType ?? 'student';
+    const receiverType: ParticipantType = body.receiverType ?? 'student';
+
+    // Verify sender's password
+    let verifyEmail: string;
+
+    if (senderType === "user") {
+      // For user-type senders, verify the sender's own password
+      const { data: senderUser } = await supabaseAdmin
+        .from("users")
+        .select("email")
+        .eq("id", body.senderId)
+        .single();
+
+      if (!senderUser?.email) {
+        return NextResponse.json(
+          { error: "Sender not found" },
+          { status: 400 }
+        );
+      }
+      verifyEmail = senderUser.email;
+    } else {
+      // Student senders don't have auth accounts, verify logged-in user's password
+      verifyEmail = authUser.email;
+    }
+
+    // Create a throwaway client for password verification to avoid corrupting any session state
+    const verifyClient = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    const { error: signInError } = await verifyClient.auth.signInWithPassword({
+      email: verifyEmail,
       password: body.password,
     });
 
@@ -73,10 +107,6 @@ export async function POST(request: NextRequest) {
 
     let transaction;
     const description = body.message || `${body.transactionType} by ${user.name}`;
-
-    // Default to student type if not specified (for backwards compatibility)
-    const senderType: ParticipantType = body.senderType ?? 'student';
-    const receiverType: ParticipantType = body.receiverType ?? 'student';
 
     // Handle different transaction types
     switch (body.transactionType) {
@@ -127,6 +157,9 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Invalidate dashboard cache so adcoin stats/leaderboard show updated data
+    revalidateTag("dashboard", "max");
 
     return NextResponse.json({ success: true, transaction });
   } catch (error) {

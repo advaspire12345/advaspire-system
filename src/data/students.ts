@@ -159,19 +159,25 @@ export interface StudentForPayment {
   parentName: string | null;
   parentPhone: string | null;
   enrollments: StudentEnrollmentForPayment[];
+  /** If this entry represents a shared pool, the pool ID */
+  poolId?: string;
+  /** All student IDs in the shared pool (for creating payments) */
+  poolStudentIds?: string[];
 }
 
 export async function getStudentsForPayment(userEmail: string): Promise<StudentForPayment[]> {
   // Import user helpers dynamically to avoid circular imports
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  const branchIds = await getUserBranchIds(userEmail);
+  const user = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || user?.role === "super_admin");
 
   let query = supabaseAdmin
     .from('students')
     .select(`
       id,
       name,
-      branch:branches!inner(name),
+      branch:branches!inner(name, city),
       parent_students(
         parent:parents(name, phone)
       ),
@@ -184,8 +190,8 @@ export async function getStudentsForPayment(userEmail: string): Promise<StudentF
     .is('deleted_at', null)
     .order('name');
 
-  if (userBranchId) {
-    query = query.eq('branch_id', userBranchId);
+  if (branchIds) {
+    query = query.in('branch_id', branchIds);
   }
 
   const { data, error } = await query;
@@ -195,8 +201,8 @@ export async function getStudentsForPayment(userEmail: string): Promise<StudentF
     return [];
   }
 
-  return (data ?? []).map((student) => {
-    const branch = student.branch as unknown as { name: string };
+  const result: StudentForPayment[] = (data ?? []).map((student) => {
+    const branch = student.branch as unknown as { name: string; city: string | null };
     const parentStudents = student.parent_students as unknown as Array<{
       parent: { name: string; phone: string | null } | null;
     }>;
@@ -220,12 +226,64 @@ export async function getStudentsForPayment(userEmail: string): Promise<StudentF
     return {
       id: student.id,
       name: student.name,
-      branchName: branch.name,
+      branchName: useCityName ? (branch.city || branch.name) : branch.name,
       parentName,
       parentPhone,
       enrollments,
     };
   });
+
+  // Also fetch shared pools and create combined entries (exclude monthly packages)
+  const { data: pools } = await supabaseAdmin
+    .from('shared_session_pools')
+    .select(`
+      id,
+      course_id,
+      package_id,
+      course:courses(id, name)
+    `)
+    .is('deleted_at', null);
+
+  for (const pool of pools ?? []) {
+    // Skip pools with monthly packages — monthly subscriptions are per-student
+    if (pool.package_id) {
+      const { data: poolPkg } = await supabaseAdmin
+        .from('course_pricing')
+        .select('package_type')
+        .eq('id', pool.package_id)
+        .single();
+      if (poolPkg?.package_type === 'monthly') continue;
+    }
+    // Get students in this pool
+    const { data: poolStudents } = await supabaseAdmin
+      .from('pool_students')
+      .select('student_id')
+      .eq('pool_id', pool.id);
+    if (!poolStudents || poolStudents.length < 2) continue;
+
+    const poolStudentIds = poolStudents.map((ps: { student_id: string }) => ps.student_id);
+    // Find matching individual student entries we already built
+    const matchedStudents = result.filter((s: StudentForPayment) => poolStudentIds.includes(s.id));
+    if (matchedStudents.length < 2) continue;
+
+    const course = pool.course as unknown as { id: string; name: string } | null;
+    const combinedName = matchedStudents.map((s: StudentForPayment) => s.name).join(' & ');
+    // Use first student's info for parent/branch
+    const first = matchedStudents[0];
+
+    result.push({
+      id: `pool:${pool.id}:${first.id}`,
+      name: combinedName,
+      branchName: first.branchName,
+      parentName: first.parentName,
+      parentPhone: first.parentPhone,
+      enrollments: course ? [{ courseId: course.id, courseName: course.name }] : [],
+      poolId: pool.id,
+      poolStudentIds: matchedStudents.map((s: StudentForPayment) => s.id),
+    });
+  }
+
+  return result;
 }
 
 export async function searchStudents(query: string, branchId?: string): Promise<Student[]> {
@@ -440,6 +498,7 @@ export async function unlinkParentFromStudent(parentId: string, studentId: strin
 
 export interface StudentTableRow {
   id: string;
+  enrollmentId: string | null;
   studentId: string | null;
   photo: string | null;
   coverPhoto: string | null;
@@ -499,9 +558,36 @@ export async function getStudentsForTable(
   userEmail: string,
   branchId?: string
 ): Promise<StudentTableRow[]> {
-  // Get user's branch access
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  // Get user's branch access — resolve company IDs to all child HQ/branch IDs
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const user = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || user?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && user?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
 
   // Build base query with actual database columns
   let query = supabaseAdmin
@@ -521,7 +607,7 @@ export async function getStudentsForTable(
       level,
       adcoin_balance,
       created_at,
-      branch:branches(name),
+      branch:branches(name, city),
       enrollments(
         id,
         status,
@@ -535,6 +621,8 @@ export async function getStudentsForTable(
         package_id,
         instructor_id,
         pool_id,
+        level,
+        adcoin_balance,
         course:courses(id, name),
         package:course_pricing(id, package_type, duration),
         pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
@@ -552,15 +640,16 @@ export async function getStudentsForTable(
           city
         )
       ),
-      payments(amount, status, course_id, package_id)
+      payments(amount, status, course_id, package_id, pool_id)
     `)
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
   // Apply branch filter
-  const effectiveBranchId = branchId || userBranchId;
-  if (effectiveBranchId) {
-    query = query.eq('branch_id', effectiveBranchId);
+  if (branchId) {
+    query = query.eq('branch_id', branchId);
+  } else if (branchIds) {
+    query = query.in('branch_id', branchIds);
   }
 
   const { data, error } = await query;
@@ -570,26 +659,85 @@ export async function getStudentsForTable(
     return [];
   }
 
-  // Process results with defensive typing
-  return (data ?? []).map((student: any) => {
-    // Get most relevant active enrollment
-    const activeEnrollment = student.enrollments
-      ?.filter((e: any) => e.status === 'active')
-      .sort((a: any, b: any) =>
-        new Date(b.enrolled_at || 0).getTime() - new Date(a.enrolled_at || 0).getTime()
-      )[0] || null;
+  // Pre-fetch all course pricing so we can look up duration per payment's package_id
+  const { data: allPricing } = await supabaseAdmin
+    .from('course_pricing')
+    .select('id, duration, package_type');
+  const pricingMap = new Map<string, { duration: number; package_type: string }>();
+  for (const p of allPricing ?? []) {
+    pricingMap.set(p.id, { duration: p.duration, package_type: p.package_type });
+  }
 
+  // Helper to compute sessions from a payment's own package
+  const getSessionsForPayment = (packageId: string | null): number => {
+    if (!packageId) return 0;
+    const pkg = pricingMap.get(packageId);
+    if (!pkg) return 0;
+    return pkg.package_type === 'monthly' ? pkg.duration * 4 : pkg.duration;
+  };
+
+  // Pre-fetch pool payment data and join dates so ALL siblings in a pool share the total
+  const poolPaymentCache = new Map<string, { totalPaid: number; totalSessions: number }>();
+  // Map: poolId -> studentId -> joined_at date string
+  const poolJoinDateCache = new Map<string, Map<string, string>>();
+  // Map: poolId -> actual number of students in the pool
+  const poolSiblingCountCache = new Map<string, number>();
+  const allPoolIds = new Set<string>();
+  for (const student of data ?? []) {
+    for (const enrollment of (student as any).enrollments || []) {
+      if (enrollment.pool_id) allPoolIds.add(enrollment.pool_id);
+    }
+  }
+  if (allPoolIds.size > 0) {
+    for (const poolId of allPoolIds) {
+      // Get all students in this pool with join dates
+      const { data: poolStudentLinks } = await supabaseAdmin
+        .from('pool_students')
+        .select('student_id, joined_at')
+        .eq('pool_id', poolId);
+
+      // Cache join dates per student and sibling count
+      const joinDates = new Map<string, string>();
+      for (const ps of poolStudentLinks ?? []) {
+        if (ps.joined_at) joinDates.set(ps.student_id, ps.joined_at);
+      }
+      poolJoinDateCache.set(poolId, joinDates);
+      poolSiblingCountCache.set(poolId, (poolStudentLinks ?? []).length);
+      // Get the pool's course_id
+      const { data: poolData } = await supabaseAdmin
+        .from('shared_session_pools')
+        .select('course_id')
+        .eq('id', poolId)
+        .single();
+      if (!poolStudentLinks?.length || !poolData) continue;
+      const studentIds = poolStudentLinks.map(ps => ps.student_id);
+      // Sum only shared pool payments (with pool_id set) from ALL siblings
+      const { data: poolPayments } = await supabaseAdmin
+        .from('payments')
+        .select('amount, package_id')
+        .in('student_id', studentIds)
+        .eq('course_id', poolData.course_id)
+        .eq('pool_id', poolId)
+        .eq('status', 'paid');
+      const totalPaid = (poolPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
+      const totalSessions = (poolPayments ?? []).reduce((sum, p) => {
+        return sum + getSessionsForPayment(p.package_id);
+      }, 0);
+      poolPaymentCache.set(poolId, { totalPaid, totalSessions });
+    }
+  }
+
+  // Helper to build a row from a student + single enrollment
+  const buildRow = (student: any, enrollment: any | null): StudentTableRow => {
     // Parse schedule from enrollment - prefer new schedule field
     let scheduleDays: string[] = [];
     let scheduleTime: string | null = null;
 
-    if (activeEnrollment?.schedule) {
-      // New format: JSON array of {day, time} objects
+    if (enrollment?.schedule) {
       try {
-        const scheduleEntries = JSON.parse(activeEnrollment.schedule);
+        const scheduleEntries = JSON.parse(enrollment.schedule);
         if (Array.isArray(scheduleEntries)) {
           scheduleDays = scheduleEntries.map((e: { day: string }) => e.day).filter(Boolean);
-          // Build time string from all entries
           const times = scheduleEntries
             .map((e: { day: string; time: string }) => e.time)
             .filter(Boolean);
@@ -600,18 +748,17 @@ export async function getStudentsForTable(
       }
     }
 
-    // Fall back to legacy day_of_week/start_time if schedule not available
-    if (scheduleDays.length === 0 && activeEnrollment?.day_of_week) {
+    if (scheduleDays.length === 0 && enrollment?.day_of_week) {
       try {
-        const parsed = JSON.parse(activeEnrollment.day_of_week);
-        scheduleDays = Array.isArray(parsed) ? parsed : [activeEnrollment.day_of_week];
+        const parsed = JSON.parse(enrollment.day_of_week);
+        scheduleDays = Array.isArray(parsed) ? parsed : [enrollment.day_of_week];
       } catch {
-        scheduleDays = activeEnrollment.day_of_week.split(',').map((d: string) => d.trim());
+        scheduleDays = enrollment.day_of_week.split(',').map((d: string) => d.trim());
       }
     }
 
-    if (!scheduleTime && activeEnrollment?.start_time) {
-      scheduleTime = activeEnrollment.start_time;
+    if (!scheduleTime && enrollment?.start_time) {
+      scheduleTime = enrollment.start_time;
     }
 
     // Get first parent (if any)
@@ -622,100 +769,111 @@ export async function getStudentsForTable(
     let sessionsRemaining: number | null = null;
     let periodStart: string | null = null;
     let periodEnd: string | null = null;
-    const packageDuration: number | null = activeEnrollment?.package?.duration || null;
-    const packageType = activeEnrollment?.package?.package_type || null;
+    const packageDuration: number | null = enrollment?.package?.duration || null;
+    const packageType = enrollment?.package?.package_type || null;
 
     // Check if enrollment is part of a shared sibling pool
-    const isPooled = activeEnrollment?.pool_id && activeEnrollment?.pool;
-    const poolInfo = isPooled ? activeEnrollment.pool as unknown as {
+    const isPooled = enrollment?.pool_id && enrollment?.pool;
+    const poolInfo = isPooled ? enrollment.pool as unknown as {
       id: string;
       sessions_remaining: number;
       total_sessions: number;
       name: string | null;
-      sibling_count?: number;
     } : null;
 
-    if (activeEnrollment) {
-      // For pooled enrollments, calculate INDIVIDUAL session remaining
-      // Each sibling's remaining = (pool.total_sessions / sibling_count) - their_attendance_count
+    if (enrollment) {
       if (isPooled && poolInfo) {
-        // Count this student's attendance (present/late)
-        const attendanceRecords = (activeEnrollment.attendance || []) as Array<{ date: string; status: string }>;
-        const thisStudentAttendance = attendanceRecords.filter(
-          (a) => a.status === 'present' || a.status === 'late'
-        ).length;
-
-        // Get sibling count from pool (default to 2 if not available)
-        const siblingCount = poolInfo.sibling_count || 2;
-
-        // Calculate this student's allocation
-        const thisStudentAllocation = Math.floor(poolInfo.total_sessions / siblingCount);
-
-        // This student's remaining = allocation - their attendance
-        sessionsRemaining = thisStudentAllocation - thisStudentAttendance;
+        // Per-student tracking: allocation minus only THIS student's attendance
+        const siblingCount = poolSiblingCountCache.get(enrollment.pool_id) || 2;
+        const allocation = Math.floor(poolInfo.total_sessions / siblingCount);
+        const attendanceRecords = (enrollment.attendance || []) as Array<{ date: string; status: string }>;
+        const joinDates = poolJoinDateCache.get(enrollment.pool_id);
+        const joinedAt = joinDates?.get(student.id);
+        const thisStudentAttendance = attendanceRecords.filter((a) => {
+          if (a.status !== 'present' && a.status !== 'late') return false;
+          if (!joinedAt) return true;
+          return new Date(a.date) >= new Date(joinedAt);
+        }).length;
+        const bonus = enrollment.sessions_remaining ?? 0;
+        sessionsRemaining = allocation + bonus - thisStudentAttendance;
       } else {
-        // Non-pooled: use enrollment's sessions_remaining
-        const enrollmentSessions = activeEnrollment.sessions_remaining ?? 0;
+        const enrollmentSessions = enrollment.sessions_remaining ?? 0;
 
         if (packageType === 'session') {
-          // For session-based: show remaining sessions directly
           sessionsRemaining = enrollmentSessions;
         } else if (packageType === 'monthly') {
-          // For monthly: sessions_remaining represents months remaining
-          // period_start is set when first attendance is marked
-          const dbPeriodStart = activeEnrollment.period_start;
-
-          // Always set sessions remaining
+          const dbPeriodStart = enrollment.period_start;
           sessionsRemaining = enrollmentSessions;
-
-          // If period_start exists, always show the date range (even if sessions <= 0)
           if (dbPeriodStart) {
             periodStart = dbPeriodStart;
-            // Calculate end date: start + 1 month (per period)
             const endDate = new Date(dbPeriodStart);
             endDate.setMonth(endDate.getMonth() + 1);
-            const endDateStr = endDate.toISOString().split('T')[0];
-            periodEnd = endDateStr;
+            periodEnd = endDate.toISOString().split('T')[0];
           }
-          // If no period_start and sessions > 0, they're waiting for first attendance
-          // If no period_start and sessions <= 0, pending payment before any attendance
         } else {
-          // No package type specified, use enrollment sessions
           sessionsRemaining = enrollmentSessions;
         }
       }
     }
 
-    // Calculate session count - total attended sessions across all enrollments
+    // Calculate session count for THIS enrollment only
     let sessionCount = 0;
-    for (const enrollment of student.enrollments || []) {
+    if (enrollment) {
       const attendanceRecords = (enrollment.attendance || []) as Array<{ date: string; status: string }>;
-      // Count only present and late statuses
-      sessionCount += attendanceRecords.filter(
+      sessionCount = attendanceRecords.filter(
         (a) => a.status === 'present' || a.status === 'late'
       ).length;
     }
 
-    // Calculate payment count - total paid amount and sessions bought
-    const payments = (student.payments || []) as Array<{
-      amount: number;
-      status: string;
-      course_id: string | null;
-      package_id: string | null;
-    }>;
-    const paidPayments = payments.filter((p) => p.status === 'paid');
-    const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+    // Calculate payment count - for this enrollment's course
+    let totalPaid: number;
+    let totalSessionsBought: number;
 
-    // Calculate total sessions bought from enrollment package
-    // For monthly packages: 4 sessions per month
-    // For session packages: use the duration directly
-    const enrollmentPackageType = activeEnrollment?.package?.package_type;
-    const packageDurationVal = activeEnrollment?.package?.duration ?? 0;
-    const sessionsPerPayment = enrollmentPackageType === 'monthly' ? packageDurationVal * 4 : packageDurationVal;
-    const totalSessionsBought = paidPayments.length * sessionsPerPayment;
+    if (isPooled && poolInfo && enrollment?.pool_id) {
+      // Shared package: split pool payments evenly, then add this student's individual payments
+      const poolPayments = poolPaymentCache.get(enrollment.pool_id);
+      const siblingCount = poolSiblingCountCache.get(enrollment.pool_id) || 2;
+      const poolSharePaid = (poolPayments?.totalPaid ?? 0) / siblingCount;
+      const poolShareSessions = Math.floor((poolPayments?.totalSessions ?? 0) / siblingCount);
+
+      // Also get this student's individual (non-pool) payments for the same course
+      const individualPayments = (student.payments || []) as Array<{
+        amount: number;
+        status: string;
+        course_id: string | null;
+        package_id: string | null;
+        pool_id: string | null;
+      }>;
+      const individualPaid = individualPayments.filter(
+        (p) => p.status === 'paid' && p.course_id === enrollment.course?.id && !p.pool_id
+      );
+      const individualTotalPaid = individualPaid.reduce((sum, p) => sum + Number(p.amount), 0);
+      const individualSessions = individualPaid.reduce((sum, p) => sum + getSessionsForPayment(p.package_id), 0);
+
+      totalPaid = poolSharePaid + individualTotalPaid;
+      totalSessionsBought = poolShareSessions + individualSessions;
+    } else {
+      // Normal (non-shared): use this student's own payments
+      const payments = (student.payments || []) as Array<{
+        amount: number;
+        status: string;
+        course_id: string | null;
+        package_id: string | null;
+      }>;
+      const coursePayments = enrollment?.course?.id
+        ? payments.filter((p) => p.course_id === enrollment.course.id)
+        : payments;
+      const paidPayments = coursePayments.filter((p) => p.status === 'paid');
+      totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      // Sum sessions from each payment's own package duration
+      totalSessionsBought = paidPayments.reduce((sum, p) => {
+        return sum + getSessionsForPayment(p.package_id);
+      }, 0);
+    }
 
     return {
       id: student.id,
+      enrollmentId: enrollment?.id || null,
       studentId: student.student_id || null,
       photo: student.photo || null,
       coverPhoto: student.cover_photo || null,
@@ -726,37 +884,32 @@ export async function getStudentsForTable(
       gender: student.gender || null,
       schoolName: student.school_name || null,
       branchId: student.branch_id,
-      branchName: student.branch?.name || 'N/A',
-      programName: activeEnrollment?.course?.name || null,
-      courseId: activeEnrollment?.course?.id || null,
-      instructorId: activeEnrollment?.instructor_id || null,
-      packageId: activeEnrollment?.package_id || null,
-      packageType: activeEnrollment?.package?.package_type || null,
+      branchName: useCityName ? (student.branch?.city || student.branch?.name || 'N/A') : (student.branch?.name || 'N/A'),
+      programName: enrollment?.course?.name || null,
+      courseId: enrollment?.course?.id || null,
+      instructorId: enrollment?.instructor_id || null,
+      packageId: enrollment?.package_id || null,
+      packageType: enrollment?.package?.package_type || null,
       scheduleDays,
       scheduleTime,
       enrollDate: student.created_at,
-      expiredDate: null, // Can be calculated from sessions_remaining if needed
-      enrollmentStatus: activeEnrollment?.status || null,
-      level: student.level || 1,
-      adcoinBalance: student.adcoin_balance || 0,
-      // Period Active info
-      sessionsRemaining, // Allow negative for tracking sessions used before payment
+      expiredDate: null,
+      enrollmentStatus: enrollment?.status || null,
+      level: enrollment?.level ?? student.level ?? 1,
+      adcoinBalance: enrollment?.adcoin_balance ?? student.adcoin_balance ?? 0,
+      sessionsRemaining,
       periodStart,
       periodEnd,
       packageDuration,
-      // Pool info (for sibling sharing)
       isPooled: !!isPooled,
-      poolId: activeEnrollment?.pool_id || null,
+      poolId: enrollment?.pool_id || null,
       poolName: poolInfo?.name || null,
-      poolSiblings: null, // Will be populated via separate query if needed
-      // Session count
+      poolSiblings: null,
       sessionCount,
-      // Payment info
       paymentCount: {
         totalPaid,
         totalSessionsBought,
       },
-      // Parent info
       parentId: parent?.id || null,
       parentName: parent?.name || null,
       parentPhone: parent?.phone || null,
@@ -766,7 +919,24 @@ export async function getStudentsForTable(
       parentCity: parent?.city || null,
       parentRelationship: firstParentLink?.relationship || null,
     };
-  });
+  };
+
+  // Process results - one row per enrollment (or one row for students with no enrollments)
+  const rows: StudentTableRow[] = [];
+  for (const student of data ?? []) {
+    const enrollments = student.enrollments || [];
+    if (enrollments.length === 0) {
+      // Student with no enrollments - still show one row
+      rows.push(buildRow(student, null));
+    } else {
+      // One row per enrollment
+      for (const enrollment of enrollments) {
+        rows.push(buildRow(student, enrollment));
+      }
+    }
+  }
+
+  return rows;
 }
 
 // ============================================
@@ -796,27 +966,30 @@ export async function updateOrCreateEnrollment(
     instructor_id: string | null;
     schedule: { day: string; time: string }[];
     sessions_remaining: number;
+    status?: EnrollmentStatus;
+    level?: number;
+    adcoin_balance?: number;
   }
 ): Promise<boolean> {
   // Build day_of_week and start_time from schedule for backwards compatibility
   const days = enrollmentData.schedule.map(s => s.day).filter(Boolean);
   const firstEntry = enrollmentData.schedule[0];
 
-  // First, check if student has any active enrollment
-  const { data: activeEnrollments, error: fetchError } = await supabaseAdmin
+  // First, check if student has any enrollment for this course (any status)
+  const { data: existingEnrollments, error: fetchError } = await supabaseAdmin
     .from('enrollments')
-    .select('id, course_id, sessions_remaining')
+    .select('id, course_id, sessions_remaining, status')
     .eq('student_id', studentId)
-    .eq('status', 'active')
-    .is('deleted_at', null);
+    .is('deleted_at', null)
+    .order('enrolled_at', { ascending: false });
 
   if (fetchError) {
     console.error('Error fetching existing enrollments:', fetchError);
     return false;
   }
 
-  // Find if there's an enrollment for the same course
-  const sameCourseEnrollment = activeEnrollments?.find(
+  // Find if there's an enrollment for the same course (any status)
+  const sameCourseEnrollment = existingEnrollments?.find(
     (e) => e.course_id === enrollmentData.course_id
   );
 
@@ -841,6 +1014,9 @@ export async function updateOrCreateEnrollment(
         schedule: JSON.stringify(enrollmentData.schedule),
         // Only update sessions if existing is exactly 0 (no payment or attendance yet)
         ...(keepSessions ? {} : { sessions_remaining: 0 }),
+        ...(enrollmentData.status ? { status: enrollmentData.status } : {}),
+        ...(enrollmentData.level !== undefined ? { level: enrollmentData.level } : {}),
+        ...(enrollmentData.adcoin_balance !== undefined ? { adcoin_balance: enrollmentData.adcoin_balance } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', sameCourseEnrollment.id);
@@ -850,22 +1026,8 @@ export async function updateOrCreateEnrollment(
       return false;
     }
   } else {
-    // Deactivate any other active enrollments
-    if (activeEnrollments && activeEnrollments.length > 0) {
-      const { error: deactivateError } = await supabaseAdmin
-        .from('enrollments')
-        .update({ status: 'completed', updated_at: new Date().toISOString() })
-        .eq('student_id', studentId)
-        .eq('status', 'active')
-        .is('deleted_at', null);
-
-      if (deactivateError) {
-        console.error('Error deactivating old enrollments:', deactivateError);
-      }
-    }
-
-    // Create new enrollment with sessions_remaining = 0
-    // Sessions will be added when payment is approved
+    // No existing enrollment for this course - create a new one
+    // Do NOT deactivate other enrollments; students can have multiple active enrollments in different courses
     const { error: insertError } = await supabaseAdmin
       .from('enrollments')
       .insert({
@@ -878,6 +1040,8 @@ export async function updateOrCreateEnrollment(
         schedule: JSON.stringify(enrollmentData.schedule),
         sessions_remaining: 0, // Start with 0, will be set when payment approved
         status: 'active',
+        level: enrollmentData.level || 1,
+        adcoin_balance: enrollmentData.adcoin_balance || 0,
       });
 
     if (insertError) {

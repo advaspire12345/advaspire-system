@@ -12,6 +12,7 @@ import { createParent, getParentByEmail, updateParent } from "@/data/parents";
 import { checkEmailExists, getEmailConflictMessage } from "@/data/email-validation";
 import { createPayment } from "@/data/payments";
 import { supabaseAdmin } from "@/db";
+import { authorizeAction } from "@/data/permissions";
 import type { StudentInsert, StudentUpdate, EnrollmentInsert, ParentInsert, ParentUpdate, Gender, PaymentInsert, AdcoinTransactionInsert } from "@/db/schema";
 
 /**
@@ -55,6 +56,9 @@ export async function generateNextStudentId(): Promise<string> {
 }
 
 export interface StudentFormPayload {
+  // Existing student ID (when enrolling existing student in a new program)
+  existingStudentId: string | null;
+
   // Basic Info
   name: string;
   email: string | null;
@@ -94,6 +98,9 @@ export interface StudentFormPayload {
   shareWithSibling: boolean;
   existingPoolId: string | null;
 
+  // Enrollment Status (edit only)
+  enrollmentStatus: string | null;
+
   // Notes
   notes: string | null;
 }
@@ -102,102 +109,127 @@ export async function createStudentAction(
   payload: StudentFormPayload
 ): Promise<{ success: boolean; error?: string; studentId?: string }> {
   try {
-    // 1. Check student email uniqueness (if email provided)
-    if (payload.email?.trim()) {
-      const emailCheck = await checkEmailExists(payload.email.trim());
-      if (emailCheck.exists) {
-        return {
-          success: false,
-          error: getEmailConflictMessage(emailCheck.table!)
-        };
-      }
-    }
+    await authorizeAction('students', 'can_create');
 
-    // 2. Check parent email BEFORE creating student to avoid orphaned records
-    const shouldHandleParent = (payload.parentId === "new" || !payload.parentId) && payload.parentName?.trim();
-    if (shouldHandleParent) {
-      const parentEmail = payload.parentEmail?.trim() || `${payload.parentName!.toLowerCase().replace(/\s+/g, '.')}@placeholder.com`;
+    // Check if enrolling an existing student in a new program
+    const isExistingStudent = !!payload.existingStudentId;
 
-      // Check if parent email is same as student email - not allowed
-      if (payload.email?.trim() && parentEmail.toLowerCase() === payload.email.trim().toLowerCase()) {
-        return {
-          success: false,
-          error: "Parent email cannot be the same as student email. Please use different emails for student and parent accounts."
-        };
+    let studentDbId: string;
+
+    if (isExistingStudent) {
+      // Use the existing student - no need to create a new one
+      // Level and adcoin are saved per-enrollment, not updated on student record
+      studentDbId = payload.existingStudentId!;
+
+      // Update student's branch_id if it changed
+      if (payload.branchId) {
+        await updateStudent(studentDbId, { branch_id: payload.branchId });
       }
 
-      // Check if parent with this email already exists (that's OK, we'll link to them)
-      const existingParent = await getParentByEmail(parentEmail);
-
-      if (!existingParent) {
-        // Check if email is used elsewhere (student/user) - this is NOT OK
-        const parentEmailCheck = await checkEmailExists(parentEmail, "parents");
-        if (parentEmailCheck.exists) {
+      // Still link parent if needed
+      if (payload.parentId && payload.parentId !== "new") {
+        await linkParentToStudent(payload.parentId, studentDbId, payload.parentRelationship);
+      }
+    } else {
+      // 1. Check student email uniqueness (if email provided)
+      if (payload.email?.trim()) {
+        const emailCheck = await checkEmailExists(payload.email.trim());
+        if (emailCheck.exists) {
           return {
             success: false,
-            error: `Parent email "${parentEmail}" is already registered as a ${parentEmailCheck.table === "students" ? "student" : "team member"}. Please use a different email.`
+            error: getEmailConflictMessage(emailCheck.table!)
           };
         }
       }
-    }
 
-    // 3. Generate student ID if not provided
-    let studentId = payload.studentId?.trim() || null;
-    if (!studentId) {
-      studentId = await generateNextStudentId();
-    }
+      // 2. Check parent email BEFORE creating student to avoid orphaned records
+      const shouldHandleParent = (payload.parentId === "new" || !payload.parentId) && payload.parentName?.trim();
+      if (shouldHandleParent) {
+        const parentEmail = payload.parentEmail?.trim() || `${payload.parentName!.toLowerCase().replace(/\s+/g, '.')}@placeholder.com`;
 
-    // 4. Create the student
-    const studentData: StudentInsert = {
-      student_id: studentId,
-      name: payload.name,
-      email: payload.email?.trim() || null,
-      phone: payload.phone || null,
-      photo: payload.photoUrl || null,
-      date_of_birth: payload.dateOfBirth || null,
-      gender: payload.gender || null,
-      school_name: payload.schoolName || null,
-      cover_photo: payload.coverPhotoUrl || null,
-      branch_id: payload.branchId,
-      level: payload.level || 1,
-      adcoin_balance: payload.adcoinBalance || 0,
-    };
+        // Check if parent email is same as student email - not allowed
+        if (payload.email?.trim() && parentEmail.toLowerCase() === payload.email.trim().toLowerCase()) {
+          return {
+            success: false,
+            error: "Parent email cannot be the same as student email. Please use different emails for student and parent accounts."
+          };
+        }
 
-    const student = await createStudent(studentData);
+        // Check if parent with this email already exists (that's OK, we'll link to them)
+        const existingParent = await getParentByEmail(parentEmail);
 
-    if (!student) {
-      return { success: false, error: "Failed to create student record" };
-    }
-
-    // 5. Handle parent creation/linking if provided (email already validated above)
-    if (shouldHandleParent) {
-      const parentEmail = payload.parentEmail?.trim() || `${payload.parentName!.toLowerCase().replace(/\s+/g, '.')}@placeholder.com`;
-
-      // Check if parent with this email already exists
-      const existingParent = await getParentByEmail(parentEmail);
-
-      if (existingParent) {
-        // Link existing parent instead of creating duplicate
-        await linkParentToStudent(existingParent.id, student.id, payload.parentRelationship);
-      } else {
-        // Email was already validated above, safe to create new parent
-        const parentData: ParentInsert = {
-          name: payload.parentName!.trim(),
-          email: parentEmail,
-          phone: payload.parentPhone?.trim() || null,
-          address: payload.parentAddress?.trim() || null,
-          postcode: payload.parentPostcode?.trim() || null,
-          city: payload.parentCity?.trim() || null,
-        };
-
-        const parent = await createParent(parentData);
-        if (parent) {
-          await linkParentToStudent(parent.id, student.id, payload.parentRelationship);
+        if (!existingParent) {
+          // Check if email is used elsewhere (student/user) - this is NOT OK
+          const parentEmailCheck = await checkEmailExists(parentEmail, "parents");
+          if (parentEmailCheck.exists) {
+            return {
+              success: false,
+              error: `Parent email "${parentEmail}" is already registered as a ${parentEmailCheck.table === "students" ? "student" : "team member"}. Please use a different email.`
+            };
+          }
         }
       }
-    } else if (payload.parentId && payload.parentId !== "new") {
-      // Link existing parent
-      await linkParentToStudent(payload.parentId, student.id, payload.parentRelationship);
+
+      // 3. Generate student ID if not provided
+      let studentId = payload.studentId?.trim() || null;
+      if (!studentId) {
+        studentId = await generateNextStudentId();
+      }
+
+      // 4. Create the student
+      const studentData: StudentInsert = {
+        student_id: studentId,
+        name: payload.name,
+        email: payload.email?.trim() || null,
+        phone: payload.phone || null,
+        photo: payload.photoUrl || null,
+        date_of_birth: payload.dateOfBirth || null,
+        gender: payload.gender || null,
+        school_name: payload.schoolName || null,
+        cover_photo: payload.coverPhotoUrl || null,
+        branch_id: payload.branchId,
+        level: payload.level || 1,
+        adcoin_balance: payload.adcoinBalance || 0,
+      };
+
+      const student = await createStudent(studentData);
+
+      if (!student) {
+        return { success: false, error: "Failed to create student record" };
+      }
+
+      studentDbId = student.id;
+
+      // 5. Handle parent creation/linking if provided (email already validated above)
+      if (shouldHandleParent) {
+        const parentEmail = payload.parentEmail?.trim() || `${payload.parentName!.toLowerCase().replace(/\s+/g, '.')}@placeholder.com`;
+
+        // Check if parent with this email already exists
+        const existingParent = await getParentByEmail(parentEmail);
+
+        if (existingParent) {
+          // Link existing parent instead of creating duplicate
+          await linkParentToStudent(existingParent.id, studentDbId, payload.parentRelationship);
+        } else {
+          // Email was already validated above, safe to create new parent
+          const parentData: ParentInsert = {
+            name: payload.parentName!.trim(),
+            email: parentEmail,
+            phone: payload.parentPhone?.trim() || null,
+            address: payload.parentAddress?.trim() || null,
+            postcode: payload.parentPostcode?.trim() || null,
+            city: payload.parentCity?.trim() || null,
+          };
+
+          const parent = await createParent(parentData);
+          if (parent) {
+            await linkParentToStudent(parent.id, studentDbId, payload.parentRelationship);
+          }
+        }
+      } else if (payload.parentId && payload.parentId !== "new") {
+        // Link existing parent
+        await linkParentToStudent(payload.parentId, studentDbId, payload.parentRelationship);
+      }
     }
 
     // 6. Create enrollment if course is selected
@@ -211,7 +243,7 @@ export async function createStudentAction(
 
       // sessions_remaining starts at 0 - will be set when payment is approved
       const enrollmentData: EnrollmentInsert = {
-        student_id: student.id,
+        student_id: studentDbId,
         course_id: payload.courseId,
         package_id: payload.packageId || null,
         instructor_id: payload.instructorId || null,
@@ -221,20 +253,53 @@ export async function createStudentAction(
         status: "active",
         sessions_remaining: 0, // Start with 0, will be set when payment approved
         pool_id: payload.existingPoolId || null, // Link to pool if joining existing
+        level: payload.level || 1,
+        adcoin_balance: payload.adcoinBalance || 0,
       };
 
       const enrollment = await createEnrollment(enrollmentData);
       const enrollmentId = enrollment?.id;
 
-      // 6a. Handle sibling session sharing
-      if (enrollmentId && payload.shareWithSibling && payload.parentId && payload.parentId !== "new") {
+      // 6a. Handle sibling session sharing (only for session packages, not monthly)
+      let skipPoolCreation = false;
+      if (payload.packageId) {
+        const { data: pkgCheck } = await supabaseAdmin
+          .from('course_pricing')
+          .select('package_type')
+          .eq('id', payload.packageId)
+          .single();
+        if (pkgCheck?.package_type === 'monthly') {
+          skipPoolCreation = true;
+          console.log('[Pool] Skipping pool creation for monthly package');
+        }
+      }
+      if (enrollmentId && payload.shareWithSibling && payload.parentId && payload.parentId !== "new" && !skipPoolCreation) {
         const { createPoolWithSiblings, addStudentToPool } = await import("@/data/pools");
 
         // Check if joining existing pool or creating new
         if (payload.existingPoolId) {
           // Join existing pool
-          await addStudentToPool(payload.existingPoolId, student.id, enrollmentId);
-          console.log(`Student ${student.id} joined existing pool ${payload.existingPoolId}`);
+          await addStudentToPool(payload.existingPoolId, studentDbId, enrollmentId);
+          console.log(`Student ${studentDbId} joined existing pool ${payload.existingPoolId}`);
+
+          // Update shared_with on all pool payments to include the new sibling
+          const { data: allPoolMembers } = await supabaseAdmin
+            .from('pool_students')
+            .select('student_id')
+            .eq('pool_id', payload.existingPoolId);
+          const allMemberIds = (allPoolMembers ?? []).map(ps => ps.student_id);
+
+          if (allMemberIds.length > 0) {
+            // Update all pending and paid payments for this pool
+            await supabaseAdmin
+              .from('payments')
+              .update({
+                shared_with: allMemberIds,
+                notes: `Shared package for ${allMemberIds.length} siblings`,
+              })
+              .eq('pool_id', payload.existingPoolId)
+              .in('status', ['pending', 'paid']);
+          }
         } else {
           // Need to create a new pool with first sibling
           // Check if parent has other children enrolled in this course
@@ -251,7 +316,7 @@ export async function createStudentAction(
             .select('id, student_id')
             .eq('course_id', payload.courseId)
             .in('student_id', siblingStudentIds)
-            .neq('student_id', student.id)
+            .neq('student_id', studentDbId)
             .eq('status', 'active')
             .is('deleted_at', null)
             .maybeSingle();
@@ -277,7 +342,7 @@ export async function createStudentAction(
               parentData?.name || 'Family',
               courseData?.name || 'Course',
               { studentId: siblingEnrollmentData.student_id, enrollmentId: siblingEnrollmentData.id },
-              { studentId: student.id, enrollmentId: enrollmentId }
+              { studentId: studentDbId, enrollmentId: enrollmentId }
             );
 
             if (pool) {
@@ -299,10 +364,17 @@ export async function createStudentAction(
                   .update({
                     pool_id: pool.id,
                     is_shared_package: true,
-                    shared_with: [siblingEnrollmentData.student_id, student.id],
+                    shared_with: [siblingEnrollmentData.student_id, studentDbId],
                     notes: `Shared package for ${parentData?.name || 'Family'} siblings`,
                   })
                   .eq('id', siblingPendingPayment.id);
+              } else {
+                // No existing pending payment — create a new one for the shared pool
+                const { createPoolRenewalPayment } = await import("@/data/payments");
+                const poolPayment = await createPoolRenewalPayment(pool.id);
+                if (poolPayment) {
+                  console.log(`Created pending pool payment ${poolPayment.id} for pool ${pool.id}`);
+                }
               }
             }
           }
@@ -327,7 +399,7 @@ export async function createStudentAction(
           // Note: payments.package_id references 'packages' table, not 'course_pricing'
           // So we don't set package_id here, just store the amount and course
           const paymentData: PaymentInsert = {
-            student_id: student.id,
+            student_id: studentDbId,
             course_id: payload.courseId,
             amount: pricing.price,
             payment_type: 'registration',
@@ -337,14 +409,14 @@ export async function createStudentAction(
 
           const paymentResult = await createPayment(paymentData);
           if (!paymentResult) {
-            console.error('Failed to create pending payment for student:', student.id);
+            console.error('Failed to create pending payment for student:', studentDbId);
           }
         }
       }
     }
 
-    // 8. Create adcoin transaction if initial balance is provided
-    if (payload.adcoinBalance > 0) {
+    // 8. Create adcoin transaction if initial balance is provided (only for new students)
+    if (!isExistingStudent && payload.adcoinBalance > 0) {
       // Get pool account (advaspire) user ID for sender
       const { getSettings } = await import("@/data/settings");
       const { getUserByEmail } = await import("@/data/users");
@@ -354,7 +426,7 @@ export async function createStudentAction(
 
       const transactionData: AdcoinTransactionInsert = {
         sender_id: poolUser?.id || null,
-        receiver_id: student.id,
+        receiver_id: studentDbId,
         amount: payload.adcoinBalance,
         type: 'adjusted',
         description: 'Initial adcoin balance on registration',
@@ -369,9 +441,48 @@ export async function createStudentAction(
       }
     }
 
+    // 9. Check if parent or student phone matches any trial and mark as converted
+    // Collect all phone numbers to check (parent phone + student phone)
+    const phonesToCheck: string[] = [];
+    if (payload.parentPhone?.trim()) phonesToCheck.push(payload.parentPhone.trim());
+    if (payload.phone?.trim()) phonesToCheck.push(payload.phone.trim());
+
+    if (phonesToCheck.length > 0) {
+      // Normalize all phones by stripping non-digit characters
+      const normalizedPhones = phonesToCheck.map((p) => p.replace(/\D/g, ''));
+
+      // Fetch all non-converted trials
+      const { data: allTrials } = await supabaseAdmin
+        .from('trials')
+        .select('id, parent_phone')
+        .in('status', ['pending', 'confirmed', 'completed'])
+        .is('deleted_at', null);
+
+      if (allTrials && allTrials.length > 0) {
+        const matchingIds = allTrials
+          .filter((t) => normalizedPhones.includes(t.parent_phone.replace(/\D/g, '')))
+          .map((t) => t.id);
+
+        if (matchingIds.length > 0) {
+          await supabaseAdmin
+            .from('trials')
+            .update({ status: 'converted', updated_at: new Date().toISOString() })
+            .in('id', matchingIds);
+          console.log(`[TrialConvert] Converted ${matchingIds.length} trial(s) matching phones: ${phonesToCheck.join(', ')}`);
+        } else {
+          console.log(`[TrialConvert] No matching trials for phones: ${phonesToCheck.join(', ')}`);
+        }
+      } else {
+        console.log(`[TrialConvert] No unconverted trials found in database`);
+      }
+    } else {
+      console.log(`[TrialConvert] No phone numbers to check. parentPhone: "${payload.parentPhone}", phone: "${payload.phone}"`);
+    }
+
     revalidatePath("/student");
+    revalidatePath("/trial");
     revalidateTag("dashboard", "max");
-    return { success: true, studentId: student.id };
+    return { success: true, studentId: studentDbId };
   } catch (error) {
     console.error("Error in createStudentAction:", error);
     return {
@@ -386,6 +497,8 @@ export async function updateStudentAction(
   payload: StudentFormPayload
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('students', 'can_edit');
+
     // 1. Check student email uniqueness (excluding current student)
     if (payload.email?.trim()) {
       const { data: currentStudent } = await import("@/db").then(m =>
@@ -540,7 +653,36 @@ export async function updateStudentAction(
         instructor_id: payload.instructorId || null,
         schedule: validScheduleEntries,
         sessions_remaining: 0, // Will be ignored if existing sessions != 0
+        ...(payload.enrollmentStatus ? { status: payload.enrollmentStatus as import("@/db/schema").EnrollmentStatus } : {}),
+        level: payload.level || 1,
+        adcoin_balance: payload.adcoinBalance || 0,
       });
+
+      // 4b. Handle pool redistribution on enrollment status change
+      if (payload.enrollmentStatus) {
+        const { data: enrollmentForPool } = await supabaseAdmin
+          .from('enrollments')
+          .select('id, pool_id')
+          .eq('student_id', studentId)
+          .eq('course_id', payload.courseId)
+          .is('deleted_at', null)
+          .order('enrolled_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (enrollmentForPool?.pool_id) {
+          const inactiveStatuses = ['cancelled', 'completed', 'expired'];
+          if (inactiveStatuses.includes(payload.enrollmentStatus)) {
+            // Going inactive → redistribute sessions to siblings
+            const { redistributePoolOnInactive } = await import("@/data/pools");
+            await redistributePoolOnInactive(enrollmentForPool.id, studentId);
+          } else if (payload.enrollmentStatus === 'active') {
+            // Coming back active → restore sessions from siblings
+            const { restoreStudentToPool } = await import("@/data/pools");
+            await restoreStudentToPool(enrollmentForPool.id, studentId);
+          }
+        }
+      }
 
       // 5. Update pending payment if package changed
       if (payload.packageId) {
@@ -559,8 +701,9 @@ export async function updateStudentAction(
             .select('id, pool_id')
             .eq('student_id', studentId)
             .eq('course_id', payload.courseId)
-            .eq('status', 'active')
             .is('deleted_at', null)
+            .order('enrolled_at', { ascending: false })
+            .limit(1)
             .maybeSingle();
 
           const poolId = enrollmentWithPool?.pool_id;
@@ -703,6 +846,8 @@ export async function deleteStudentAction(
   studentId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('students', 'can_delete');
+
     const success = await softDeleteStudent(studentId);
 
     if (!success) {

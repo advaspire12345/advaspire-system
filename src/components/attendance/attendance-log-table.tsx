@@ -3,8 +3,6 @@
 import { useState, useMemo, useCallback } from "react";
 import {
   Search,
-  ChevronLeft,
-  ChevronRight,
   Pencil,
   Trash2,
   Download,
@@ -12,6 +10,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
 import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import {
@@ -42,6 +41,9 @@ interface InstructorOption {
 interface AttendanceLogTableProps {
   initialData: AttendanceLogRow[];
   instructors?: InstructorOption[];
+  hideBranch?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -98,6 +100,9 @@ const csvColumns = [
 export function AttendanceLogTable({
   initialData,
   instructors = [],
+  hideBranch,
+  canEdit = true,
+  canDelete = true,
 }: AttendanceLogTableProps) {
   const [data, setData] = useState<AttendanceLogRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
@@ -178,6 +183,8 @@ export function AttendanceLogTable({
         notes: formData.notes,
         projectPhotos: formData.projectPhotos,
         adcoin: formData.adcoin,
+        lesson: formData.lesson,
+        mission: formData.mission,
       });
 
       if (result.success) {
@@ -196,6 +203,8 @@ export function AttendanceLogTable({
                   notes: formData.notes,
                   projectPhotos: formData.projectPhotos,
                   adcoin: formData.adcoin,
+                  lesson: formData.lesson,
+                  mission: formData.mission,
                 }
               : item,
           ),
@@ -227,7 +236,7 @@ export function AttendanceLogTable({
   const handleExport = () => {
     const exportData = filteredData.map((row) => ({
       ...row,
-      date: format(new Date(row.date), "do MMM yyyy"),
+      date: formatDate(row.date, row.dayOfWeek),
       status: row.status.charAt(0).toUpperCase() + row.status.slice(1),
       adcoin: row.adcoin ?? 0,
     }));
@@ -238,9 +247,30 @@ export function AttendanceLogTable({
     );
   };
 
-  // Format date display
-  const formatDate = (dateStr: string) => {
-    return format(new Date(dateStr), "do MMM yyyy");
+  // Compute the actual calendar date from actual_day relative to the slot date's week
+  const getActualDate = (slotDate: string, actualDay: string | null): Date => {
+    const base = new Date(slotDate + 'T00:00:00');
+    if (!actualDay) return base;
+    const dayMap: Record<string, number> = {
+      sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+      thursday: 4, friday: 5, saturday: 6,
+    };
+    const targetIdx = dayMap[actualDay.toLowerCase()];
+    if (targetIdx === undefined) return base;
+    const baseDay = base.getDay();
+    const mondayOff = baseDay === 0 ? -6 : 1 - baseDay;
+    const monday = new Date(base);
+    monday.setDate(base.getDate() + mondayOff);
+    const daysFromMon = targetIdx === 0 ? 6 : targetIdx - 1;
+    const target = new Date(monday);
+    target.setDate(monday.getDate() + daysFromMon);
+    return target;
+  };
+
+  // Format date display — show actual day's date, not slot date
+  const formatDate = (slotDate: string, actualDay: string | null) => {
+    const actualDate = getActualDate(slotDate, actualDay);
+    return format(actualDate, "do MMM yyyy");
   };
 
   // Format time display
@@ -397,6 +427,8 @@ export function AttendanceLogTable({
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "actions" && !canEdit && !canDelete && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -417,7 +449,7 @@ export function AttendanceLogTable({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No attendance records found.
@@ -468,7 +500,7 @@ export function AttendanceLogTable({
 
                       {/* Branch */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", hideBranch && "hidden")}
                         style={{ width: columns[2].width }}
                       >
                         <TruncatedText text={row.branchName} maxLength={12} />
@@ -495,7 +527,7 @@ export function AttendanceLogTable({
                         className="px-4 py-3 font-bold"
                         style={{ width: columns[5].width }}
                       >
-                        {formatDate(row.date)}
+                        {formatDate(row.date, row.dayOfWeek)}
                       </td>
 
                       {/* Day */}
@@ -567,31 +599,35 @@ export function AttendanceLogTable({
 
                       {/* Actions */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")}
                         style={{ width: columns[14].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
                           {/* Edit Button */}
-                          <button
-                            type="button"
-                            onClick={() => openModal("edit", row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                            aria-label={`Edit attendance for ${row.studentName}`}
-                            title="Edit"
-                          >
-                            <Pencil className="h-5 w-5" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => openModal("edit", row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              aria-label={`Edit attendance for ${row.studentName}`}
+                              title="Edit"
+                            >
+                              <Pencil className="h-5 w-5" />
+                            </button>
+                          )}
 
                           {/* Delete Button */}
-                          <button
-                            type="button"
-                            onClick={() => openModal("delete", row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                            aria-label={`Delete attendance for ${row.studentName}`}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-5 w-5" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => openModal("delete", row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              aria-label={`Delete attendance for ${row.studentName}`}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -602,38 +638,13 @@ export function AttendanceLogTable({
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between rounded-lg bg-white p-4">
-              <p className="text-sm text-muted-foreground">
-                Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{" "}
-                {Math.min(currentPage * ITEMS_PER_PAGE, filteredData.length)} of{" "}
-                {filteredData.length} results
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-sm font-medium">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
-                  disabled={currentPage === totalPages}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalResults={filteredData.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
         </CardContent>
       </Card>
 

@@ -34,71 +34,91 @@ import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
 import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import { createClient } from "@/lib/supabase/client";
 
-const navigationItems = [
+import type { PermissionsMap, PermissionResource, UserRole } from "@/db/schema";
+
+const navigationItems: {
+  title: string;
+  icon: typeof LayoutDashboard;
+  href: string;
+  resource: PermissionResource;
+}[] = [
   {
     title: "Dashboard",
     icon: LayoutDashboard,
     href: "/dashboard",
+    resource: "dashboard",
   },
   {
     title: "Branches",
     icon: Building2,
     href: "/branches",
+    resource: "branches",
   },
   {
     title: "Trial",
     icon: FlaskConical,
     href: "/trial",
+    resource: "trials",
   },
   {
     title: "Student",
     icon: FileUser,
     href: "/student",
+    resource: "students",
   },
   {
     title: "Examination",
     icon: Award,
     href: "/examination",
+    resource: "examinations",
   },
   {
     title: "Program",
     icon: GraduationCap,
     href: "/program",
+    resource: "programs",
   },
   {
     title: "Team",
     icon: Users,
     href: "/team",
+    resource: "team",
   },
   {
     title: "Mark Attendance",
     icon: CalendarCheck,
     href: "/attendance",
+    resource: "attendance",
   },
   {
     title: "Attendance History",
     icon: ClipboardList,
     href: "/attendance-log",
+    resource: "attendance_log",
   },
   {
     title: "Payment Record",
     icon: CreditCard,
     href: "/payment-record",
+    resource: "payment_record",
   },
   {
     title: "Pending Payments",
     icon: Clock,
     href: "/pending-payments",
+    resource: "pending_payments",
   },
   {
     title: "Leaderboard",
     icon: Trophy,
     href: "/leaderboard",
+    resource: "leaderboard",
   },
   {
     title: "Transactions",
     icon: ArrowLeftRight,
     href: "/transactions",
+    resource: "transactions",
   },
 ];
 
@@ -125,7 +145,12 @@ interface UserProfile {
   avatar: string | null;
 }
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  permissions: PermissionsMap | null;
+  userRole: UserRole | null;
+}
+
+export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
   const pathname = usePathname();
   const [user, setUser] = useState<UserProfile | null>(null);
   const supabase = createClient();
@@ -232,7 +257,11 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigationItems.map((item) => {
+              {navigationItems.filter((item) => {
+                // If no permissions loaded yet, show all (will be guarded by page)
+                if (!permissions) return true;
+                return permissions[item.resource]?.can_view;
+              }).map((item) => {
                 const isActive =
                   pathname === item.href ||
                   pathname.startsWith(item.href + "/");

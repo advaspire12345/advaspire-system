@@ -7,13 +7,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/ui/search-bar";
 import { Pagination } from "@/components/ui/pagination";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
+import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import { cn } from "@/lib/utils";
 import type { StudentTableRow } from "@/data/students";
 import { BranchOption, CourseOption } from "@/components/trial/trial-modal";
 import { parseISO, format } from "date-fns";
 import { StudentModal } from "@/components/student/student-modal";
-import type { StudentFormData, CoursePricingOption, CourseSlotOption, ParentOption } from "@/components/student/student-modal";
+import type { StudentFormData, CoursePricingOption, CourseSlotOption, ParentOption, StudentSelectOption } from "@/components/student/student-modal";
 import type { StudentFormPayload } from "@/app/(dashboard)/student/actions";
 
 interface StudentTableProps {
@@ -23,9 +24,10 @@ interface StudentTableProps {
   coursePricing: CoursePricingOption[];
   courseSlots: CourseSlotOption[];
   parents: ParentOption[];
-  onAdd: (payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
-  onEdit: (studentId: string, payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
-  onDelete: (studentId: string) => Promise<{ success: boolean; error?: string }>;
+  onAdd?: (payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
+  onEdit?: (studentId: string, payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
+  onDelete?: (studentId: string) => Promise<{ success: boolean; error?: string }>;
+  hideBranch?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -82,10 +84,44 @@ export function StudentTable({
   onAdd,
   onEdit,
   onDelete,
+  hideBranch,
 }: StudentTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Build student select options from initialData (deduplicated by student id)
+  const studentSelectOptions: StudentSelectOption[] = useMemo(() => {
+    const studentMap = new Map<string, StudentSelectOption>();
+    for (const row of initialData) {
+      const existing = studentMap.get(row.id);
+      if (existing) {
+        if (row.courseId && !existing.enrolledCourseIds.includes(row.courseId)) {
+          existing.enrolledCourseIds.push(row.courseId);
+        }
+      } else {
+        studentMap.set(row.id, {
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          dateOfBirth: row.dateOfBirth,
+          gender: row.gender,
+          schoolName: row.schoolName,
+          photo: row.photo,
+          coverPhoto: row.coverPhoto,
+          branchId: row.branchId,
+          level: row.level,
+          adcoinBalance: row.adcoinBalance,
+          studentId: row.studentId,
+          enrolledCourseIds: row.courseId ? [row.courseId] : [],
+          parentId: row.parentId,
+          parentRelationship: row.parentRelationship,
+        });
+      }
+    }
+    return Array.from(studentMap.values());
+  }, [initialData]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -97,6 +133,7 @@ export function StudentTable({
   // Convert StudentFormData to StudentFormPayload
   // Photos are uploaded immediately via API and URLs are stored in formData
   const convertToPayload = (formData: StudentFormData): StudentFormPayload => ({
+    existingStudentId: formData.existingStudentId,
     name: formData.name,
     email: formData.email,
     phone: formData.phone,
@@ -126,10 +163,12 @@ export function StudentTable({
     scheduleEntries: formData.scheduleEntries,
     shareWithSibling: formData.shareWithSibling,
     existingPoolId: formData.existingPoolId,
+    enrollmentStatus: formData.enrollmentStatus,
     notes: formData.notes,
   });
 
   const handleAdd = async (formData: StudentFormData) => {
+    if (!onAdd) return;
     const payload = convertToPayload(formData);
     const result = await onAdd(payload);
     if (!result.success) {
@@ -139,6 +178,7 @@ export function StudentTable({
   };
 
   const handleEdit = async (formData: StudentFormData) => {
+    if (!onEdit) return;
     if (!selectedRecord) return;
     const payload = convertToPayload(formData);
     const result = await onEdit(selectedRecord.id, payload);
@@ -149,6 +189,7 @@ export function StudentTable({
   };
 
   const handleDelete = async () => {
+    if (!onDelete) return;
     if (!selectedRecord) return;
     const result = await onDelete(selectedRecord.id);
     if (!result.success) {
@@ -259,78 +300,41 @@ export function StudentTable({
 
     const sessions = row.sessionsRemaining ?? 0;
 
-    // For MONTHLY packages, always show date range if period exists
+    // For MONTHLY packages — show date only
     if (row.packageType === "monthly") {
       if (row.periodStart && row.periodEnd) {
         try {
           const startDate = parseISO(row.periodStart);
           const endDate = parseISO(row.periodEnd);
-          const dateRange = `${format(startDate, "d/M")} - ${format(endDate, "d/M")}`;
-
-          if (sessions < 0) {
-            // Negative months - pending payment with date range
-            return (
-              <div className="text-xs space-y-0.5">
-                <div className="font-medium">{dateRange}</div>
-                <div className="text-amber-500 font-medium">Pending Payment</div>
-              </div>
-            );
-          } else if (sessions === 0) {
-            // Zero months - pending payment with date range
-            return (
-              <div className="text-xs space-y-0.5">
-                <div className="font-medium">{dateRange}</div>
-                <div className="text-amber-500 font-medium">Pending Payment</div>
-              </div>
-            );
-          } else {
-            // Positive months remaining
-            return (
-              <div className="text-xs space-y-0.5">
-                <div className="font-medium">{dateRange}</div>
-                <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
-              </div>
-            );
-          }
+          return (
+            <span className="font-medium text-xs">
+              {format(startDate, "d/M")} - {format(endDate, "d/M")}
+            </span>
+          );
         } catch {
           return "-";
         }
-      } else {
-        // No period start - waiting for first attendance or pending payment
-        if (sessions > 0) {
-          return (
-            <div className="text-xs space-y-0.5">
-              <span className="text-muted-foreground">Awaiting first session</span>
-              <div className="text-[#615DFA] font-medium">{sessions} month{sessions !== 1 ? "s" : ""}</div>
-            </div>
-          );
-        } else {
-          return (
-            <span className="text-amber-500 text-xs font-medium">Pending Payment</span>
-          );
-        }
       }
+      return (
+        <span className="text-amber-500 text-xs font-medium">Pending</span>
+      );
     }
 
-    // For SESSION packages
+    // For SESSION packages — show sessions count
     if (row.packageType === "session") {
       if (sessions < 0) {
-        const owedCount = Math.abs(sessions);
         return (
-          <div className="space-y-0.5">
-            <span className="text-red-500 font-bold">
-              {sessions} session{owedCount !== 1 ? "s" : ""}
-            </span>
-            <div className="text-amber-500 text-xs font-medium">Pending Payment</div>
-          </div>
+          <span className="text-red-500 text-sm font-medium">
+            {sessions} session{Math.abs(sessions) !== 1 ? "s" : ""}
+          </span>
         );
       } else if (sessions === 0) {
         return (
-          <span className="text-amber-500 text-xs font-medium">Pending Payment</span>
+          <span className="text-red-500 text-sm font-medium">0 sessions</span>
         );
       } else {
         return (
-          <span className="font-medium text-[#615DFA]">
+          <span className="text-[#615DFA] text-sm font-medium">
             {sessions} session{sessions !== 1 ? "s" : ""}
           </span>
         );
@@ -351,13 +355,15 @@ export function StudentTable({
               onChange={handleSearchChange}
               placeholder="Search by name, email, branch or program..."
             />
-            <Button
-              onClick={openAddModal}
-              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Student
-            </Button>
+            {onAdd && (
+              <Button
+                onClick={openAddModal}
+                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Student
+              </Button>
+            )}
           </div>
 
           {/* Table - EXACT STRUCTURE MATCH TO TRIAL TABLE */}
@@ -375,6 +381,8 @@ export function StudentTable({
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
                         col.align === "right" && "text-right",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "action" && !onEdit && !onDelete && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -395,7 +403,7 @@ export function StudentTable({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No students found.
@@ -404,7 +412,7 @@ export function StudentTable({
                 ) : (
                   paginatedData.map((row, rowIdx) => (
                     <tr
-                      key={row.id}
+                      key={`${row.id}-${row.enrollmentId || 'no-enrollment'}`}
                       className={cn(
                         "transition hover:bg-[#f0f6ff]",
                         rowIdx === paginatedData.length - 1 &&
@@ -416,16 +424,21 @@ export function StudentTable({
                         className="px-3 py-2"
                         style={{ width: columns[0].width }}
                       >
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage
-                            src={row.photo || undefined}
-                            alt={row.name}
-                            className="object-cover"
-                          />
-                          <AvatarFallback className="bg-gradient-to-r from-[#615DFA] to-[#23D2E2] text-white font-medium text-xs">
-                            {row.name.charAt(0)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <div className="relative flex justify-center">
+                          <div className="relative">
+                            <HexagonAvatar
+                              size={50}
+                              imageUrl={row.photo ?? undefined}
+                              percentage={0.5}
+                              animated={false}
+                              fallbackInitials={row.name.charAt(0)}
+                              cornerRadius={8}
+                            />
+                            <div className="absolute -bottom-1 -right-1 z-10">
+                              <HexagonNumberBadge value={row.level} size={22} />
+                            </div>
+                          </div>
+                        </div>
                       </td>
 
                       {/* Student Name */}
@@ -462,7 +475,7 @@ export function StudentTable({
 
                       {/* Branch */}
                       <td
-                        className="px-3 py-2 text-sm"
+                        className={cn("px-3 py-2 text-sm", hideBranch && "hidden")}
                         style={{ width: columns[5].width }}
                       >
                         {row.branchName}
@@ -564,49 +577,63 @@ export function StudentTable({
                         {row.parentCity || "-"}
                       </td>
 
-                      {/* Status */}
+                      {/* Status — auto-derived for session packages based on sessions */}
                       <td
                         className="px-3 py-2 text-center"
                         style={{ width: columns[16].width }}
                       >
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-                            row.enrollmentStatus
-                              ? ENROLLMENT_STATUS_STYLES[row.enrollmentStatus] ?? "bg-gray-100 text-gray-700"
-                              : "bg-gray-100 text-gray-700",
-                          )}
-                        >
-                          {row.enrollmentStatus
-                            ? ENROLLMENT_STATUS_LABELS[row.enrollmentStatus] ?? row.enrollmentStatus
-                            : "None"}
-                        </span>
+                        {(() => {
+                          const sessions = row.sessionsRemaining ?? 0;
+                          // For session packages: override status based on session count
+                          const autoStatus =
+                            row.packageType === "session"
+                              ? sessions > 0 ? "active" : "pending"
+                              : row.enrollmentStatus;
+                          return (
+                            <span
+                              className={cn(
+                                "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+                                autoStatus
+                                  ? ENROLLMENT_STATUS_STYLES[autoStatus] ?? "bg-gray-100 text-gray-700"
+                                  : "bg-gray-100 text-gray-700",
+                              )}
+                            >
+                              {autoStatus
+                                ? ENROLLMENT_STATUS_LABELS[autoStatus] ?? autoStatus
+                                : "None"}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Action */}
                       <td
-                        className="px-3 py-2"
+                        className={cn("px-3 py-2", !onEdit && !onDelete && "hidden")}
                         style={{ width: columns[17].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                            aria-label={`Edit student ${row.name}`}
-                            title="Edit"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openDeleteModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                            aria-label={`Delete student ${row.name}`}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {onEdit && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              aria-label={`Edit student ${row.name}`}
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
+                          {onDelete && (
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              aria-label={`Delete student ${row.name}`}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -635,6 +662,7 @@ export function StudentTable({
         coursePricing={coursePricing}
         courseSlots={courseSlots}
         parents={parents}
+        students={studentSelectOptions}
         mode={modalMode}
         record={selectedRecord}
         branches={branches}

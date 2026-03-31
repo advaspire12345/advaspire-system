@@ -76,9 +76,9 @@ interface ProgramModalProps {
   onAdd: (payload: ProgramFormPayload) => Promise<void>;
   onEdit: (payload: ProgramFormPayload) => Promise<void>;
   onDelete: () => Promise<void>;
-  onCreateCategory: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
+  onCreateCategory?: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
   onFetchProgram: (programId: string) => Promise<{ success: boolean; data?: ProgramFull; error?: string }>;
-  onUploadCoverImage: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
+  onUploadCoverImage?: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
 }
 
 const TABS = [
@@ -680,8 +680,8 @@ export function ProgramModal({
       description: description || null,
       short_description: shortDescription || null,
       category_id: categoryId && categoryId !== "new" ? categoryId : null,
-      number_of_levels: numberOfLevels ? parseInt(numberOfLevels) : null,
-      sessions_to_level_up: sessionsToLevelUp ? parseInt(sessionsToLevelUp) : null,
+      number_of_levels: numberOfLevels ? parseInt(numberOfLevels) : 0,
+      sessions_to_level_up: numberOfLevels === "0" ? 0 : (sessionsToLevelUp ? parseInt(sessionsToLevelUp) : null),
       program_type: programType || null,
       status: status || "active",
       branch_id: branchIds[0] || "", // Primary branch
@@ -764,7 +764,7 @@ export function ProgramModal({
     try {
       // Upload cover image if there's a pending file
       let finalCoverImageUrl = coverImageUrl;
-      if (pendingCoverFile && mode !== "delete") {
+      if (pendingCoverFile && mode !== "delete" && onUploadCoverImage) {
         const formData = new FormData();
         formData.append("file", pendingCoverFile);
         const uploadResult = await onUploadCoverImage(formData);
@@ -781,7 +781,7 @@ export function ProgramModal({
 
       // Create new category if needed
       let finalCategoryId = categoryId;
-      if (categoryId === "new" && newCategoryName.trim()) {
+      if (categoryId === "new" && newCategoryName.trim() && onCreateCategory) {
         const result = await onCreateCategory(newCategoryName.trim());
         if (result.success && result.categoryId) {
           finalCategoryId = result.categoryId;
@@ -1154,19 +1154,29 @@ export function ProgramModal({
                         />
                       )}
 
-                      <FloatingInput
-                        label="Number of Levels"
-                        type="number"
-                        value={numberOfLevels}
-                        onChange={(e) => setNumberOfLevels(e.target.value)}
-                      />
+                      <div className={numberOfLevels === "0" ? "md:col-span-2" : ""}>
+                        <FloatingInput
+                          label="Number of Levels"
+                          type="number"
+                          value={numberOfLevels}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setNumberOfLevels(val);
+                            if (val === "0") {
+                              setSessionsToLevelUp("0");
+                            }
+                          }}
+                        />
+                      </div>
 
-                      <FloatingInput
-                        label="Sessions to Level Up"
-                        type="number"
-                        value={sessionsToLevelUp}
-                        onChange={(e) => setSessionsToLevelUp(e.target.value)}
-                      />
+                      {numberOfLevels !== "0" && (
+                        <FloatingInput
+                          label="Sessions to Level Up"
+                          type="number"
+                          value={sessionsToLevelUp}
+                          onChange={(e) => setSessionsToLevelUp(e.target.value)}
+                        />
+                      )}
 
                       <div className="md:col-span-2">
                         <FloatingMultiSelect

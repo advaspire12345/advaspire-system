@@ -7,18 +7,24 @@ import {
   Trash2,
   Plus,
   Download,
-  ExternalLink,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/ui/search-bar";
 import { Pagination } from "@/components/ui/pagination";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
+import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import { cn } from "@/lib/utils";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, differenceInYears } from "date-fns";
 import { ExaminationModal } from "@/components/examination/examination-modal";
-import type { ExaminationTableRow, EligibleStudent, ExaminationStatus } from "@/db/schema";
-import type { ExaminationFormPayload } from "@/app/(dashboard)/examination/actions";
+import { CertificatePreviewModal } from "@/components/examination/certificate-preview-modal";
+import type { ExaminationTableRow, EligibleStudent, ExaminationStatus, StudentExamOption } from "@/db/schema";
+import {
+  createExaminationAction,
+  updateExaminationAction,
+  deleteExaminationAction,
+  type ExaminationFormPayload,
+} from "@/app/(dashboard)/examination/actions";
 
 export interface BranchOption {
   id: string;
@@ -40,17 +46,14 @@ export interface ExaminerOption {
 interface ExaminationTableProps {
   initialData: ExaminationTableRow[];
   eligibleStudents: EligibleStudent[];
+  allStudents: StudentExamOption[];
   examiners: ExaminerOption[];
   branches: BranchOption[];
   courses: CourseOption[];
-  onAdd: (
-    payload: ExaminationFormPayload
-  ) => Promise<{ success: boolean; error?: string }>;
-  onEdit: (
-    examId: string,
-    payload: Partial<ExaminationFormPayload>
-  ) => Promise<{ success: boolean; error?: string }>;
-  onDelete: (examId: string) => Promise<{ success: boolean; error?: string }>;
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  hideBranch?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -63,18 +66,16 @@ const columns: {
 }[] = [
   { key: "photo", label: "Photo", width: "50px" },
   { key: "student", label: "Student", width: "130px" },
-  { key: "branch", label: "Branch", width: "100px" },
   { key: "age", label: "Age", width: "50px", align: "center" },
-  { key: "program", label: "Program", width: "120px" },
+  { key: "branch", label: "Branch", width: "100px" },
+  { key: "exam", label: "Exam", width: "160px" },
   { key: "sessionAttend", label: "Sessions", width: "70px", align: "center" },
-  { key: "level", label: "Level", width: "60px", align: "center" },
-  { key: "exam", label: "Exam", width: "140px" },
   { key: "reattempt", label: "Reattempt", width: "70px", align: "center" },
   { key: "mark", label: "Mark", width: "60px", align: "center" },
   { key: "notes", label: "Detail", width: "100px" },
-  { key: "examiner", label: "PIC", width: "50px", align: "center" },
+  { key: "examiner", label: "PIC", width: "100px" },
   { key: "date", label: "Date", width: "100px" },
-  { key: "cert", label: "Cert", width: "60px", align: "center" },
+  { key: "cert", label: "Cert", width: "100px", align: "center" },
   { key: "status", label: "Status", width: "90px", align: "center" },
   { key: "action", label: "Action", width: "90px", align: "center" },
 ];
@@ -100,18 +101,17 @@ const STATUS_LABELS: Record<ExaminationStatus, string> = {
 export function ExaminationTable({
   initialData,
   eligibleStudents,
+  allStudents,
   examiners,
   branches,
   courses,
-  onAdd,
-  onEdit,
-  onDelete,
+  canCreate,
+  canEdit,
+  canDelete,
+  hideBranch,
 }: ExaminationTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ExaminationStatus | "all">(
-    "all"
-  );
   const [currentPage, setCurrentPage] = useState(1);
 
   // Modal state
@@ -120,8 +120,18 @@ export function ExaminationTable({
   const [selectedRecord, setSelectedRecord] =
     useState<ExaminationTableRow | null>(null);
 
+  // Certificate preview state
+  const [certPreviewOpen, setCertPreviewOpen] = useState(false);
+  const [certRecord, setCertRecord] = useState<ExaminationTableRow | null>(null);
+
+  const openCertPreview = (record: ExaminationTableRow) => {
+    setCertRecord(record);
+    setCertPreviewOpen(true);
+  };
+
   const handleAdd = async (payload: ExaminationFormPayload) => {
-    const result = await onAdd(payload);
+    if (!canCreate) return;
+    const result = await createExaminationAction(payload);
     if (!result.success) {
       throw new Error(result.error || "Failed to create examination");
     }
@@ -129,31 +139,88 @@ export function ExaminationTable({
   };
 
   const handleEdit = async (payload: ExaminationFormPayload) => {
+    if (!canEdit) return;
     if (!selectedRecord) return;
-    const result = await onEdit(selectedRecord.id, payload);
-    if (!result.success) {
-      throw new Error(result.error || "Failed to update examination");
+    // Eligible rows are virtual (not in DB yet), so create instead of update
+    if (selectedRecord.id.startsWith("eligible-")) {
+      if (!canCreate) return;
+      const result = await createExaminationAction(payload);
+      if (!result.success) {
+        throw new Error(result.error || "Failed to create examination");
+      }
+    } else {
+      const result = await updateExaminationAction(selectedRecord.id, payload);
+      if (!result.success) {
+        throw new Error(result.error || "Failed to update examination");
+      }
     }
     router.refresh();
   };
 
   const handleDelete = async () => {
+    if (!canDelete) return;
     if (!selectedRecord) return;
-    const result = await onDelete(selectedRecord.id);
+    // Eligible rows are virtual (not in DB), nothing to delete
+    if (selectedRecord.id.startsWith("eligible-")) {
+      return;
+    }
+    const result = await deleteExaminationAction(selectedRecord.id);
     if (!result.success) {
       throw new Error(result.error || "Failed to delete examination");
     }
     router.refresh();
   };
 
+  // Convert eligible students to virtual table rows and merge with real exam records
+  const allData = useMemo(() => {
+    // Create a set of existing exam keys (student+course+level) to avoid duplicates
+    const existingExamKeys = new Set(
+      initialData.map((row) => `${row.studentId}-${row.courseId}-${row.examLevel}`)
+    );
+
+    // Convert eligible students to virtual ExaminationTableRow entries
+    const eligibleRows: ExaminationTableRow[] = eligibleStudents
+      .filter((es) => !existingExamKeys.has(`${es.studentId}-${es.courseId}-${es.currentLevel}`))
+      .map((es) => {
+        let studentAge: number | null = null;
+        if (es.dateOfBirth) {
+          try {
+            studentAge = differenceInYears(new Date(), parseISO(es.dateOfBirth));
+          } catch { /* ignore */ }
+        }
+        return {
+          id: `eligible-${es.studentId}-${es.enrollmentId}`,
+          studentId: es.studentId,
+          studentName: es.studentName,
+          studentPhoto: es.studentPhoto,
+          studentAge,
+          branchId: es.branchId,
+          branchName: es.branchName,
+          courseId: es.courseId,
+          courseName: es.courseName,
+          sessionAttend: es.sessionsAttended,
+          currentLevel: es.currentLevel,
+          examName: `${es.courseName} Level ${es.currentLevel}`,
+          examLevel: es.currentLevel,
+          reattemptCount: 0,
+          mark: null,
+          notes: null,
+          examinerId: null,
+          examinerName: null,
+          examinerPhoto: null,
+          examDate: new Date().toISOString(),
+          certificateUrl: null,
+          certificateNumber: null,
+          status: "eligible" as ExaminationStatus,
+        };
+      });
+
+    return [...eligibleRows, ...initialData];
+  }, [initialData, eligibleStudents]);
+
   // Filter data based on search and status
   const filteredData = useMemo(() => {
-    let result = initialData;
-
-    // Status filter
-    if (statusFilter !== "all") {
-      result = result.filter((row) => row.status === statusFilter);
-    }
+    let result = allData;
 
     // Search filter
     if (searchQuery.trim()) {
@@ -168,7 +235,7 @@ export function ExaminationTable({
     }
 
     return result;
-  }, [initialData, searchQuery, statusFilter]);
+  }, [allData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -183,10 +250,6 @@ export function ExaminationTable({
     setCurrentPage(1);
   };
 
-  const handleStatusFilterChange = (status: ExaminationStatus | "all") => {
-    setStatusFilter(status);
-    setCurrentPage(1);
-  };
 
   // Modal handlers
   const openAddModal = () => {
@@ -222,44 +285,28 @@ export function ExaminationTable({
         <CardContent className="space-y-4 p-0 min-w-0">
           {/* Search and Action Row */}
           <div className="flex flex-col gap-4 rounded-lg p-6 sm:flex-row sm:items-center sm:justify-between bg-white">
-            <div className="flex flex-col sm:flex-row gap-4 flex-1">
+            <div className="flex-1">
               <SearchBar
                 value={searchQuery}
                 onChange={handleSearchChange}
                 placeholder="Search by student, branch, program, exam..."
               />
-              {/* Status Filter */}
-              <select
-                value={statusFilter}
-                onChange={(e) =>
-                  handleStatusFilterChange(
-                    e.target.value as ExaminationStatus | "all"
-                  )
-                }
-                className="h-[50px] px-4 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#615DFA]"
-              >
-                <option value="all">All Status</option>
-                <option value="eligible">Eligible</option>
-                <option value="scheduled">Scheduled</option>
-                <option value="in_progress">In Progress</option>
-                <option value="pass">Pass</option>
-                <option value="fail">Fail</option>
-                <option value="absent">Absent</option>
-              </select>
             </div>
-            <Button
-              onClick={openAddModal}
-              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Examination
-            </Button>
+            {canCreate && (
+              <Button
+                onClick={openAddModal}
+                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Examination
+              </Button>
+            )}
           </div>
 
           {/* Table */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1600px] w-full table-fixed border-separate border-spacing-0">
+            <table className="min-w-[1300px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
                   {columns.map((col, idx) => (
@@ -270,7 +317,9 @@ export function ExaminationTable({
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.align === "right" && "text-right"
+                        col.align === "right" && "text-right",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "action" && !canEdit && !canDelete && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -286,12 +335,12 @@ export function ExaminationTable({
             </table>
 
             {/* Body Table */}
-            <table className="min-w-[1600px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="min-w-[1300px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No examinations found.
@@ -312,16 +361,21 @@ export function ExaminationTable({
                         className="px-3 py-2"
                         style={{ width: columns[0].width }}
                       >
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage
-                            src={row.studentPhoto || undefined}
-                            alt={row.studentName}
-                            className="object-cover"
-                          />
-                          <AvatarFallback className="bg-gradient-to-r from-[#615DFA] to-[#23D2E2] text-white font-medium text-xs">
-                            {row.studentName.charAt(0)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <div className="relative flex justify-center">
+                          <div className="relative">
+                            <HexagonAvatar
+                              size={50}
+                              imageUrl={row.studentPhoto ?? undefined}
+                              percentage={0.5}
+                              animated={false}
+                              fallbackInitials={row.studentName.charAt(0)}
+                              cornerRadius={8}
+                            />
+                            <div className="absolute -bottom-1 -right-1 z-10">
+                              <HexagonNumberBadge value={row.currentLevel} size={22} />
+                            </div>
+                          </div>
+                        </div>
                       </td>
 
                       {/* Student Name */}
@@ -332,28 +386,28 @@ export function ExaminationTable({
                         {row.studentName}
                       </td>
 
-                      {/* Branch */}
-                      <td
-                        className="px-3 py-2 text-sm truncate"
-                        style={{ width: columns[2].width }}
-                      >
-                        {row.branchName}
-                      </td>
-
                       {/* Age */}
                       <td
                         className="px-3 py-2 text-center"
-                        style={{ width: columns[3].width }}
+                        style={{ width: columns[2].width }}
                       >
                         {row.studentAge ?? "-"}
                       </td>
 
-                      {/* Program */}
+                      {/* Branch */}
+                      <td
+                        className={cn("px-3 py-2 text-sm truncate", hideBranch && "hidden")}
+                        style={{ width: columns[3].width }}
+                      >
+                        {row.branchName}
+                      </td>
+
+                      {/* Exam (Program + Level) */}
                       <td
                         className="px-3 py-2 text-sm truncate"
                         style={{ width: columns[4].width }}
                       >
-                        {row.courseName}
+                        {row.courseName} Lv.{row.examLevel}
                       </td>
 
                       {/* Session Attend */}
@@ -364,33 +418,10 @@ export function ExaminationTable({
                         {row.sessionAttend}
                       </td>
 
-                      {/* Level */}
-                      <td
-                        className="px-3 py-2 text-center font-bold"
-                        style={{ width: columns[6].width }}
-                      >
-                        {row.currentLevel}
-                      </td>
-
-                      {/* Exam */}
-                      <td
-                        className="px-3 py-2 text-sm"
-                        style={{ width: columns[7].width }}
-                      >
-                        <div className="space-y-0.5">
-                          <div className="font-medium truncate">
-                            {row.examName}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            Level {row.examLevel}
-                          </div>
-                        </div>
-                      </td>
-
                       {/* Reattempt */}
                       <td
                         className="px-3 py-2 text-center"
-                        style={{ width: columns[8].width }}
+                        style={{ width: columns[6].width }}
                       >
                         {row.reattemptCount > 0 ? (
                           <span className="text-orange-600 font-medium">
@@ -404,7 +435,7 @@ export function ExaminationTable({
                       {/* Mark */}
                       <td
                         className="px-3 py-2 text-center"
-                        style={{ width: columns[9].width }}
+                        style={{ width: columns[7].width }}
                       >
                         {row.mark !== null ? (
                           <span
@@ -427,7 +458,7 @@ export function ExaminationTable({
                       {/* Notes */}
                       <td
                         className="px-3 py-2 text-xs truncate"
-                        style={{ width: columns[10].width }}
+                        style={{ width: columns[8].width }}
                         title={row.notes || undefined}
                       >
                         {row.notes || "-"}
@@ -435,32 +466,16 @@ export function ExaminationTable({
 
                       {/* Examiner (PIC) */}
                       <td
-                        className="px-3 py-2 text-center"
-                        style={{ width: columns[11].width }}
+                        className="px-3 py-2 text-sm truncate"
+                        style={{ width: columns[9].width }}
                       >
-                        {row.examinerPhoto || row.examinerName ? (
-                          <Avatar
-                            className="h-6 w-6 mx-auto"
-                            title={row.examinerName || undefined}
-                          >
-                            <AvatarImage
-                              src={row.examinerPhoto || undefined}
-                              alt={row.examinerName || "Examiner"}
-                              className="object-cover"
-                            />
-                            <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
-                              {row.examinerName?.charAt(0) || "?"}
-                            </AvatarFallback>
-                          </Avatar>
-                        ) : (
-                          "-"
-                        )}
+                        {row.examinerName || "-"}
                       </td>
 
                       {/* Date */}
                       <td
                         className="px-3 py-2 text-sm"
-                        style={{ width: columns[12].width }}
+                        style={{ width: columns[10].width }}
                       >
                         {formatDate(row.examDate)}
                       </td>
@@ -468,22 +483,18 @@ export function ExaminationTable({
                       {/* Certificate */}
                       <td
                         className="px-3 py-2 text-center"
-                        style={{ width: columns[13].width }}
+                        style={{ width: columns[11].width }}
                       >
-                        {row.certificateUrl ? (
-                          <a
-                            href={row.certificateUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center p-1 text-[#615DFA] hover:bg-[#615DFA]/10 rounded"
-                            title="Download Certificate"
+                        {row.status === "pass" ? (
+                          <button
+                            type="button"
+                            onClick={() => openCertPreview(row)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-muted-foreground/30 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-transparent hover:bg-[#23D2E2] hover:text-white"
+                            title="View Certificate"
                           >
-                            <Download className="h-4 w-4" />
-                          </a>
-                        ) : row.status === "pass" ? (
-                          <span className="text-xs text-muted-foreground">
-                            Pending
-                          </span>
+                            <Download className="h-3.5 w-3.5" />
+                            <span>Cert</span>
+                          </button>
                         ) : (
                           "-"
                         )}
@@ -492,7 +503,7 @@ export function ExaminationTable({
                       {/* Status */}
                       <td
                         className="px-3 py-2 text-center"
-                        style={{ width: columns[14].width }}
+                        style={{ width: columns[12].width }}
                       >
                         <span
                           className={cn(
@@ -506,28 +517,32 @@ export function ExaminationTable({
 
                       {/* Action */}
                       <td
-                        className="px-3 py-2"
-                        style={{ width: columns[15].width }}
+                        className={cn("px-3 py-2", !canEdit && !canDelete && "hidden")}
+                        style={{ width: columns[13].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                            aria-label={`Edit examination for ${row.studentName}`}
-                            title="Edit"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openDeleteModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                            aria-label={`Delete examination for ${row.studentName}`}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              aria-label={`Edit examination for ${row.studentName}`}
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              aria-label={`Delete examination for ${row.studentName}`}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -554,13 +569,28 @@ export function ExaminationTable({
         onOpenChange={setModalOpen}
         mode={modalMode}
         record={selectedRecord}
-        eligibleStudents={eligibleStudents}
+        allStudents={allStudents}
         examiners={examiners}
         courses={courses}
         onAdd={handleAdd}
         onEdit={handleEdit}
         onDelete={handleDelete}
       />
+
+      {/* Certificate Preview Modal */}
+      {certRecord && (
+        <CertificatePreviewModal
+          open={certPreviewOpen}
+          onOpenChange={setCertPreviewOpen}
+          studentName={certRecord.studentName}
+          courseName={certRecord.courseName}
+          examLevel={certRecord.examLevel}
+          mark={certRecord.mark}
+          examinerName={certRecord.examinerName}
+          examDate={certRecord.examDate}
+          certificateNumber={certRecord.certificateNumber}
+        />
+      )}
     </>
   );
 }

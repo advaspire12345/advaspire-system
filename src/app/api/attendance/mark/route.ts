@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { markAttendance, updateSessionTracking } from "@/data/attendance";
 import { getUserByAuthId, getUserByEmail } from "@/data/users";
+import { updateAdcoinBalance, getStudentById } from "@/data/students";
 import { supabaseAdmin } from "@/db";
 import type { AttendanceStatus, TrialStatus } from "@/db/schema";
 
@@ -25,6 +27,13 @@ interface MarkAttendanceRequest {
   // Trial-specific fields
   instructorFeedback?: string;
   isTrial?: boolean;
+  // Existing attendance ID for direct updates
+  attendanceId?: string;
+  // Original slot info from enrollment schedule
+  slotDay?: string;
+  slotTime?: string;
+  // Password for adcoin transfer verification
+  adcoinPassword?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -45,6 +54,13 @@ export async function POST(request: NextRequest) {
     }
     if (!user) {
       return NextResponse.json({ error: "User not found in system" }, { status: 401 });
+    }
+
+    // Check permissions
+    const { getPermissionsForUser } = await import("@/data/permissions");
+    const permissions = await getPermissionsForUser(user.id, user.role);
+    if (!permissions.attendance.can_create) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body: MarkAttendanceRequest = await request.json();
@@ -212,11 +228,179 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // ── Duplicate checks (only for new records, skip if editing existing) ──
+    if (!body.attendanceId && body.actualDay && body.actualStartTime) {
+      const normalizeTime = (t: string | null) => {
+        if (!t) return '';
+        const parts = t.split(':');
+        return parts.length >= 2 ? `${parts[0].padStart(2, '0')}:${parts[1]}` : t;
+      };
+      const normalizeDay = (d: string | null) => (d || '').toLowerCase().trim();
+      const enteredDay = normalizeDay(body.actualDay);
+      const enteredTime = normalizeTime(body.actualStartTime);
+
+      // Calculate current week boundaries
+      const today = new Date();
+      const currentDayOfWeek = today.getDay();
+      const mondayOffset = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+      const monday = new Date(today);
+      monday.setDate(today.getDate() + mondayOffset);
+      monday.setHours(0, 0, 0, 0);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const mondayStr = fmt(monday);
+      const sundayStr = fmt(sunday);
+
+      // Fetch all current-week attendance for this enrollment
+      const { data: weekRecords } = await supabaseAdmin
+        .from('attendance')
+        .select('id, slot_day, slot_time, actual_day, actual_start_time, enrollment_id')
+        .eq('enrollment_id', body.enrollmentId)
+        .gte('date', mondayStr)
+        .lte('date', sundayStr);
+
+      // Check 1: Slot duplicate — does this enrollment already have attendance for the same slot?
+      if (body.slotDay && body.slotTime) {
+        // Mark Present / Mark Absent mode: check by slot_day + slot_time
+        const slotDup = (weekRecords ?? []).find(r =>
+          normalizeDay(r.slot_day) === normalizeDay(body.slotDay!) &&
+          normalizeTime(r.slot_time) === normalizeTime(body.slotTime!)
+        );
+        if (slotDup) {
+          return NextResponse.json(
+            { error: `Attendance already exists for this ${body.slotDay} ${body.slotTime} slot this week.` },
+            { status: 409 }
+          );
+        }
+      } else {
+        // Take Attendance (add) mode: check by slot_day + slot_time OR actual_day + actual_start_time
+        const slotDup = (weekRecords ?? []).find(r =>
+          // Match by schedule slot info
+          (normalizeDay(r.slot_day) === enteredDay && normalizeTime(r.slot_time) === enteredTime) ||
+          // Match by actual day+time (any record, regardless of slot info)
+          (normalizeDay(r.actual_day) === enteredDay && normalizeTime(r.actual_start_time) === enteredTime)
+        );
+        if (slotDup) {
+          return NextResponse.json(
+            { error: `This enrollment already has attendance on ${body.actualDay} at ${body.actualStartTime} this week.` },
+            { status: 409 }
+          );
+        }
+      }
+
+      // Check 2: Actual time duplicate — does this student have attendance at the same actual day+time
+      // across ANY enrollment (including the same one)?
+      const { data: enrollment } = await supabaseAdmin
+        .from('enrollments')
+        .select('student_id')
+        .eq('id', body.enrollmentId)
+        .single();
+
+      if (enrollment?.student_id) {
+        // Get all enrollments for the student, then query their attendance
+        const { data: studentEnrollments } = await supabaseAdmin
+          .from('enrollments')
+          .select('id')
+          .eq('student_id', enrollment.student_id)
+          .is('deleted_at', null);
+
+        const enrollmentIds = (studentEnrollments ?? []).map(e => e.id);
+        if (enrollmentIds.length > 0) {
+          const { data: allStudentRecords } = await supabaseAdmin
+            .from('attendance')
+            .select('id, actual_day, actual_start_time, enrollment_id')
+            .in('enrollment_id', enrollmentIds)
+            .gte('date', mondayStr)
+            .lte('date', sundayStr);
+
+          const timeDup = (allStudentRecords ?? []).find(r =>
+            normalizeDay(r.actual_day) === enteredDay &&
+            normalizeTime(r.actual_start_time) === enteredTime
+          );
+          if (timeDup) {
+            const isSameEnrollment = timeDup.enrollment_id === body.enrollmentId;
+            return NextResponse.json(
+              { error: `This student already has attendance on ${body.actualDay} at ${body.actualStartTime} this week${isSameEnrollment ? '' : ' (different program)'}.` },
+              { status: 409 }
+            );
+          }
+        }
+      }
+    }
+
+    // ── Auto-match slot from enrollment schedule when slotDay/slotTime not provided ──
+    // This handles "Take Attendance" (add mode) where the user enters a day+time
+    // that matches an existing enrollment schedule slot.
+    let resolvedSlotDay = body.slotDay || null;
+    let resolvedSlotTime = body.slotTime || null;
+
+    if (!resolvedSlotDay && body.actualDay) {
+      const { data: enrollmentData } = await supabaseAdmin
+        .from('enrollments')
+        .select('schedule, day_of_week, start_time')
+        .eq('id', body.enrollmentId)
+        .single();
+
+      if (enrollmentData) {
+        const normD = (d: string | null) => (d || '').toLowerCase().trim();
+        const normT = (t: string | null) => {
+          if (!t) return '';
+          const parts = t.split(':');
+          return parts.length >= 2 ? `${parts[0].padStart(2, '0')}:${parts[1]}` : t;
+        };
+
+        interface ScheduleSlot { day: string; time?: string }
+        let slots: ScheduleSlot[] = [];
+
+        // Parse schedule field
+        if (enrollmentData.schedule) {
+          try {
+            const parsed = JSON.parse(enrollmentData.schedule as string);
+            if (Array.isArray(parsed)) {
+              slots = parsed.filter((s: ScheduleSlot) => s.day && s.day.trim());
+            }
+          } catch { /* ignore */ }
+        }
+
+        // Fallback to day_of_week
+        if (slots.length === 0 && enrollmentData.day_of_week) {
+          try {
+            const parsed = JSON.parse(enrollmentData.day_of_week);
+            if (Array.isArray(parsed)) {
+              slots = parsed.map((d: string) => ({ day: d, time: enrollmentData.start_time ?? undefined }));
+            }
+          } catch {
+            slots = enrollmentData.day_of_week.split(',').map((d: string) => ({
+              day: d.trim(),
+              time: enrollmentData.start_time ?? undefined,
+            }));
+          }
+        }
+
+        // Find a matching slot
+        const match = slots.find(s => {
+          const slotDay = s.day.charAt(0).toUpperCase() + s.day.slice(1).toLowerCase();
+          const slotTime = s.time || enrollmentData.start_time;
+          return normD(slotDay) === normD(body.actualDay!) &&
+                 normT(slotTime) === normT(body.actualStartTime!);
+        });
+
+        if (match) {
+          resolvedSlotDay = match.day.charAt(0).toUpperCase() + match.day.slice(1).toLowerCase();
+          resolvedSlotTime = match.time || enrollmentData.start_time;
+          console.log('[API Mark Attendance] Auto-matched slot:', resolvedSlotDay, resolvedSlotTime);
+        }
+      }
+    }
+
     console.log('[API Mark Attendance] Received data:', {
       enrollmentId: body.enrollmentId,
       date: body.date,
       actualDay: body.actualDay,
       actualStartTime: body.actualStartTime,
+      slotDay: resolvedSlotDay,
+      slotTime: resolvedSlotTime,
       lesson: body.lesson,
       mission: body.mission,
     });
@@ -240,6 +424,9 @@ export async function POST(request: NextRequest) {
         adcoin: body.adcoin ?? 0,
         lesson: body.lesson,
         mission: body.mission,
+        attendanceId: body.attendanceId,
+        slotDay: resolvedSlotDay,
+        slotTime: resolvedSlotTime,
       }
     );
 
@@ -254,6 +441,89 @@ export async function POST(request: NextRequest) {
         { error: "Failed to mark attendance" },
         { status: 500 }
       );
+    }
+
+    // Create/update adcoin transaction if adcoin > 0 and student is present/late
+    if (body.adcoin && body.adcoin > 0 && (body.status === 'present' || body.status === 'late')) {
+      // Verify password before processing adcoin transfer
+      if (!body.adcoinPassword) {
+        return NextResponse.json(
+          { error: "Password is required to transfer adcoin." },
+          { status: 400 }
+        );
+      }
+
+      const verifyClient = createSupabaseClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+      const { error: signInError } = await verifyClient.auth.signInWithPassword({
+        email: authUser.email!,
+        password: body.adcoinPassword,
+      });
+
+      if (signInError) {
+        return NextResponse.json(
+          { error: "Invalid password. Adcoin transfer denied." },
+          { status: 401 }
+        );
+      }
+      // Get student_id from enrollment
+      const { data: enrollment } = await supabaseAdmin
+        .from('enrollments')
+        .select('student_id')
+        .eq('id', body.enrollmentId)
+        .single();
+
+      if (enrollment?.student_id) {
+        const student = await getStudentById(enrollment.student_id);
+        if (student) {
+          const txDescription = `Attendance reward - ${body.date}`;
+
+          // Check if a transaction already exists for this attendance date + student
+          const { data: existingTx } = await supabaseAdmin
+            .from('adcoin_transactions')
+            .select('id, amount')
+            .eq('receiver_id', enrollment.student_id)
+            .eq('type', 'earned')
+            .eq('description', txDescription)
+            .maybeSingle();
+
+          if (!existingTx) {
+            // No existing transaction — create one
+            const { error: txError } = await supabaseAdmin
+              .from('adcoin_transactions')
+              .insert({
+                sender_id: user.id,
+                receiver_id: enrollment.student_id,
+                type: 'earned',
+                amount: body.adcoin,
+                description: txDescription,
+                verified_by: user.id,
+              });
+
+            if (txError) {
+              console.warn('[Attendance Mark] Failed to create adcoin transaction:', txError);
+            } else {
+              await updateAdcoinBalance(enrollment.student_id, student.adcoin_balance + body.adcoin);
+            }
+          } else if (existingTx.amount !== body.adcoin) {
+            // Transaction exists but amount changed — update and adjust balance
+            const diff = body.adcoin - existingTx.amount;
+            const { error: updateTxError } = await supabaseAdmin
+              .from('adcoin_transactions')
+              .update({ amount: body.adcoin })
+              .eq('id', existingTx.id);
+
+            if (updateTxError) {
+              console.warn('[Attendance Mark] Failed to update adcoin transaction:', updateTxError);
+            } else {
+              await updateAdcoinBalance(enrollment.student_id, student.adcoin_balance + diff);
+            }
+          }
+          // If existingTx.amount === body.adcoin, no change needed
+        }
+      }
     }
 
     // Update session tracking when:
@@ -300,6 +570,9 @@ export async function POST(request: NextRequest) {
       console.log('[Attendance Mark] Skipping session tracking - conditions not met');
       console.log('[Attendance Mark] Conditions: isNew=%s, status=%s, previousStatus=%s', result.isNew, body.status, result.previousStatus);
     }
+
+    // Invalidate dashboard cache so stats/charts show updated data
+    revalidateTag("dashboard", "max");
 
     return NextResponse.json({ success: true, attendance: result.attendance, isNew: result.isNew });
   } catch (error) {

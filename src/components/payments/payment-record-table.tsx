@@ -5,8 +5,6 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Search,
-  ChevronLeft,
-  ChevronRight,
   Pencil,
   Trash2,
   CalendarIcon,
@@ -17,6 +15,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import {
   Tooltip,
   TooltipContent,
@@ -51,6 +50,9 @@ interface PaymentRecordTableProps {
   initialEndDate?: string;
   courses?: CourseOption[];
   packages?: PackageOption[];
+  hideBranch?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -83,6 +85,9 @@ export function PaymentRecordTable({
   initialEndDate,
   courses = [],
   packages = [],
+  hideBranch,
+  canEdit = true,
+  canDelete = true,
 }: PaymentRecordTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -414,7 +419,9 @@ export function PaymentRecordTable({
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.align === "right" && "text-right"
+                        col.align === "right" && "text-right",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "actions" && !canEdit && !canDelete && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -435,7 +442,7 @@ export function PaymentRecordTable({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No payment records found.
@@ -475,7 +482,7 @@ export function PaymentRecordTable({
                       </td>
 
                       {/* Branch */}
-                      <td className="px-4 py-3" style={{ width: columns[2].width }}>
+                      <td className={cn("px-4 py-3", hideBranch && "hidden")} style={{ width: columns[2].width }}>
                         <TruncatedText text={row.branchName} maxLength={10} />
                       </td>
 
@@ -550,29 +557,33 @@ export function PaymentRecordTable({
                       </td>
 
                       {/* Actions */}
-                      <td className="px-4 py-3" style={{ width: columns[10].width }}>
+                      <td className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")} style={{ width: columns[10].width }}>
                         <div className="flex items-center justify-center gap-2">
                           {/* Edit Button */}
-                          <button
-                            type="button"
-                            onClick={() => openModal("edit", row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                            aria-label="Edit payment"
-                            title="Edit"
-                          >
-                            <Pencil className="h-5 w-5" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => openModal("edit", row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              aria-label="Edit payment"
+                              title="Edit"
+                            >
+                              <Pencil className="h-5 w-5" />
+                            </button>
+                          )}
 
                           {/* Delete Button */}
-                          <button
-                            type="button"
-                            onClick={() => openModal("delete", row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                            aria-label="Delete payment"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-5 w-5" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => openModal("delete", row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              aria-label="Delete payment"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -583,36 +594,13 @@ export function PaymentRecordTable({
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between rounded-lg bg-white p-4">
-              <p className="text-sm text-muted-foreground">
-                Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{" "}
-                {Math.min(currentPage * ITEMS_PER_PAGE, filteredData.length)} of{" "}
-                {filteredData.length} results
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-sm font-medium">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalResults={filteredData.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
         </CardContent>
       </Card>
 

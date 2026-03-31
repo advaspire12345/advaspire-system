@@ -2,19 +2,22 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Plus, FileText } from "lucide-react";
+import { Pencil, Trash2, Plus, FileText, Shield } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/ui/search-bar";
 import { Pagination } from "@/components/ui/pagination";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
 import { cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
 import { TeamModal } from "@/components/team/team-modal";
 import { CvPreviewModal } from "@/components/team/cv-preview-modal";
+import { PermissionModal } from "@/components/team/permission-modal";
+import type { PermissionModalData } from "@/components/team/permission-modal";
 import type { TeamTableRow } from "@/data/team";
 import type { TeamMemberFormData } from "@/components/team/team-modal";
 import type { TeamMemberFormPayload } from "@/app/(dashboard)/team/actions";
+import type { PermissionResource, ResourcePermission, UserRole } from "@/db/schema";
 
 interface BranchOption {
   id: string;
@@ -24,9 +27,19 @@ interface BranchOption {
 interface TeamTableProps {
   initialData: TeamTableRow[];
   branches: BranchOption[];
-  onAdd: (payload: TeamMemberFormPayload) => Promise<{ success: boolean; error?: string }>;
-  onEdit: (userId: string, payload: TeamMemberFormPayload) => Promise<{ success: boolean; error?: string }>;
-  onDelete: (userId: string) => Promise<{ success: boolean; error?: string }>;
+  currentUserRole?: UserRole | null;
+  currentUserBranchId?: string | null;
+  hideBranch?: boolean;
+  onAdd?: (payload: TeamMemberFormPayload) => Promise<{ success: boolean; error?: string }>;
+  onEdit?: (userId: string, payload: TeamMemberFormPayload) => Promise<{ success: boolean; error?: string }>;
+  onDelete?: (userId: string) => Promise<{ success: boolean; error?: string }>;
+  onSavePermissions?: (
+    userId: string,
+    permissions: { resource: PermissionResource; can_view: boolean; can_create: boolean; can_edit: boolean; can_delete: boolean }[]
+  ) => Promise<{ success: boolean; error?: string }>;
+  onLoadPermissions?: (
+    userId: string
+  ) => Promise<{ permissions: Record<PermissionResource, ResourcePermission>; role: string } | null>;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -40,14 +53,14 @@ const columns: {
   { key: "photo", label: "Photo", width: "70px" },
   { key: "name", label: "Name", width: "160px" },
   { key: "phone", label: "Phone", width: "130px" },
-  { key: "address", label: "Address", width: "180px" },
+  { key: "address", label: "Address", width: "160px" },
   { key: "branch", label: "Branch", width: "130px" },
   { key: "email", label: "Email", width: "180px" },
   { key: "cv", label: "CV", width: "70px", align: "center" as const },
   { key: "role", label: "Role", width: "120px" },
   { key: "employedDate", label: "Employed Date", width: "120px" },
   { key: "status", label: "Status", width: "90px", align: "center" as const },
-  { key: "action", label: "Action", width: "100px", align: "center" as const },
+  { key: "action", label: "Action", width: "140px", align: "center" as const },
 ];
 
 const ROLE_LABELS: Record<string, string> = {
@@ -70,9 +83,14 @@ const STATUS_LABELS: Record<string, string> = {
 export function TeamTable({
   initialData,
   branches,
+  currentUserRole,
+  currentUserBranchId,
+  hideBranch,
   onAdd,
   onEdit,
   onDelete,
+  onSavePermissions,
+  onLoadPermissions,
 }: TeamTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -87,6 +105,10 @@ export function TeamTable({
   const [cvPreviewOpen, setCvPreviewOpen] = useState(false);
   const [cvPreviewUrl, setCvPreviewUrl] = useState("");
   const [cvMemberName, setCvMemberName] = useState("");
+
+  // Permission modal state
+  const [permissionModalOpen, setPermissionModalOpen] = useState(false);
+  const [permissionModalData, setPermissionModalData] = useState<PermissionModalData | null>(null);
 
   // Convert form data to payload
   // Note: avatarImage and coverImage are File objects that would need to be uploaded
@@ -106,6 +128,7 @@ export function TeamTable({
   });
 
   const handleAdd = async (formData: TeamMemberFormData) => {
+    if (!onAdd) return;
     const payload = convertToPayload(formData, true);
     const result = await onAdd(payload);
     if (!result.success) {
@@ -115,7 +138,7 @@ export function TeamTable({
   };
 
   const handleEdit = async (formData: TeamMemberFormData) => {
-    if (!selectedRecord) return;
+    if (!selectedRecord || !onEdit) return;
     const payload = convertToPayload(formData);
     const result = await onEdit(selectedRecord.id, payload);
     if (!result.success) {
@@ -125,12 +148,38 @@ export function TeamTable({
   };
 
   const handleDelete = async () => {
-    if (!selectedRecord) return;
+    if (!selectedRecord || !onDelete) return;
     const result = await onDelete(selectedRecord.id);
     if (!result.success) {
       throw new Error(result.error || "Failed to delete team member");
     }
     router.refresh();
+  };
+
+  const openPermissionModal = async (record: TeamTableRow) => {
+    if (!onLoadPermissions) return;
+    const result = await onLoadPermissions(record.id);
+    if (result) {
+      setPermissionModalData({
+        userId: record.id,
+        userName: record.name,
+        userRole: record.role,
+        permissions: result.permissions,
+      });
+      setPermissionModalOpen(true);
+    }
+  };
+
+  const handleSavePermissions = async (
+    userId: string,
+    permissions: { resource: PermissionResource; can_view: boolean; can_create: boolean; can_edit: boolean; can_delete: boolean }[]
+  ) => {
+    if (!onSavePermissions) return { success: false, error: "Not available" };
+    const result = await onSavePermissions(userId, permissions);
+    if (result.success) {
+      router.refresh();
+    }
+    return result;
   };
 
   // Filter data based on search
@@ -208,13 +257,15 @@ export function TeamTable({
               onChange={handleSearchChange}
               placeholder="Search by name, email, branch or role..."
             />
-            <Button
-              onClick={openAddModal}
-              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Team Member
-            </Button>
+            {onAdd && (
+              <Button
+                onClick={openAddModal}
+                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Team Member
+              </Button>
+            )}
           </div>
 
           {/* Table */}
@@ -231,7 +282,9 @@ export function TeamTable({
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.align === "right" && "text-right"
+                        col.align === "right" && "text-right",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "action" && !onEdit && !onDelete && !onSavePermissions && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -252,7 +305,7 @@ export function TeamTable({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No team members found.
@@ -273,16 +326,16 @@ export function TeamTable({
                         className="px-4 py-3"
                         style={{ width: columns[0].width }}
                       >
-                        <Avatar className="h-9 w-9">
-                          <AvatarImage
-                            src={row.photo || undefined}
-                            alt={row.name}
-                            className="object-cover"
+                        <div className="relative flex justify-center">
+                          <HexagonAvatar
+                            size={50}
+                            imageUrl={row.photo ?? undefined}
+                            percentage={0.5}
+                            animated={false}
+                            fallbackInitials={row.name.charAt(0)}
+                            cornerRadius={8}
                           />
-                          <AvatarFallback className="bg-gradient-to-r from-[#615DFA] to-[#23D2E2] text-white font-medium text-xs">
-                            {row.name.charAt(0)}
-                          </AvatarFallback>
-                        </Avatar>
+                        </div>
                       </td>
 
                       {/* Name */}
@@ -312,7 +365,7 @@ export function TeamTable({
 
                       {/* Branch */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", hideBranch && "hidden")}
                         style={{ width: columns[4].width }}
                       >
                         {row.branchName}
@@ -380,28 +433,43 @@ export function TeamTable({
 
                       {/* Action */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", !onEdit && !onDelete && !onSavePermissions && "hidden")}
                         style={{ width: columns[10].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                            aria-label={`Edit ${row.name}`}
-                            title="Edit"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openDeleteModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                            aria-label={`Delete ${row.name}`}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {onEdit && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              aria-label={`Edit ${row.name}`}
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
+                          {onSavePermissions && (row.role === "branch_admin" || row.role === "instructor") && (
+                            <button
+                              type="button"
+                              onClick={() => openPermissionModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              aria-label={`Permissions for ${row.name}`}
+                              title="Permissions"
+                            >
+                              <Shield className="h-4 w-4" />
+                            </button>
+                          )}
+                          {onDelete && (
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              aria-label={`Delete ${row.name}`}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -429,6 +497,8 @@ export function TeamTable({
         mode={modalMode}
         record={selectedRecord}
         branches={branches}
+        currentUserRole={currentUserRole ?? undefined}
+        currentUserBranchId={currentUserBranchId ?? undefined}
         onAdd={handleAdd}
         onEdit={handleEdit}
         onDelete={handleDelete}
@@ -440,6 +510,14 @@ export function TeamTable({
         onOpenChange={setCvPreviewOpen}
         cvUrl={cvPreviewUrl}
         memberName={cvMemberName}
+      />
+
+      {/* Permission Modal */}
+      <PermissionModal
+        open={permissionModalOpen}
+        onOpenChange={setPermissionModalOpen}
+        data={permissionModalData}
+        onSave={handleSavePermissions}
       />
     </>
   );

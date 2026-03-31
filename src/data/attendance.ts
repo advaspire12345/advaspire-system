@@ -353,6 +353,10 @@ export interface MarkAttendanceData {
   adcoin?: number | null;
   lesson?: string | null;
   mission?: string | null;
+  attendanceId?: string;
+  // Original slot info from enrollment schedule (never changes)
+  slotDay?: string | null;
+  slotTime?: string | null;
 }
 
 export interface MarkAttendanceResult {
@@ -371,73 +375,120 @@ export async function markAttendance(
 ): Promise<MarkAttendanceResult> {
   console.log('markAttendance called with:', { enrollmentId, date, status, markedBy, notes, data });
 
-  // Check if attendance already exists for this enrollment and date
-  const { data: existingRecords, error: existingError } = await supabaseAdmin
-    .from('attendance')
-    .select('id, status, actual_start_time, actual_day')
-    .eq('enrollment_id', enrollmentId)
-    .eq('date', date);
+  type ExistingRecord = { id: string; status: AttendanceStatus; slot_day: string | null; slot_time: string | null };
 
-  if (existingError && existingError.code !== 'PGRST116') {
-    console.error('Error checking existing attendance:', existingError);
+  // Step 1: If attendanceId is provided, directly update that record by ID
+  if (data?.attendanceId) {
+    console.log('markAttendance: Direct update by attendanceId:', data.attendanceId);
+    const { data: directRecord, error: directError } = await supabaseAdmin
+      .from('attendance')
+      .select('id, status, slot_day, slot_time')
+      .eq('id', data.attendanceId)
+      .single();
+
+    if (!directError && directRecord) {
+      // Update everything EXCEPT slot_day and slot_time (those never change)
+      const attendance = await updateAttendance(directRecord.id, {
+        status,
+        marked_by: data?.markedBy ?? markedBy ?? null,
+        notes: data?.notes ?? notes ?? null,
+        actual_day: data?.actualDay ?? null,
+        actual_start_time: data?.actualStartTime ?? null,
+        actual_end_time: data?.actualEndTime ?? null,
+        class_type: data?.classType ?? null,
+        instructor_name: data?.instructorName ?? null,
+        last_activity: data?.lastActivity ?? null,
+        project_photos: data?.projectPhotos ?? null,
+        adcoin: data?.adcoin ?? 0,
+        lesson: data?.lesson ?? null,
+        mission: data?.mission ?? null,
+      });
+      return { attendance, isNew: false, previousStatus: directRecord.status as AttendanceStatus };
+    }
+    console.warn('markAttendance: attendanceId not found, falling back to slot matching');
   }
 
-  // Find an existing record that matches BOTH the day AND time slot
-  type ExistingRecord = { id: string; status: AttendanceStatus; actual_start_time: string | null; actual_day: string | null };
+  // Step 2: Try to find existing record by slot_day + slot_time (new reliable matching)
   let existing: ExistingRecord | null = null;
-  const newStartTime = data?.actualStartTime || null;
-  const newActualDay = data?.actualDay || null;
+  const slotDay = data?.slotDay || null;
+  const slotTime = data?.slotTime || null;
 
-  // Helper to normalize time for comparison (e.g., "11:00" and "11:00:00" should match)
-  const normalizeTime = (time: string | null): string => {
-    if (!time) return '';
-    const parts = time.split(':');
-    if (parts.length >= 2) {
-      return `${parts[0].padStart(2, '0')}:${parts[1]}`;
+  if (slotDay && slotTime) {
+    const { data: slotRecords, error: slotError } = await supabaseAdmin
+      .from('attendance')
+      .select('id, status, slot_day, slot_time')
+      .eq('enrollment_id', enrollmentId)
+      .eq('slot_day', slotDay)
+      .eq('slot_time', slotTime)
+      .eq('date', date);
+
+    if (!slotError && slotRecords && slotRecords.length > 0) {
+      existing = slotRecords[0] as ExistingRecord;
+      console.log('markAttendance: Matched by slot_day+slot_time:', existing.id);
     }
-    return time;
-  };
+  }
 
-  // Helper to normalize day for comparison (case-insensitive)
-  const normalizeDay = (day: string | null): string => {
-    if (!day) return '';
-    return day.toLowerCase().trim();
-  };
+  // Step 3: Fallback — match by enrollment + date (for old records without slot info)
+  // IMPORTANT: Only match records that have NO slot info (truly old records) or matching slot info.
+  // Never steal a record that belongs to a different slot.
+  if (!existing) {
+    const { data: dateRecords, error: dateError } = await supabaseAdmin
+      .from('attendance')
+      .select('id, status, slot_day, slot_time')
+      .eq('enrollment_id', enrollmentId)
+      .eq('date', date);
 
-  if (existingRecords && existingRecords.length > 0) {
-    console.log('markAttendance: Found', existingRecords.length, 'existing records for this date');
-    console.log('markAttendance: Looking for match - day:', newActualDay, 'time:', newStartTime);
+    if (!dateError && dateRecords) {
+      const normalizeD = (d: string | null) => (d || '').toLowerCase().trim();
+      const normalizeT = (t: string | null): string => {
+        if (!t) return '';
+        const parts = t.split(':');
+        return parts.length >= 2 ? `${parts[0].padStart(2, '0')}:${parts[1]}` : t;
+      };
 
-    if (newStartTime && newActualDay) {
-      // Match by BOTH day AND time - this is the most specific match
-      const normalizedNewTime = normalizeTime(newStartTime);
-      const normalizedNewDay = normalizeDay(newActualDay);
-
-      const match = existingRecords.find(r => {
-        const recordTime = normalizeTime(r.actual_start_time);
-        const recordDay = normalizeDay(r.actual_day);
-        const timeMatch = recordTime === normalizedNewTime;
-        const dayMatch = recordDay === normalizedNewDay;
-        console.log('markAttendance: Comparing record', r.id, '- day:', r.actual_day, '(', recordDay, ') time:', r.actual_start_time, '(', recordTime, ') -> dayMatch:', dayMatch, 'timeMatch:', timeMatch);
-        return timeMatch && dayMatch;
+      // Filter to records that are safe to match:
+      // - Records with no slot info (old records), OR
+      // - Records whose slot info matches the current request
+      const candidates = dateRecords.filter(r => {
+        const hasSlotInfo = r.slot_day && r.slot_time;
+        if (!hasSlotInfo) return true; // Old record, safe to match
+        // Has slot info — only match if it's the same slot
+        return normalizeD(r.slot_day) === normalizeD(slotDay) &&
+               normalizeT(r.slot_time) === normalizeT(slotTime);
       });
 
-      existing = match ? (match as ExistingRecord) : null;
-      console.log('markAttendance: Day+Time match result:', existing?.id || 'none (will create new)');
-    } else if (newStartTime) {
-      // Only time provided - match by time only (legacy behavior)
-      const normalizedNewTime = normalizeTime(newStartTime);
-      const match = existingRecords.find(r => normalizeTime(r.actual_start_time) === normalizedNewTime);
-      existing = match ? (match as ExistingRecord) : null;
-      console.log('markAttendance: Time-only match:', normalizedNewTime, 'found:', existing?.id || 'none');
-    } else {
-      // If no time provided, only update if there's exactly one record for this date
-      if (existingRecords.length === 1) {
-        existing = existingRecords[0] as ExistingRecord;
+      if (candidates.length === 1) {
+        existing = candidates[0] as ExistingRecord;
+        console.log('markAttendance: Matched by enrollment+date (single candidate):', existing.id);
       }
     }
   }
 
+  if (existing) {
+    console.log('markAttendance: UPDATING existing attendance:', existing.id);
+    const attendance = await updateAttendance(existing.id, {
+      status,
+      marked_by: data?.markedBy ?? markedBy ?? null,
+      notes: data?.notes ?? notes ?? null,
+      actual_day: data?.actualDay ?? null,
+      actual_start_time: data?.actualStartTime ?? null,
+      actual_end_time: data?.actualEndTime ?? null,
+      class_type: data?.classType ?? null,
+      instructor_name: data?.instructorName ?? null,
+      last_activity: data?.lastActivity ?? null,
+      project_photos: data?.projectPhotos ?? null,
+      adcoin: data?.adcoin ?? 0,
+      lesson: data?.lesson ?? null,
+      mission: data?.mission ?? null,
+      // Set slot_day/slot_time if not already set on the record
+      ...(!existing.slot_day && slotDay ? { slot_day: slotDay } : {}),
+      ...(!existing.slot_time && slotTime ? { slot_time: slotTime } : {}),
+    });
+    return { attendance, isNew: false, previousStatus: existing.status as AttendanceStatus };
+  }
+
+  // Step 4: No existing record — create new with slot info
+  console.log('markAttendance: CREATING NEW attendance - slot:', slotDay, slotTime);
   const attendanceData: AttendanceInsert = {
     enrollment_id: enrollmentId,
     date,
@@ -454,20 +505,10 @@ export async function markAttendance(
     adcoin: data?.adcoin ?? 0,
     lesson: data?.lesson ?? null,
     mission: data?.mission ?? null,
+    slot_day: slotDay,
+    slot_time: slotTime,
   };
 
-  console.log('Prepared attendance data:', attendanceData);
-
-  if (existing) {
-    console.log('markAttendance: UPDATING existing attendance:', existing.id, 'day:', existing.actual_day, 'time:', existing.actual_start_time, 'previous status:', existing.status);
-    // Update existing - remove enrollment_id and date as they're not in update type
-    const { enrollment_id: _, date: __, ...updateData } = attendanceData;
-    const attendance = await updateAttendance(existing.id, updateData);
-    return { attendance, isNew: false, previousStatus: existing.status as AttendanceStatus };
-  }
-
-  console.log('markAttendance: CREATING NEW attendance - day:', newActualDay, 'time:', newStartTime);
-  // Create new
   const attendance = await createAttendance(attendanceData);
   return { attendance, isNew: true, previousStatus: null };
 }
@@ -650,7 +691,13 @@ export interface AttendanceTableRow {
   endTime: string | null;
   lastAttendanceDate: string | null;
   lastAttendanceStatus: AttendanceStatus | null;
+  lastActivityText: string | null;
+  lastLesson: string | null;
+  lastMission: string | null;
+  lastAdcoin: number;
   sessionsRemaining: number;
+  // Whether student has an active exam for this enrollment
+  hasExam: boolean;
   // Type to distinguish between enrollment and trial
   type: 'enrollment' | 'trial';
   // Trial-specific fields
@@ -693,8 +740,35 @@ export async function getEnrollmentsForAttendance(
   await autoMarkAbsentForPreviousWeek();
 
   // Import user helpers dynamically to avoid circular imports
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
 
   // Build query - package_id references course_pricing table
   const selectQuery = `
@@ -706,23 +780,25 @@ export async function getEnrollmentsForAttendance(
     start_time,
     end_time,
     sessions_remaining,
+    pool_id,
+    pool:shared_session_pools(id, sessions_remaining, total_sessions),
     student:students!inner(
       id,
       name,
       photo,
       branch_id,
       deleted_at,
-      branch:branches!inner(id, name)
+      branch:branches!inner(id, name, city)
     ),
     course:courses!inner(id, name),
     package:course_pricing(description),
-    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin, lesson, mission)
+    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin, lesson, mission, slot_day, slot_time)
   `;
 
   let query = supabaseAdmin
     .from('enrollments')
     .select(selectQuery)
-    .eq('status', 'active')
+    .in('status', ['active', 'pending'])
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
@@ -742,9 +818,43 @@ export async function getEnrollmentsForAttendance(
     // Filter out deleted students
     if (studentData.deleted_at) return false;
     // Apply branch filter if user has a specific branch
-    if (userBranchId && studentData.branch_id !== userBranchId) return false;
+    if (branchIds && !branchIds.includes(studentData.branch_id)) return false;
     return true;
   });
+
+  // Fetch active exams for all enrollments to mark "Exam" badge
+  const enrollmentIds = filteredData.map((e) => e.id);
+  const activeExamEnrollmentIds = new Set<string>();
+  if (enrollmentIds.length > 0) {
+    const { data: activeExams } = await supabaseAdmin
+      .from('examinations')
+      .select('enrollment_id')
+      .in('enrollment_id', enrollmentIds)
+      .is('deleted_at', null)
+      .in('status', ['eligible', 'scheduled', 'in_progress']);
+
+    for (const exam of activeExams ?? []) {
+      if (exam.enrollment_id) {
+        activeExamEnrollmentIds.add(exam.enrollment_id);
+      }
+    }
+  }
+
+  // Pre-fetch pool sibling counts for pooled enrollments
+  const poolSiblingCountMap = new Map<string, number>();
+  const poolIdsForAttendance = new Set<string>();
+  for (const enrollment of filteredData) {
+    if ((enrollment as any).pool_id) poolIdsForAttendance.add((enrollment as any).pool_id);
+  }
+  if (poolIdsForAttendance.size > 0) {
+    for (const poolId of poolIdsForAttendance) {
+      const { data: poolMembers } = await supabaseAdmin
+        .from('pool_students')
+        .select('student_id')
+        .eq('pool_id', poolId);
+      poolSiblingCountMap.set(poolId, (poolMembers ?? []).length);
+    }
+  }
 
   const result: AttendanceTableRow[] = [];
 
@@ -776,10 +886,26 @@ export async function getEnrollmentsForAttendance(
       name: string;
       photo: string | null;
       branch_id: string;
-      branch: { id: string; name: string };
+      branch: { id: string; name: string; city: string | null };
     };
     const courseData = enrollment.course as unknown as { id: string; name: string };
     const pkgData = enrollment.package as unknown as { description: string } | null;
+
+    // Compute sessions remaining — use pool data for pooled enrollments
+    let computedSessionsRemaining = enrollment.sessions_remaining;
+    const poolId = (enrollment as any).pool_id as string | null;
+    const poolData = (enrollment as any).pool as { id: string; sessions_remaining: number; total_sessions: number } | null;
+    if (poolId && poolData) {
+      const siblingCount = poolSiblingCountMap.get(poolId) || 2;
+      const allocation = Math.floor(poolData.total_sessions / siblingCount);
+      const bonus = enrollment.sessions_remaining ?? 0;
+      // Count only THIS student's present/late attendance
+      const allAttendance = (enrollment.attendance || []) as Array<{ status: string }>;
+      const thisStudentAttendance = allAttendance.filter(
+        (a) => a.status === 'present' || a.status === 'late'
+      ).length;
+      computedSessionsRemaining = allocation + bonus - thisStudentAttendance;
+    }
 
     // Full attendance record type
     interface AttendanceRecord {
@@ -796,6 +922,8 @@ export async function getEnrollmentsForAttendance(
       adcoin: number;
       lesson: string | null;
       mission: string | null;
+      slot_day: string | null;
+      slot_time: string | null;
     }
     const attendanceRecords = (enrollment.attendance as unknown as AttendanceRecord[]) ?? [];
 
@@ -804,6 +932,34 @@ export async function getEnrollmentsForAttendance(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
     );
     const lastAttendance = sortedAttendance[0] ?? null;
+
+    // Historical data should EXCLUDE current week so it doesn't bleed across slots
+    // (current week data is shown via existingAttendance per-slot instead)
+    const previousWeekRecords = sortedAttendance.filter((a) => {
+      const dateStr = a.date.includes('T') ? a.date.split('T')[0] : a.date;
+      return dateStr < mondayStr;
+    });
+
+    // Historical last attendance date (most recent date where student was present/late, before this week)
+    const lastPresentAttendance = previousWeekRecords.find(
+      (a) => a.status === 'present' || a.status === 'late'
+    );
+    const historicalLastAttendanceDate = lastPresentAttendance?.date ?? null;
+
+    // Only consider present/late records from previous weeks for historical fields
+    const presentRecords = previousWeekRecords.filter((a) => a.status === 'present' || a.status === 'late');
+
+    // Last activity text from the most recent present/late attendance (previous weeks)
+    const lastActivityRecord = presentRecords.find((a) => a.last_activity);
+    const lastActivityText = lastActivityRecord?.last_activity ?? null;
+
+    // Last lesson, mission, and adcoin from the most recent present/late attendance (previous weeks)
+    const lastLessonRecord = presentRecords.find((a) => a.lesson);
+    const lastLesson = lastLessonRecord?.lesson ?? null;
+    const lastMissionRecord = presentRecords.find((a) => a.mission);
+    const lastMission = lastMissionRecord?.mission ?? null;
+    const lastAdcoinRecord = presentRecords.find((a) => a.adcoin > 0);
+    const lastAdcoin = lastAdcoinRecord?.adcoin ?? 0;
 
     // Parse schedule slots from the schedule field
     interface ScheduleEntry {
@@ -875,15 +1031,12 @@ export async function getEnrollmentsForAttendance(
       );
     }
 
-    // Helper to normalize time for comparison (convert to HH:MM format)
-    const normalizeTime = (time: string | null | undefined): string => {
-      if (!time) return '';
-      // Remove seconds if present (e.g., "17:00:00" -> "17:00")
-      const parts = time.split(':');
-      if (parts.length >= 2) {
-        return `${parts[0].padStart(2, '0')}:${parts[1]}`;
-      }
-      return time;
+    // Helper to normalize for comparison
+    const normalizeDay = (d: string | null | undefined) => (d || '').toLowerCase().trim();
+    const normalizeTime = (t: string | null | undefined): string => {
+      if (!t) return '';
+      const parts = t.split(':');
+      return parts.length >= 2 ? `${parts[0].padStart(2, '0')}:${parts[1]}` : t;
     };
 
     // Track which attendance records have been matched to slots
@@ -897,118 +1050,61 @@ export async function getEnrollmentsForAttendance(
 
       // Calculate the date for this slot in the current week
       const slotDayIndex = getDayIndex(slot.day);
-      if (slotDayIndex === -1) continue; // Skip invalid days
+      if (slotDayIndex === -1) continue;
 
-      // Calculate the slot date within the current week (Monday to Sunday)
-      const daysFromMonday = slotDayIndex === 0 ? 6 : slotDayIndex - 1; // Sunday is at end of week
+      const daysFromMonday = slotDayIndex === 0 ? 6 : slotDayIndex - 1;
       const slotDate = new Date(currentWeekMonday);
       slotDate.setDate(currentWeekMonday.getDate() + daysFromMonday);
-      const slotDateStr = slotDate.toISOString().split('T')[0];
+      const slotDateStr = formatLocalDate(slotDate);
 
-      // Find attendance for THIS specific slot
-      // Match by time within the week (attendance might be saved with different date)
-      const normalizedSlotTime = normalizeTime(slotTime);
-      const todayStr = new Date().toISOString().split('T')[0];
-
-      // Get all unmatched attendance records for this week
-      const availableAttendance = currentWeekAttendanceRecords.filter(a => {
-        if (matchedAttendanceIds.has(a.id)) return false;
-        return true;
-      });
+      // Get unmatched attendance for this enrollment in current week
+      const availableAttendance = currentWeekAttendanceRecords.filter(a => !matchedAttendanceIds.has(a.id));
 
       let slotAttendance: AttendanceRecord | undefined;
 
-      // Try to match attendance to this slot
-      // Normalize slot day for comparison
-      const normalizedSlotDay = slotDay.toLowerCase().trim();
-
-      console.log(`[Slot Match] Looking for slot: day=${normalizedSlotDay}, time=${normalizedSlotTime}, date=${slotDateStr}`);
-      console.log(`[Slot Match] Available attendance (${availableAttendance.length}):`,
-        availableAttendance.map(a => ({
-          id: a.id.substring(0, 8),
-          actual_day: a.actual_day,
-          actual_start_time: a.actual_start_time,
-          lesson: a.lesson
-        }))
+      // PRIMARY: Match by slot_day + slot_time (permanent slot identifier, never changes)
+      slotAttendance = availableAttendance.find(a =>
+        normalizeDay(a.slot_day) === normalizeDay(slotDay) &&
+        normalizeTime(a.slot_time) === normalizeTime(slotTime)
       );
 
-      // First try: match by actual_day + time (most reliable since user explicitly selects the day)
-      slotAttendance = availableAttendance.find(a => {
-        const normalizedAttendanceDay = (a.actual_day || '').toLowerCase().trim();
-        const normalizedAttendanceTime = normalizeTime(a.actual_start_time);
-        const match = normalizedAttendanceDay === normalizedSlotDay && normalizedAttendanceTime === normalizedSlotTime;
-        if (match) console.log(`[Slot Match] Try1 MATCHED: day=${normalizedAttendanceDay}, time=${normalizedAttendanceTime}`);
-        return match;
-      });
-
-      // Second try: exact date + time match
-      if (!slotAttendance && normalizedSlotTime) {
-        slotAttendance = availableAttendance.find(a => {
-          const dateStr = a.date.includes('T') ? a.date.split('T')[0] : a.date;
-          const normalizedAttendanceTime = normalizeTime(a.actual_start_time);
-          const match = dateStr === slotDateStr && normalizedAttendanceTime === normalizedSlotTime;
-          if (match) console.log(`[Slot Match] Try2 MATCHED: date=${dateStr}, time=${normalizedAttendanceTime}`);
-          return match;
-        });
-      }
-
-      // Third try: match by actual_day only (if times don't match but day does)
+      // FALLBACK for old records without slot_day/slot_time: match by actual_day + actual_start_time
       if (!slotAttendance) {
-        slotAttendance = availableAttendance.find(a => {
-          const normalizedAttendanceDay = (a.actual_day || '').toLowerCase().trim();
-          const match = normalizedAttendanceDay === normalizedSlotDay;
-          if (match) console.log(`[Slot Match] Try3 MATCHED: day=${normalizedAttendanceDay}`);
-          return match;
-        });
+        slotAttendance = availableAttendance.find(a =>
+          !a.slot_day && // Only old records without slot info
+          normalizeDay(a.actual_day) === normalizeDay(slotDay) &&
+          normalizeTime(a.actual_start_time) === normalizeTime(slotTime)
+        );
       }
 
-      // Fourth try: time match when there's only ONE unmatched record with this time
-      if (!slotAttendance && normalizedSlotTime) {
-        const timeMatches = availableAttendance.filter(a => {
-          const normalizedAttendanceTime = normalizeTime(a.actual_start_time);
-          return normalizedAttendanceTime === normalizedSlotTime;
-        });
-        if (timeMatches.length === 1) {
-          slotAttendance = timeMatches[0];
-          console.log(`[Slot Match] Try4 MATCHED: only one time match`);
+      // LAST RESORT: if only one unmatched record remains AND it has no slot info (old record),
+      // assume it's for this slot. Never steal a record that has slot info for a different slot.
+      if (!slotAttendance && availableAttendance.length === 1) {
+        const candidate = availableAttendance[0];
+        const hasSlotInfo = candidate.slot_day && candidate.slot_time;
+        if (!hasSlotInfo) {
+          slotAttendance = candidate;
         }
       }
 
-      console.log(`[Slot Match] Final result for ${slotDay} ${slotTime}:`, slotAttendance ? `FOUND (lesson=${slotAttendance.lesson})` : 'NOT FOUND');
-
-      // If no time match but there's only one attendance for the slot date, use it
-      if (!slotAttendance) {
-        const slotDateAttendance = availableAttendance.filter(a => {
-          const dateStr = a.date.includes('T') ? a.date.split('T')[0] : a.date;
-          return dateStr === slotDateStr;
-        });
-        if (slotDateAttendance.length === 1) {
-          slotAttendance = slotDateAttendance[0];
-        }
-      }
-
-      // Mark this attendance as matched so other slots won't use it
+      // Mark as matched
       if (slotAttendance) {
         matchedAttendanceIds.add(slotAttendance.id);
-        console.log(`[Attendance Table] Slot ${slotDay} ${slotTime} matched to attendance:`, {
-          id: slotAttendance.id,
-          date: slotAttendance.date,
-          status: slotAttendance.status,
-          classType: slotAttendance.class_type,
-          instructor: slotAttendance.instructor_name
-        });
-      } else {
-        console.log(`[Attendance Table] Slot ${slotDay} ${slotTime} (date: ${slotDateStr}) - NO attendance matched. Available: ${availableAttendance.length}`);
       }
 
-      // Check if THIS slot's attendance is complete
-      const isSlotComplete = slotAttendance &&
-        slotAttendance.class_type &&
-        slotAttendance.instructor_name;
+      // Skip if all fields are done (show in attendance history instead)
+      if (slotAttendance) {
+        const isAbsentDone = slotAttendance.status === 'absent';
+        const isPresentDone = (slotAttendance.status === 'present' || slotAttendance.status === 'late') &&
+          slotAttendance.class_type &&
+          slotAttendance.instructor_name &&
+          slotAttendance.lesson &&
+          slotAttendance.mission &&
+          slotAttendance.last_activity;
 
-      // Skip this slot only if its attendance is complete
-      if (isSlotComplete) {
-        continue;
+        if (isAbsentDone || isPresentDone) {
+          continue;
+        }
       }
 
       result.push({
@@ -1018,7 +1114,7 @@ export async function getEnrollmentsForAttendance(
         studentName: studentData.name,
         studentPhoto: studentData.photo,
         branchId: studentData.branch_id,
-        branchName: studentData.branch.name,
+        branchName: useCityName ? (studentData.branch.city || studentData.branch.name) : studentData.branch.name,
         courseId: courseData.id,
         courseName: courseData.name,
         packageName: pkgData?.description ?? null,
@@ -1027,10 +1123,15 @@ export async function getEnrollmentsForAttendance(
         slotTime: slotTime,
         startTime: enrollment.start_time,
         endTime: enrollment.end_time,
-        // Use this slot's specific attendance date, not the enrollment's overall last attendance
-        lastAttendanceDate: slotAttendance?.date ?? null,
+        // Historical last attendance date (most recent present/late)
+        lastAttendanceDate: historicalLastAttendanceDate,
         lastAttendanceStatus: slotAttendance?.status ?? null,
-        sessionsRemaining: enrollment.sessions_remaining,
+        lastActivityText,
+        lastLesson,
+        lastMission,
+        lastAdcoin,
+        sessionsRemaining: computedSessionsRemaining,
+        hasExam: activeExamEnrollmentIds.has(enrollment.id),
         type: 'enrollment',
         // Include existing attendance data if partially filled
         existingAttendance: slotAttendance ? {
@@ -1051,85 +1152,70 @@ export async function getEnrollmentsForAttendance(
       });
     }
 
-    // Also create rows for any UNMATCHED incomplete attendance records
-    // This handles cases where attendance was added manually without matching schedule slots
-    // But only if the day/time combination doesn't already exist in result
-    const unmatchedAttendance = currentWeekAttendanceRecords.filter(a =>
-      !matchedAttendanceIds.has(a.id)
-    );
+    // Add orphaned attendance records (e.g. created via "Take Attendance" with no slot info)
+    // These are current-week records that weren't matched to any schedule slot
+    const orphanedRecords = currentWeekAttendanceRecords.filter(a => !matchedAttendanceIds.has(a.id));
+    for (const orphan of orphanedRecords) {
+      // Skip if fully completed (same logic as schedule slots)
+      const isAbsentDone = orphan.status === 'absent';
+      const isPresentDone = (orphan.status === 'present' || orphan.status === 'late') &&
+        orphan.class_type &&
+        orphan.instructor_name &&
+        orphan.lesson &&
+        orphan.mission &&
+        orphan.last_activity;
 
-    // Track which day+time combinations we've already added for this enrollment
-    const addedSlots = new Set<string>();
-
-    // Add existing slots to the set
-    for (const row of result) {
-      if (row.enrollmentId === enrollment.id) {
-        const slotKey = `${row.slotDay}-${normalizeTime(row.slotTime)}`;
-        addedSlots.add(slotKey);
-      }
-    }
-
-    for (let j = 0; j < unmatchedAttendance.length; j++) {
-      const attendance = unmatchedAttendance[j];
-
-      // Check if this attendance is complete
-      const isComplete = attendance.class_type && attendance.instructor_name;
-      if (isComplete) {
-        continue; // Skip complete attendance
-      }
-
-      // Get the day name from the attendance date
-      const attendanceDate = new Date(attendance.date);
-      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const attendanceDayName = dayNames[attendanceDate.getDay()];
-      const attendanceDay = attendance.actual_day || attendanceDayName;
-      const attendanceTime = attendance.actual_start_time || enrollment.start_time;
-
-      // Check if this day+time already exists - if so, skip to avoid duplicates
-      const slotKey = `${attendanceDay}-${normalizeTime(attendanceTime)}`;
-      if (addedSlots.has(slotKey)) {
+      if (isAbsentDone || isPresentDone) {
         continue;
       }
-      addedSlots.add(slotKey);
+
+      const orphanDay = orphan.actual_day || orphan.slot_day || 'Manual';
+      const orphanTime = orphan.actual_start_time || orphan.slot_time || null;
+      const orphanDateStr = orphan.date.includes('T') ? orphan.date.split('T')[0] : orphan.date;
 
       result.push({
-        id: `${enrollment.id}-attendance-${attendance.id}`,
+        id: `${enrollment.id}-orphan-${orphan.id}`,
         enrollmentId: enrollment.id,
         studentId: studentData.id,
         studentName: studentData.name,
         studentPhoto: studentData.photo,
         branchId: studentData.branch_id,
-        branchName: studentData.branch.name,
+        branchName: useCityName ? (studentData.branch.city || studentData.branch.name) : studentData.branch.name,
         courseId: courseData.id,
         courseName: courseData.name,
         packageName: pkgData?.description ?? null,
         dayOfWeek: enrollment.day_of_week,
-        slotDay: attendanceDay,
-        slotTime: attendanceTime,
-        startTime: attendanceTime,
-        endTime: enrollment.end_time,
-        // Use this specific attendance's date, not the enrollment's overall last attendance
-        lastAttendanceDate: attendance.date,
-        lastAttendanceStatus: attendance.status,
-        sessionsRemaining: enrollment.sessions_remaining,
+        slotDay: orphanDay,
+        slotTime: orphanTime,
+        startTime: orphanTime,
+        endTime: null,
+        lastAttendanceDate: historicalLastAttendanceDate,
+        lastAttendanceStatus: orphan.status,
+        lastActivityText,
+        lastLesson,
+        lastMission,
+        lastAdcoin,
+        sessionsRemaining: computedSessionsRemaining,
+        hasExam: activeExamEnrollmentIds.has(enrollment.id),
         type: 'enrollment',
         existingAttendance: {
-          id: attendance.id,
-          date: attendance.date,
-          status: attendance.status,
-          classType: attendance.class_type,
-          actualDay: attendance.actual_day,
-          actualStartTime: attendance.actual_start_time,
-          instructorName: attendance.instructor_name,
-          lastActivity: attendance.last_activity,
-          projectPhotos: attendance.project_photos,
-          notes: attendance.notes,
-          adcoin: attendance.adcoin ?? 0,
-          lesson: attendance.lesson,
-          mission: attendance.mission,
+          id: orphan.id,
+          date: orphan.date,
+          status: orphan.status,
+          classType: orphan.class_type,
+          actualDay: orphan.actual_day,
+          actualStartTime: orphan.actual_start_time,
+          instructorName: orphan.instructor_name,
+          lastActivity: orphan.last_activity,
+          projectPhotos: orphan.project_photos,
+          notes: orphan.notes,
+          adcoin: orphan.adcoin ?? 0,
+          lesson: orphan.lesson,
+          mission: orphan.mission,
         },
       });
     }
+
   }
 
   // ============================================
@@ -1149,7 +1235,7 @@ export async function getEnrollmentsForAttendance(
       scheduled_date,
       scheduled_time,
       status,
-      branch:branches!inner(id, name),
+      branch:branches!inner(id, name, city),
       course:courses(id, name)
     `)
     .in('status', ['pending', 'confirmed'])
@@ -1162,12 +1248,12 @@ export async function getEnrollmentsForAttendance(
   } else {
     // Filter trials by branch if user has a specific branch
     const filteredTrials = (trialsData ?? []).filter((trial) => {
-      if (userBranchId && trial.branch_id !== userBranchId) return false;
+      if (branchIds && !branchIds.includes(trial.branch_id)) return false;
       return true;
     });
 
     for (const trial of filteredTrials) {
-      const branchData = trial.branch as unknown as { id: string; name: string };
+      const branchData = trial.branch as unknown as { id: string; name: string; city: string | null };
       const trialCourseData = trial.course as unknown as { id: string; name: string } | null;
 
       // Get day name from scheduled_date
@@ -1182,7 +1268,7 @@ export async function getEnrollmentsForAttendance(
         studentName: `${trial.child_name} (Trial)`,
         studentPhoto: null,
         branchId: trial.branch_id,
-        branchName: branchData.name,
+        branchName: useCityName ? (branchData.city || branchData.name) : branchData.name,
         courseId: trialCourseData?.id ?? '',
         courseName: trialCourseData?.name ?? 'Trial Class',
         packageName: 'Trial',
@@ -1193,7 +1279,12 @@ export async function getEnrollmentsForAttendance(
         endTime: null,
         lastAttendanceDate: null,
         lastAttendanceStatus: null,
+        lastActivityText: null,
+        lastLesson: null,
+        lastMission: null,
+        lastAdcoin: 0,
         sessionsRemaining: 1,
+        hasExam: false,
         type: 'trial',
         trialId: trial.id,
         parentName: trial.parent_name,
@@ -1224,8 +1315,8 @@ export async function getEnrollmentsForAttendance(
 export async function getBranchesForAttendance(
   userEmail: string
 ): Promise<{ id: string; name: string }[]> {
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds } = await import("./users");
+  const branchIds = await getUserBranchIds(userEmail);
 
   let query = supabaseAdmin
     .from('branches')
@@ -1233,8 +1324,8 @@ export async function getBranchesForAttendance(
     .is('deleted_at', null)
     .order('name');
 
-  if (userBranchId) {
-    query = query.eq('id', userBranchId);
+  if (branchIds) {
+    query = query.in('id', branchIds);
   }
 
   const { data, error } = await query;
@@ -1260,8 +1351,35 @@ export async function getBranchesForAttendance(
 export async function getAllStudentsForManualAttendance(
   userEmail: string
 ): Promise<AttendanceTableRow[]> {
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
 
   const { data, error } = await supabaseAdmin
     .from('enrollments')
@@ -1274,13 +1392,15 @@ export async function getAllStudentsForManualAttendance(
       start_time,
       end_time,
       sessions_remaining,
+      pool_id,
+      pool:shared_session_pools(id, sessions_remaining, total_sessions),
       student:students!inner(
         id,
         name,
         photo,
         branch_id,
         deleted_at,
-        branch:branches!inner(id, name)
+        branch:branches!inner(id, name, city)
       ),
       course:courses!inner(id, name),
       package:course_pricing(description)
@@ -1301,9 +1421,23 @@ export async function getAllStudentsForManualAttendance(
       branch_id: string;
     };
     if (studentData.deleted_at) return false;
-    if (userBranchId && studentData.branch_id !== userBranchId) return false;
+    if (branchIds && !branchIds.includes(studentData.branch_id)) return false;
     return true;
   });
+
+  // Pre-fetch pool sibling counts for manual attendance
+  const manualPoolCountMap = new Map<string, number>();
+  const manualPoolIds = new Set<string>();
+  for (const e of filteredData) {
+    if ((e as any).pool_id) manualPoolIds.add((e as any).pool_id);
+  }
+  for (const pId of manualPoolIds) {
+    const { data: members } = await supabaseAdmin
+      .from('pool_students')
+      .select('student_id')
+      .eq('pool_id', pId);
+    manualPoolCountMap.set(pId, (members ?? []).length);
+  }
 
   const result: AttendanceTableRow[] = [];
 
@@ -1324,10 +1458,27 @@ export async function getAllStudentsForManualAttendance(
       name: string;
       photo: string | null;
       branch_id: string;
-      branch: { id: string; name: string };
+      branch: { id: string; name: string; city: string | null };
     };
     const courseData = enrollment.course as unknown as { id: string; name: string };
     const pkgData = enrollment.package as unknown as { description: string } | null;
+
+    // Compute sessions remaining — use pool data for pooled enrollments
+    let manualSessionsRemaining = enrollment.sessions_remaining;
+    const mPoolId = (enrollment as any).pool_id as string | null;
+    const mPool = (enrollment as any).pool as { id: string; sessions_remaining: number; total_sessions: number } | null;
+    if (mPoolId && mPool) {
+      const count = manualPoolCountMap.get(mPoolId) || 2;
+      const allocation = Math.floor(mPool.total_sessions / count);
+      const bonus = enrollment.sessions_remaining ?? 0;
+      // Count this student's present/late attendance for this enrollment
+      const { count: attCount } = await supabaseAdmin
+        .from('attendance')
+        .select('id', { count: 'exact', head: true })
+        .eq('enrollment_id', enrollment.id)
+        .in('status', ['present', 'late']);
+      manualSessionsRemaining = allocation + bonus - (attCount ?? 0);
+    }
 
     // Get start time from schedule or default
     let slotTime = enrollment.start_time;
@@ -1347,7 +1498,7 @@ export async function getAllStudentsForManualAttendance(
       studentName: studentData.name,
       studentPhoto: studentData.photo,
       branchId: studentData.branch_id,
-      branchName: studentData.branch.name,
+      branchName: useCityName ? (studentData.branch.city || studentData.branch.name) : studentData.branch.name,
       courseId: courseData.id,
       courseName: courseData.name,
       packageName: pkgData?.description ?? null,
@@ -1358,7 +1509,12 @@ export async function getAllStudentsForManualAttendance(
       endTime: enrollment.end_time,
       lastAttendanceDate: null,
       lastAttendanceStatus: null,
-      sessionsRemaining: enrollment.sessions_remaining,
+      lastActivityText: null,
+      lastLesson: null,
+      lastMission: null,
+      lastAdcoin: 0,
+      sessionsRemaining: manualSessionsRemaining,
+      hasExam: false,
       type: 'enrollment',
       existingAttendance: null,
     });
@@ -1399,6 +1555,8 @@ export async function getStudentActiveEnrollments(
       start_time,
       end_time,
       sessions_remaining,
+      pool_id,
+      pool:shared_session_pools(id, sessions_remaining, total_sessions),
       course:courses!inner(id, name),
       package:course_pricing(id, description)
     `)
@@ -1412,11 +1570,43 @@ export async function getStudentActiveEnrollments(
     return [];
   }
 
-  return (data ?? []).map((enrollment) => {
+  // Pre-fetch pool sibling counts
+  const poolCountMap = new Map<string, number>();
+  const enrollmentPoolIds = new Set<string>();
+  for (const e of data ?? []) {
+    if ((e as any).pool_id) enrollmentPoolIds.add((e as any).pool_id);
+  }
+  for (const pId of enrollmentPoolIds) {
+    const { data: members } = await supabaseAdmin
+      .from('pool_students')
+      .select('student_id')
+      .eq('pool_id', pId);
+    poolCountMap.set(pId, (members ?? []).length);
+  }
+
+  const results: StudentEnrollmentForAttendance[] = [];
+  for (const enrollment of data ?? []) {
     const courseData = enrollment.course as unknown as { id: string; name: string };
     const pkgData = enrollment.package as unknown as { id: string; description: string } | null;
 
-    return {
+    // Compute sessions remaining — use pool data for pooled enrollments
+    let sessionsRemaining = enrollment.sessions_remaining ?? 0;
+    const ePoolId = (enrollment as any).pool_id as string | null;
+    const ePool = (enrollment as any).pool as { id: string; sessions_remaining: number; total_sessions: number } | null;
+    if (ePoolId && ePool) {
+      const count = poolCountMap.get(ePoolId) || 2;
+      const allocation = Math.floor(ePool.total_sessions / count);
+      const bonus = enrollment.sessions_remaining ?? 0;
+      // Count this student's present/late attendance for this enrollment
+      const { count: attCount } = await supabaseAdmin
+        .from('attendance')
+        .select('id', { count: 'exact', head: true })
+        .eq('enrollment_id', enrollment.id)
+        .in('status', ['present', 'late']);
+      sessionsRemaining = allocation + bonus - (attCount ?? 0);
+    }
+
+    results.push({
       enrollmentId: enrollment.id,
       courseId: courseData.id,
       courseName: courseData.name,
@@ -1425,9 +1615,10 @@ export async function getStudentActiveEnrollments(
       dayOfWeek: enrollment.day_of_week,
       startTime: enrollment.start_time,
       endTime: enrollment.end_time,
-      sessionsRemaining: enrollment.sessions_remaining ?? 0,
-    };
-  });
+      sessionsRemaining,
+    });
+  }
+  return results;
 }
 
 // ============================================
@@ -1993,8 +2184,35 @@ export async function getAttendanceLog(
   userEmail: string
 ): Promise<AttendanceLogRow[]> {
   // Import user helpers dynamically to avoid circular imports
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
 
   // Fetch enrollment attendance records
   const enrollmentQuery = supabaseAdmin
@@ -2020,13 +2238,15 @@ export async function getAttendanceLog(
         id,
         sessions_remaining,
         day_of_week,
+        pool_id,
+        pool:shared_session_pools(id, sessions_remaining, total_sessions),
         student:students!inner(
           id,
           name,
           photo,
           branch_id,
           deleted_at,
-          branch:branches!inner(id, name)
+          branch:branches!inner(id, name, city)
         ),
         course:courses!inner(id, name),
         package:course_pricing(description)
@@ -2061,7 +2281,7 @@ export async function getAttendanceLog(
         branch_id,
         scheduled_date,
         scheduled_time,
-        branch:branches!inner(id, name),
+        branch:branches!inner(id, name, city),
         course:courses!inner(id, name)
       )
     `)
@@ -2080,6 +2300,39 @@ export async function getAttendanceLog(
     console.error('Error fetching trial attendance log:', trialError);
   }
 
+  // Pre-fetch pool sibling counts for attendance log
+  const logPoolCountMap = new Map<string, number>();
+  const logPoolIds = new Set<string>();
+  for (const record of enrollmentData ?? []) {
+    const enr = record.enrollment as any;
+    if (enr?.pool_id) logPoolIds.add(enr.pool_id);
+  }
+  for (const pId of logPoolIds) {
+    const { data: members } = await supabaseAdmin
+      .from('pool_students')
+      .select('student_id')
+      .eq('pool_id', pId);
+    logPoolCountMap.set(pId, (members ?? []).length);
+  }
+
+  // Pre-fetch per-enrollment attendance counts for pooled enrollments in the log
+  const logEnrollmentAttCountMap = new Map<string, number>();
+  const pooledLogEnrollmentIds = new Set<string>();
+  for (const record of enrollmentData ?? []) {
+    const enr = record.enrollment as any;
+    if (enr?.pool_id) pooledLogEnrollmentIds.add(enr.id);
+  }
+  if (pooledLogEnrollmentIds.size > 0) {
+    for (const eId of pooledLogEnrollmentIds) {
+      const { count: attCount } = await supabaseAdmin
+        .from('attendance')
+        .select('id', { count: 'exact', head: true })
+        .eq('enrollment_id', eId)
+        .in('status', ['present', 'late']);
+      logEnrollmentAttCountMap.set(eId, attCount ?? 0);
+    }
+  }
+
   // Process enrollment attendance records
   const enrollmentRecords = (enrollmentData ?? []).filter((record) => {
     const enrollment = record.enrollment as unknown as {
@@ -2088,23 +2341,35 @@ export async function getAttendanceLog(
     // Filter out deleted students
     if (enrollment.student.deleted_at) return false;
     // Apply branch filter
-    if (userBranchId && enrollment.student.branch_id !== userBranchId) return false;
+    if (branchIds && !branchIds.includes(enrollment.student.branch_id)) return false;
     return true;
   }).map((record) => {
     const enrollment = record.enrollment as unknown as {
       id: string;
       sessions_remaining: number;
       day_of_week: string | null;
+      pool_id: string | null;
+      pool: { id: string; sessions_remaining: number; total_sessions: number } | null;
       student: {
         id: string;
         name: string;
         photo: string | null;
         branch_id: string;
-        branch: { id: string; name: string };
+        branch: { id: string; name: string; city: string | null };
       };
       course: { id: string; name: string };
       package: { description: string } | null;
     };
+
+    // Compute sessions remaining — use pool data for pooled enrollments
+    let logSessionsRemaining = enrollment.sessions_remaining;
+    if (enrollment.pool_id && enrollment.pool) {
+      const count = logPoolCountMap.get(enrollment.pool_id) || 2;
+      const allocation = Math.floor(enrollment.pool.total_sessions / count);
+      const bonus = enrollment.sessions_remaining ?? 0;
+      const thisAttCount = logEnrollmentAttCountMap.get(enrollment.id) ?? 0;
+      logSessionsRemaining = allocation + bonus - thisAttCount;
+    }
 
     return {
       id: record.id,
@@ -2114,7 +2379,7 @@ export async function getAttendanceLog(
       studentPhoto: enrollment.student.photo,
       studentLevel: 1,
       branchId: enrollment.student.branch_id,
-      branchName: enrollment.student.branch.name,
+      branchName: useCityName ? (enrollment.student.branch.city || enrollment.student.branch.name) : enrollment.student.branch.name,
       courseId: enrollment.course.id,
       courseName: enrollment.course.name,
       packageName: enrollment.package?.description ?? null,
@@ -2127,7 +2392,7 @@ export async function getAttendanceLog(
       notes: record.notes,
       createdAt: record.created_at,
       enrollmentId: enrollment.id,
-      sessionsRemaining: enrollment.sessions_remaining,
+      sessionsRemaining: logSessionsRemaining,
       dayOfWeek: record.actual_day ?? enrollment.day_of_week,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
@@ -2143,7 +2408,7 @@ export async function getAttendanceLog(
       branch_id: string;
     };
     // Apply branch filter
-    if (userBranchId && trial.branch_id !== userBranchId) return false;
+    if (branchIds && !branchIds.includes(trial.branch_id)) return false;
     return true;
   }).map((record) => {
     const trial = record.trial as unknown as {
@@ -2152,7 +2417,7 @@ export async function getAttendanceLog(
       branch_id: string;
       scheduled_date: string;
       scheduled_time: string;
-      branch: { id: string; name: string };
+      branch: { id: string; name: string; city: string | null };
       course: { id: string; name: string };
     };
 
@@ -2164,7 +2429,7 @@ export async function getAttendanceLog(
       studentPhoto: null,
       studentLevel: 0,
       branchId: trial.branch_id,
-      branchName: trial.branch.name,
+      branchName: useCityName ? (trial.branch.city || trial.branch.name) : trial.branch.name,
       courseId: trial.course.id,
       courseName: trial.course.name,
       packageName: 'Trial',
@@ -2191,25 +2456,41 @@ export async function getAttendanceLog(
   // Combine and sort all records
   const result = [...enrollmentRecords, ...trialRecords];
 
-  // Sort by date (latest to oldest), then by day, then by time
-  result.sort((a, b) => {
-    // 1. Sort by date (latest first)
-    const dateCompare = new Date(b.date).getTime() - new Date(a.date).getTime();
-    if (dateCompare !== 0) return dateCompare;
-
-    // 2. Sort by day of week
-    const dayOrder: Record<string, number> = {
-      'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4,
-      'friday': 5, 'saturday': 6, 'sunday': 7
+  // Sort by actual date (latest first), then by actual time (latest first)
+  // The "actual date" is computed from the slot date's week + actual_day
+  const getActualDateForSort = (row: typeof result[number]): string => {
+    const base = new Date(row.date + 'T00:00:00');
+    const actualDay = row.dayOfWeek; // This is actual_day from the record
+    if (!actualDay) return row.date;
+    const dayMap: Record<string, number> = {
+      sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+      thursday: 4, friday: 5, saturday: 6,
     };
-    const dayA = dayOrder[(a.dayOfWeek || '').toLowerCase()] ?? 8;
-    const dayB = dayOrder[(b.dayOfWeek || '').toLowerCase()] ?? 8;
-    if (dayA !== dayB) return dayA - dayB;
+    const targetIdx = dayMap[actualDay.toLowerCase()];
+    if (targetIdx === undefined) return row.date;
+    const baseDay = base.getDay();
+    const mondayOff = baseDay === 0 ? -6 : 1 - baseDay;
+    const monday = new Date(base);
+    monday.setDate(base.getDate() + mondayOff);
+    const daysFromMon = targetIdx === 0 ? 6 : targetIdx - 1;
+    const target = new Date(monday);
+    target.setDate(monday.getDate() + daysFromMon);
+    const y = target.getFullYear();
+    const m = String(target.getMonth() + 1).padStart(2, '0');
+    const d = String(target.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
 
-    // 3. Sort by time (earliest first)
-    const timeA = a.actualStartTime || '23:59';
-    const timeB = b.actualStartTime || '23:59';
-    return timeA.localeCompare(timeB);
+  result.sort((a, b) => {
+    // 1. Sort by actual date (latest first)
+    const dateA = getActualDateForSort(a);
+    const dateB = getActualDateForSort(b);
+    if (dateA !== dateB) return dateB.localeCompare(dateA);
+
+    // 2. Sort by actual time (latest first)
+    const timeA = a.actualStartTime || '00:00';
+    const timeB = b.actualStartTime || '00:00';
+    return timeB.localeCompare(timeA);
   });
 
   return result;

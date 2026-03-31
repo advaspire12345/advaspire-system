@@ -2,6 +2,7 @@
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import { updatePayment, deletePayment, approvePayment, createPayment } from "@/data/payments";
+import { authorizeAction } from "@/data/permissions";
 import type { PaymentMethod, Payment } from "@/db/schema";
 
 export interface UpdatePaymentData {
@@ -21,6 +22,8 @@ export interface AddPaymentData {
   paymentMethod: PaymentMethod | null;
   paidAt: string | null;
   receiptPhoto: string | null;
+  poolId?: string;
+  poolStudentIds?: string[];
 }
 
 export async function updatePendingPaymentAction(
@@ -28,6 +31,8 @@ export async function updatePendingPaymentAction(
   data: UpdatePaymentData
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('pending_payments', 'can_edit');
+
     // Note: We don't set package_id because payments.package_id references
     // the legacy 'packages' table, not 'course_pricing'.
     // The package is looked up by course_id + amount in getPendingPaymentsForTable.
@@ -59,6 +64,8 @@ export async function approvePaymentAction(
   paymentId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('pending_payments', 'can_edit');
+
     console.log('[approvePaymentAction] Starting approval for payment:', paymentId);
 
     const result = await approvePayment(paymentId);
@@ -92,6 +99,8 @@ export async function deletePendingPaymentAction(
   paymentId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('pending_payments', 'can_delete');
+
     const result = await deletePayment(paymentId);
 
     if (!result) {
@@ -114,10 +123,12 @@ export async function addPendingPaymentAction(
   data: AddPaymentData
 ): Promise<{ success: boolean; error?: string; payment?: Payment }> {
   try {
+    await authorizeAction('pending_payments', 'can_create');
+
     // Note: We don't set package_id because payments.package_id references
     // the legacy 'packages' table, not 'course_pricing'.
     // The package is looked up by course_id + amount in getPendingPaymentsForTable.
-    const result = await createPayment({
+    const paymentInsert: Record<string, unknown> = {
       student_id: data.studentId,
       course_id: data.courseId || null,
       amount: data.price,
@@ -126,7 +137,16 @@ export async function addPendingPaymentAction(
       payment_method: data.paymentMethod,
       paid_at: data.paidAt || null,
       receipt_photo: data.receiptPhoto || null,
-    });
+    };
+    // Link payment to shared pool if applicable
+    if (data.poolId) {
+      paymentInsert.pool_id = data.poolId;
+      paymentInsert.is_shared_package = true;
+      if (data.poolStudentIds) {
+        paymentInsert.shared_with = data.poolStudentIds;
+      }
+    }
+    const result = await createPayment(paymentInsert as any);
 
     if (!result) {
       return { success: false, error: "Failed to create payment - check server logs" };

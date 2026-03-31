@@ -413,10 +413,37 @@ export async function getPendingPaymentsForTable(
   console.log('[getPendingPaymentsForTable] Starting query for user:', userEmail);
 
   // Import user helpers dynamically to avoid circular imports
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
-  console.log('[getPendingPaymentsForTable] User branch ID:', userBranchId);
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  console.log('[getPendingPaymentsForTable] User branch IDs:', branchIds);
 
   let query = supabaseAdmin
     .from('payments')
@@ -437,7 +464,7 @@ export async function getPendingPaymentsForTable(
         name,
         phone,
         branch_id,
-        branch:branches!inner(id, name),
+        branch:branches!inner(id, name, city),
         parent_students(
           parent:parents(id, name, phone)
         )
@@ -447,8 +474,8 @@ export async function getPendingPaymentsForTable(
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
 
-  if (userBranchId) {
-    query = query.eq('students.branch_id', userBranchId);
+  if (branchIds) {
+    query = query.in('students.branch_id', branchIds);
   }
 
   const { data, error } = await query;
@@ -524,7 +551,7 @@ export async function getPendingPaymentsForTable(
       name: string;
       phone: string | null;
       branch_id: string;
-      branch: { id: string; name: string };
+      branch: { id: string; name: string; city: string | null };
       parent_students: Array<{
         parent: { id: string; name: string; phone: string | null } | null;
       }>;
@@ -560,7 +587,7 @@ export async function getPendingPaymentsForTable(
       studentName: student.name,
       studentPhone: student.phone,
       branchId: student.branch_id,
-      branchName: student.branch.name,
+      branchName: useCityName ? (student.branch.city || student.branch.name) : student.branch.name,
       courseId,
       courseName: course?.name ?? null,
       packageId: (payment as unknown as { package_id: string | null }).package_id,
@@ -1009,8 +1036,35 @@ export async function getPaymentRecordsForTable(
   endDate?: string
 ): Promise<PaymentRecordRow[]> {
   // Import user helpers dynamically to avoid circular imports
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
 
   let query = supabaseAdmin
     .from('payments')
@@ -1029,7 +1083,7 @@ export async function getPaymentRecordsForTable(
         id,
         name,
         branch_id,
-        branch:branches!inner(id, name, company_name, address, phone, email, bank_name, bank_account),
+        branch:branches!inner(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
         parent_students(
           parent:parents(id, name, address, postcode, city)
         )
@@ -1039,8 +1093,8 @@ export async function getPaymentRecordsForTable(
     .eq('status', 'paid')
     .order('paid_at', { ascending: false });
 
-  if (userBranchId) {
-    query = query.eq('students.branch_id', userBranchId);
+  if (branchIds) {
+    query = query.in('students.branch_id', branchIds);
   }
 
   if (startDate) {
@@ -1061,6 +1115,24 @@ export async function getPaymentRecordsForTable(
   if (error) {
     console.error('Error fetching payment records:', error);
     return [];
+  }
+
+  // Fetch parent company names for branches
+  const parentIds = new Set<string>();
+  for (const payment of data ?? []) {
+    const student = payment.student as unknown as { branch: { parent_id: string | null } };
+    if (student.branch.parent_id) parentIds.add(student.branch.parent_id);
+  }
+  const companyNameMap = new Map<string, string>();
+  if (parentIds.size > 0) {
+    const { data: companies } = await supabaseAdmin
+      .from('branches')
+      .select('id, name')
+      .in('id', [...parentIds])
+      .eq('type', 'company');
+    for (const c of companies ?? []) {
+      companyNameMap.set(c.id, c.name);
+    }
   }
 
   // Get all course_pricing to match packages by course_id and amount
@@ -1110,7 +1182,8 @@ export async function getPaymentRecordsForTable(
       branch: {
         id: string;
         name: string;
-        company_name: string | null;
+        city: string | null;
+        parent_id: string | null;
         address: string | null;
         phone: string | null;
         email: string | null;
@@ -1162,8 +1235,8 @@ export async function getPaymentRecordsForTable(
       courseCode,
       studentName: student.name,
       branchId: student.branch_id,
-      branchName: student.branch.name,
-      branchCompanyName: student.branch.company_name,
+      branchName: useCityName ? (student.branch.city || student.branch.name) : student.branch.name,
+      branchCompanyName: student.branch.parent_id ? (companyNameMap.get(student.branch.parent_id) ?? null) : null,
       branchAddress: student.branch.address,
       branchPhone: student.branch.phone,
       branchEmail: student.branch.email,
@@ -1242,10 +1315,12 @@ export async function createPoolRenewalPayment(poolId: string): Promise<Payment 
   // Get all student IDs for shared_with
   const studentIds = pool.students.map(s => s.id);
 
+  // Note: DO NOT set package_id here — payments.package_id references the legacy
+  // 'packages' table, but pool.package_id references 'course_pricing'. Setting it
+  // would cause a FK violation and silently fail.
   const paymentData: PaymentInsert = {
     student_id: firstStudent.id,
     course_id: pool.course_id,
-    package_id: pool.package_id,
     pool_id: poolId,
     amount: price,
     payment_type: 'package',

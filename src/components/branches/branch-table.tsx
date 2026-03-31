@@ -12,7 +12,8 @@ import {
   type BranchFormData,
 } from "@/components/branches/branch-modal";
 import { cn } from "@/lib/utils";
-import type { BranchEntry, AdminOption } from "@/data/branches";
+import type { BranchEntry, CompanyOption } from "@/data/branches";
+import type { UserRole } from "@/db/schema";
 import {
   addBranchAction,
   updateBranchAction,
@@ -21,24 +22,48 @@ import {
 
 interface BranchTableProps {
   initialData: BranchEntry[];
-  admins: AdminOption[];
+  companyOptions: CompanyOption[];
+  userRole: UserRole;
+  canCreateCompany: boolean;
+  canEditCompany: boolean;
+  canDeleteCompany: boolean;
+  canCreateBranch: boolean;
+  canEditBranch: boolean;
+  canDeleteBranch: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
 
 const columns = [
+  { key: "type", label: "Type", width: "90px" },
   { key: "name", label: "Name", width: "120px" },
-  { key: "address", label: "Address", width: "180px" },
+  { key: "company", label: "Company", width: "150px" },
+  { key: "address", label: "Address", width: "150px" },
+  { key: "area", label: "Area", width: "110px" },
   { key: "phone", label: "Phone", width: "100px" },
   { key: "email", label: "Email", width: "140px" },
   { key: "bankName", label: "Bank Name", width: "120px" },
-  { key: "companyName", label: "Company Name", width: "140px" },
   { key: "account", label: "Account No.", width: "120px" },
-  { key: "admin", label: "Admin", width: "120px" },
   { key: "action", label: "Action", width: "100px", align: "center" as const },
 ];
 
-export function BranchTable({ initialData, admins }: BranchTableProps) {
+const TYPE_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  company: { bg: "bg-amber-100", text: "text-amber-700", label: "Company" },
+  hq: { bg: "bg-purple-100", text: "text-purple-700", label: "HQ" },
+  branch: { bg: "bg-blue-100", text: "text-blue-700", label: "Branch" },
+};
+
+export function BranchTable({
+  initialData,
+  companyOptions,
+  userRole,
+  canCreateCompany,
+  canEditCompany,
+  canDeleteCompany,
+  canCreateBranch,
+  canEditBranch,
+  canDeleteBranch,
+}: BranchTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -58,8 +83,8 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
     return initialData.filter(
       (row) =>
         row.branchName.toLowerCase().includes(query) ||
-        row.branchCompany.toLowerCase().includes(query) ||
-        row.adminName?.toLowerCase().includes(query),
+        row.parentName?.toLowerCase().includes(query) ||
+        row.type.toLowerCase().includes(query),
     );
   }, [initialData, searchQuery]);
 
@@ -75,6 +100,8 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
     setSearchQuery(value);
     setCurrentPage(1);
   };
+
+  const canAdd = canCreateCompany || canCreateBranch;
 
   // Open modal for add
   const openAddModal = () => {
@@ -97,21 +124,36 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
     setModalOpen(true);
   };
 
+  // Admin can edit their own company row
+  const canEditRow = (row: BranchEntry) =>
+    row.type === "company"
+      ? canEditCompany || userRole === "admin"
+      : canEditBranch;
+
+  const canDeleteRow = (row: BranchEntry) =>
+    row.type === "company" ? canDeleteCompany : canDeleteBranch;
+
+  const hideActions = !canEditCompany && !canDeleteCompany && !canEditBranch && !canDeleteBranch;
+
   // Handle add
   const handleAdd = async (formData: BranchFormData) => {
     const result = await addBranchAction({
       name: formData.name,
-      companyName: formData.companyName,
+      type: formData.type,
+      parentId: formData.parentId,
       address: formData.address,
+      city: formData.city,
       phone: formData.phone,
       email: formData.email,
       bankName: formData.bankName,
       bankAccount: formData.bankAccount,
-      adminId: formData.adminId,
+      website: formData.website,
+      logoUrl: formData.logoUrl,
+      registrationNumber: formData.registrationNumber,
     });
 
     if (!result.success) {
-      throw new Error(result.error || "Failed to add branch");
+      throw new Error(result.error || "Failed to add entry");
     }
     router.refresh();
   };
@@ -122,17 +164,21 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
 
     const result = await updateBranchAction(selectedRecord.id, {
       name: formData.name,
-      companyName: formData.companyName,
+      type: formData.type,
+      parentId: formData.parentId,
       address: formData.address,
+      city: formData.city,
       phone: formData.phone,
       email: formData.email,
       bankName: formData.bankName,
       bankAccount: formData.bankAccount,
-      adminId: formData.adminId,
+      website: formData.website,
+      logoUrl: formData.logoUrl,
+      registrationNumber: formData.registrationNumber,
     });
 
     if (!result.success) {
-      throw new Error(result.error || "Failed to update branch");
+      throw new Error(result.error || "Failed to update entry");
     }
     router.refresh();
   };
@@ -141,10 +187,10 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
   const handleDelete = async () => {
     if (!selectedRecord) return;
 
-    const result = await deleteBranchAction(selectedRecord.id);
+    const result = await deleteBranchAction(selectedRecord.id, selectedRecord.type);
 
     if (!result.success) {
-      throw new Error(result.error || "Failed to delete branch");
+      throw new Error(result.error || "Failed to delete entry");
     }
     router.refresh();
   };
@@ -159,23 +205,25 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
             <SearchBar
               value={searchQuery}
               onChange={handleSearchChange}
-              placeholder="Search by name, company, or admin..."
+              placeholder="Search by name, type, company, or admin..."
             />
 
-            {/* Add Branch Button */}
-            <Button
-              onClick={openAddModal}
-              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-            >
-              <Plus className="h-4 w-4" />
-              Add Branch
-            </Button>
+            {/* Add Button */}
+            {canAdd && (
+              <Button
+                onClick={openAddModal}
+                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+              >
+                <Plus className="h-4 w-4" />
+                Add
+              </Button>
+            )}
           </div>
 
           {/* Table */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1390px] w-full table-fixed border-separate border-spacing-0">
+            <table className="min-w-[1380px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
                   {columns.map((col, idx) => (
@@ -186,6 +234,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
                         idx === 0 && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
+                        col.key === "action" && hideActions && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -201,7 +250,7 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
             </table>
 
             {/* Body Table */}
-            <table className="min-w-[1390px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="min-w-[1380px] table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
@@ -209,120 +258,141 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
                       colSpan={columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No branches found.
+                      No entries found.
                     </td>
                   </tr>
                 ) : (
-                  paginatedData.map((row, rowIdx) => (
-                    <tr
-                      key={row.id}
-                      className={cn(
-                        "transition hover:bg-[#f0f6ff]",
-                        rowIdx === paginatedData.length - 1 &&
-                          "rounded-bl-lg rounded-br-lg",
-                      )}
-                    >
-                      {/* Name */}
-                      <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[0].width }}
-                      >
-                        {row.branchName}
-                      </td>
-
-                      {/* Address */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[1].width }}
-                      >
-                        {row.branchAddress || "-"}
-                      </td>
-
-                      {/* Phone */}
-                      <td
-                        className="px-4 py-3 font-bold text-[#23d2e2]"
-                        style={{ width: columns[2].width }}
-                      >
-                        {row.branchPhone || "-"}
-                      </td>
-
-                      {/* Email */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[3].width }}
-                      >
-                        {row.branchEmail || "-"}
-                      </td>
-
-                      {/* Bank Name */}
-                      <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[4].width }}
-                      >
-                        {row.bankName || "-"}
-                      </td>
-
-                      {/* Company Name */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[5].width }}
-                      >
-                        {row.branchCompany || "-"}
-                      </td>
-
-                      {/* Account No */}
-                      <td
-                        className="px-4 py-3 text-center font-bold"
-                        style={{ width: columns[6].width }}
-                      >
-                        {row.bankAccount || "-"}
-                      </td>
-
-                      {/* Admin */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[7].width }}
-                      >
-                        {row.adminName ? (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                            {row.adminName}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
+                  paginatedData.map((row, rowIdx) => {
+                    const badge = TYPE_BADGE[row.type] ?? TYPE_BADGE.branch;
+                    return (
+                      <tr
+                        key={row.id}
+                        className={cn(
+                          "transition hover:bg-[#f0f6ff]",
+                          rowIdx === paginatedData.length - 1 &&
+                            "rounded-bl-lg rounded-br-lg",
                         )}
-                      </td>
-
-                      {/* Action */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[8].width }}
                       >
-                        <div className="flex items-center justify-center gap-2">
-                          {/* Edit Button */}
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                            aria-label={`Edit branch ${row.branchName}`}
-                            title="Edit"
+                        {/* Type */}
+                        <td
+                          className="px-4 py-3"
+                          style={{ width: columns[0].width }}
+                        >
+                          <span
+                            className={cn(
+                              "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold",
+                              badge.bg,
+                              badge.text
+                            )}
                           >
-                            <Pencil className="h-5 w-5" />
-                          </button>
+                            {badge.label}
+                          </span>
+                        </td>
 
-                          {/* Delete Button */}
-                          <button
-                            type="button"
-                            onClick={() => openDeleteModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                            aria-label={`Delete branch ${row.branchName}`}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-5 w-5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        {/* Name */}
+                        <td
+                          className="px-4 py-3 font-bold"
+                          style={{ width: columns[1].width }}
+                        >
+                          {row.branchName}
+                        </td>
+
+                        {/* Company */}
+                        <td
+                          className="px-4 py-3"
+                          style={{ width: columns[2].width }}
+                        >
+                          {row.parentName || "-"}
+                        </td>
+
+                        {/* Address */}
+                        <td
+                          className="px-4 py-3"
+                          style={{ width: columns[3].width }}
+                        >
+                          {row.branchAddress || "-"}
+                        </td>
+
+                        {/* Area */}
+                        <td
+                          className="px-4 py-3"
+                          style={{ width: columns[4].width }}
+                        >
+                          {row.city || "-"}
+                        </td>
+
+                        {/* Phone */}
+                        <td
+                          className="px-4 py-3 font-bold text-[#23d2e2]"
+                          style={{ width: columns[5].width }}
+                        >
+                          {row.branchPhone || "-"}
+                        </td>
+
+                        {/* Email */}
+                        <td
+                          className="px-4 py-3"
+                          style={{ width: columns[6].width }}
+                        >
+                          {row.branchEmail || "-"}
+                        </td>
+
+                        {/* Bank Name */}
+                        <td
+                          className="px-4 py-3 font-bold"
+                          style={{ width: columns[7].width }}
+                        >
+                          {row.bankName || "-"}
+                        </td>
+
+                        {/* Account No */}
+                        <td
+                          className="px-4 py-3 text-center font-bold"
+                          style={{ width: columns[8].width }}
+                        >
+                          {row.bankAccount || "-"}
+                        </td>
+
+                        {/* Action */}
+                        <td
+                          className={cn("px-4 py-3", hideActions && "hidden")}
+                          style={{ width: columns[9].width }}
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            {canEditRow(row) && (
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(row)}
+                                className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                                aria-label={`Edit ${row.branchName}`}
+                                title="Edit"
+                              >
+                                <Pencil className="h-5 w-5" />
+                              </button>
+                            )}
+
+                            {canEditRow(row) && (
+                              <button
+                                type="button"
+                                onClick={() => canDeleteRow(row) && openDeleteModal(row)}
+                                disabled={!canDeleteRow(row)}
+                                className={cn(
+                                  "rounded-lg border border-muted-foreground/30 p-2",
+                                  canDeleteRow(row)
+                                    ? "text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                                    : "text-muted-foreground/30 cursor-not-allowed opacity-50"
+                                )}
+                                aria-label={`Delete ${row.branchName}`}
+                                title={canDeleteRow(row) ? "Delete" : "Cannot delete"}
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -345,7 +415,9 @@ export function BranchTable({ initialData, admins }: BranchTableProps) {
         onOpenChange={setModalOpen}
         mode={modalMode}
         record={selectedRecord}
-        admins={admins}
+        companyOptions={companyOptions}
+        userRole={userRole}
+        canCreateCompany={canCreateCompany}
         onAdd={handleAdd}
         onEdit={handleEdit}
         onDelete={handleDelete}

@@ -17,6 +17,7 @@ export interface TeamTableRow {
   name: string;
   phone: string | null;
   address: string | null;
+  city: string | null;
   branchId: string | null;
   branchName: string;
   email: string;
@@ -38,12 +39,41 @@ export async function getTeamMembersForTable(
   userEmail: string,
   branchId?: string
 ): Promise<TeamTableRow[]> {
-  // Get user's branch access
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  // Get user's branch access — resolve company IDs to child HQ/branch IDs
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
-  // Staff roles to include
-  const staffRoles: UserRole[] = ['super_admin', 'admin', 'branch_admin', 'instructor'];
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  // Staff roles to include — hide super_admin from non-super_admin users
+  const staffRoles: UserRole[] = useCityName
+    ? ['admin', 'branch_admin', 'instructor']
+    : ['super_admin', 'admin', 'branch_admin', 'instructor'];
 
   let query = supabaseAdmin
     .from('users')
@@ -53,22 +83,24 @@ export async function getTeamMembersForTable(
       name,
       phone,
       address,
+      city,
       branch_id,
       email,
       cv_url,
       role,
       employed_date,
       status,
-      branch:branches!users_branch_id_branches_id_fk(name)
+      branch:branches!users_branch_id_branches_id_fk(name, city)
     `)
     .in('role', staffRoles)
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
   // Apply branch filter
-  const effectiveBranchId = branchId || userBranchId;
-  if (effectiveBranchId) {
-    query = query.eq('branch_id', effectiveBranchId);
+  if (branchId) {
+    query = query.eq('branch_id', branchId);
+  } else if (branchIds) {
+    query = query.in('branch_id', branchIds);
   }
 
   const { data, error } = await query;
@@ -84,8 +116,9 @@ export async function getTeamMembersForTable(
     name: user.name,
     phone: user.phone || null,
     address: user.address || null,
+    city: user.city || null,
     branchId: user.branch_id,
-    branchName: user.branch?.name || 'No Branch',
+    branchName: useCityName ? (user.branch?.city || user.branch?.name || 'No Branch') : (user.branch?.name || 'No Branch'),
     email: user.email,
     cvUrl: user.cv_url || null,
     role: user.role as UserRole,

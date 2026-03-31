@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 // Skeleton components for loading states
 import {
@@ -17,12 +18,20 @@ import { DashboardCharts } from "./sections/charts";
 import { BranchOverviewSection } from "./sections/branch-overview";
 import { ActivitySection } from "./sections/activity";
 
+// Always fetch fresh data on navigation
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function DashboardPage() {
   const user = await getUser();
 
   if (!user?.email) {
     redirect("/login");
   }
+
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.dashboard;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">

@@ -6,47 +6,82 @@ import {
   updateBranch,
   softDeleteBranch,
 } from "@/data/branches";
-import type { Branch } from "@/db/schema";
+import { supabaseAdmin } from "@/db";
+import { authorizeAction } from "@/data/permissions";
+import type { Branch, BranchType } from "@/db/schema";
 
 export interface AddBranchData {
   name: string;
-  companyName: string | null;
+  type: BranchType;
+  parentId: string | null;
   address: string | null;
+  city: string | null;
   phone: string | null;
   email: string | null;
   bankName: string | null;
   bankAccount: string | null;
-  adminId: string | null;
+  website: string | null;
+  logoUrl: string | null;
+  registrationNumber: string | null;
 }
 
 export interface UpdateBranchData {
   name: string;
-  companyName: string | null;
+  type: BranchType;
+  parentId: string | null;
   address: string | null;
+  city: string | null;
   phone: string | null;
   email: string | null;
   bankName: string | null;
   bankAccount: string | null;
-  adminId: string | null;
+  website: string | null;
+  logoUrl: string | null;
+  registrationNumber: string | null;
 }
 
 export async function addBranchAction(
   data: AddBranchData
 ): Promise<{ success: boolean; error?: string; branch?: Branch }> {
   try {
+    // Company creation requires 'companies' permission, HQ/branch requires 'branches'
+    if (data.type === "company") {
+      await authorizeAction("companies", "can_create");
+    } else {
+      await authorizeAction("branches", "can_create");
+    }
+
+    // HQ: only 1 per company
+    if (data.type === "hq" && data.parentId) {
+      const { count } = await supabaseAdmin
+        .from("branches")
+        .select("id", { count: "exact", head: true })
+        .eq("parent_id", data.parentId)
+        .eq("type", "hq")
+        .is("deleted_at", null);
+
+      if (count && count > 0) {
+        return { success: false, error: "This company already has an HQ" };
+      }
+    }
+
     const result = await createBranch({
       name: data.name,
-      company_name: data.companyName,
+      type: data.type,
+      parent_id: data.type !== "company" ? data.parentId : null,
       address: data.address,
+      city: data.city,
       phone: data.phone,
       email: data.email,
       bank_name: data.bankName,
       bank_account: data.bankAccount,
-      admin_id: data.adminId,
+      website: data.type === "company" ? data.website : null,
+      logo_url: data.type === "company" ? data.logoUrl : null,
+      registration_number: data.type === "company" ? data.registrationNumber : null,
     });
 
     if (!result) {
-      return { success: false, error: "Failed to create branch" };
+      return { success: false, error: "Failed to create entry" };
     }
 
     revalidatePath("/branches");
@@ -66,19 +101,35 @@ export async function updateBranchAction(
   data: UpdateBranchData
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    // Admin can edit their own company; super_admin uses companies permission
+    if (data.type === "company") {
+      try {
+        await authorizeAction("companies", "can_edit");
+      } catch {
+        // Fall back to branches edit permission (allows admin to edit own company)
+        await authorizeAction("branches", "can_edit");
+      }
+    } else {
+      await authorizeAction("branches", "can_edit");
+    }
+
     const result = await updateBranch(branchId, {
       name: data.name,
-      company_name: data.companyName,
+      type: data.type,
+      parent_id: data.type !== "company" ? data.parentId : null,
       address: data.address,
+      city: data.city,
       phone: data.phone,
       email: data.email,
       bank_name: data.bankName,
       bank_account: data.bankAccount,
-      admin_id: data.adminId,
+      website: data.type === "company" ? data.website : null,
+      logo_url: data.type === "company" ? data.logoUrl : null,
+      registration_number: data.type === "company" ? data.registrationNumber : null,
     });
 
     if (!result) {
-      return { success: false, error: "Failed to update branch" };
+      return { success: false, error: "Failed to update entry" };
     }
 
     revalidatePath("/branches");
@@ -94,13 +145,34 @@ export async function updateBranchAction(
 }
 
 export async function deleteBranchAction(
-  branchId: string
+  branchId: string,
+  branchType: BranchType
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    if (branchType === "company") {
+      await authorizeAction("companies", "can_delete");
+
+      // Check if company has active children (HQ or branches)
+      const { count } = await supabaseAdmin
+        .from("branches")
+        .select("id", { count: "exact", head: true })
+        .eq("parent_id", branchId)
+        .is("deleted_at", null);
+
+      if (count && count > 0) {
+        return {
+          success: false,
+          error: "Cannot delete company that has active HQ or branches. Remove them first.",
+        };
+      }
+    } else {
+      await authorizeAction("branches", "can_delete");
+    }
+
     const result = await softDeleteBranch(branchId);
 
     if (!result) {
-      return { success: false, error: "Failed to delete branch" };
+      return { success: false, error: "Failed to delete entry" };
     }
 
     revalidatePath("/branches");

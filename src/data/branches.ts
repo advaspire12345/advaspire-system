@@ -183,35 +183,80 @@ export async function restoreBranch(branchId: string): Promise<boolean> {
 export interface BranchEntry {
   id: string;
   branchName: string;
-  branchCompany: string;
+  type: 'company' | 'hq' | 'branch';
+  parentId: string | null;
+  parentName: string | null;
   branchAddress: string;
+  city: string;
   branchEmail: string;
   branchPhone: string;
   bankName: string;
   bankAccount: string;
   adminId: string | null;
   adminName: string | null;
+  website: string;
+  logoUrl: string;
+  registrationNumber: string;
 }
 
-export async function getBranchData(): Promise<BranchEntry[]> {
-  // Fetch branches
-  const { data: branches, error: branchError } = await supabaseAdmin
+export async function getBranchData(branchIds?: string[]): Promise<BranchEntry[]> {
+  // Fetch branches with all new fields
+  let query = supabaseAdmin
     .from("branches")
     .select(
       `
       id,
       name,
-      company_name,
+      type,
+      parent_id,
       address,
+      city,
       email,
       phone,
       bank_name,
       bank_account,
-      admin_id
+      admin_id,
+      website,
+      logo_url,
+      registration_number
     `
     )
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
+
+  // If branchIds provided, find admin's company and show full company hierarchy
+  if (branchIds) {
+    // Fetch the admin's assigned branches to find types and parent IDs
+    const { data: adminBranches } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    // Collect company IDs: either directly assigned companies, or parent companies of assigned branches/HQs
+    const companyIds = new Set<string>();
+    for (const b of adminBranches ?? []) {
+      if (b.type === "company") {
+        companyIds.add(b.id);
+      } else if (b.parent_id) {
+        companyIds.add(b.parent_id);
+      }
+    }
+
+    const companyIdArr = [...companyIds];
+
+    // Show: the company rows + all children (HQ/branches) under those companies
+    if (companyIdArr.length > 0) {
+      query = query.or(
+        `id.in.(${companyIdArr.join(",")}),parent_id.in.(${companyIdArr.join(",")})`
+      );
+    } else {
+      // Fallback: just show the admin's own branches
+      query = query.in("id", branchIds);
+    }
+  }
+
+  const { data: branches, error: branchError } = await query;
 
   if (branchError) {
     console.error("Error fetching branches data:", branchError);
@@ -240,20 +285,77 @@ export async function getBranchData(): Promise<BranchEntry[]> {
     );
   }
 
-  return (branches ?? []).map((branch) => {
+  // Build parent name map (for branch rows that have a parent_id)
+  const parentIds = (branches ?? [])
+    .map((b) => b.parent_id)
+    .filter((id): id is string => id !== null);
+
+  let parentMap: Record<string, string> = {};
+  if (parentIds.length > 0) {
+    const { data: parents } = await supabaseAdmin
+      .from("branches")
+      .select("id, name")
+      .in("id", parentIds);
+
+    parentMap = (parents ?? []).reduce(
+      (acc, p) => {
+        acc[p.id] = p.name;
+        return acc;
+      },
+      {} as Record<string, string>
+    );
+  }
+
+  // Sort: Company first, then HQ, then branches
+  const typeOrder = { company: 0, hq: 1, branch: 2 };
+  const sorted = [...(branches ?? [])].sort((a, b) => {
+    const aOrder = typeOrder[a.type as keyof typeof typeOrder] ?? 3;
+    const bOrder = typeOrder[b.type as keyof typeof typeOrder] ?? 3;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.name.localeCompare(b.name);
+  });
+
+  return sorted.map((branch) => {
     return {
       id: branch.id,
       branchName: branch.name,
-      branchCompany: branch.company_name ?? "",
+      type: branch.type as 'company' | 'hq' | 'branch',
+      parentId: branch.parent_id,
+      parentName: branch.parent_id ? parentMap[branch.parent_id] ?? null : null,
       branchAddress: branch.address ?? "",
+      city: branch.city ?? "",
       branchEmail: branch.email ?? "",
       branchPhone: branch.phone ?? "",
       bankName: branch.bank_name ?? "",
       bankAccount: branch.bank_account ?? "",
       adminId: branch.admin_id,
       adminName: branch.admin_id ? adminMap[branch.admin_id] ?? null : null,
+      website: branch.website ?? "",
+      logoUrl: branch.logo_url ?? "",
+      registrationNumber: branch.registration_number ?? "",
     };
   });
+}
+
+export interface CompanyOption {
+  id: string;
+  name: string;
+}
+
+export async function getCompanyOptions(): Promise<CompanyOption[]> {
+  const { data, error } = await supabaseAdmin
+    .from("branches")
+    .select("id, name")
+    .eq("type", "company")
+    .is("deleted_at", null)
+    .order("name");
+
+  if (error) {
+    console.error("Error fetching company options:", error);
+    return [];
+  }
+
+  return data ?? [];
 }
 
 export interface AdminOption {

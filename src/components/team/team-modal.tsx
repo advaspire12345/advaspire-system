@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -46,12 +46,14 @@ interface TeamModalProps {
   mode: "add" | "edit" | "delete";
   record: TeamTableRow | null;
   branches: BranchOption[];
+  currentUserRole?: UserRole;
+  currentUserBranchId?: string;
   onAdd: (data: TeamMemberFormData) => Promise<void>;
   onEdit: (data: TeamMemberFormData) => Promise<void>;
   onDelete: () => Promise<void>;
 }
 
-const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
+const ALL_ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "super_admin", label: "Super Admin" },
   { value: "admin", label: "Admin" },
   { value: "branch_admin", label: "Branch Admin" },
@@ -84,10 +86,36 @@ export function TeamModal({
   mode,
   record,
   branches,
+  currentUserRole,
+  currentUserBranchId,
   onAdd,
   onEdit,
   onDelete,
 }: TeamModalProps) {
+  // Filter role options based on current user's role
+  const roleOptions = useMemo(() => {
+    if (currentUserRole === "admin") {
+      // Admin can only create branch_admin and instructor
+      return ALL_ROLE_OPTIONS.filter(
+        (r) => r.value === "branch_admin" || r.value === "instructor"
+      );
+    }
+    if (currentUserRole === "branch_admin") {
+      // Branch admin can only create instructor
+      return ALL_ROLE_OPTIONS.filter((r) => r.value === "instructor");
+    }
+    // Super admin can create all roles
+    return ALL_ROLE_OPTIONS;
+  }, [currentUserRole]);
+
+  // Filter branch options based on current user's role
+  const branchOptions = useMemo(() => {
+    if (currentUserRole === "branch_admin" && currentUserBranchId) {
+      // Branch admin can only assign to their own branch
+      return branches.filter((b) => b.id === currentUserBranchId);
+    }
+    return branches;
+  }, [branches, currentUserRole, currentUserBranchId]);
   const [formData, setFormData] = useState<TeamMemberFormData>(initialFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +165,13 @@ export function TeamModal({
           status: record.status,
         });
       } else if (mode === "add") {
-        setFormData(initialFormData);
+        setFormData({
+          ...initialFormData,
+          // Default role to first available option for the current user
+          role: roleOptions[0]?.value ?? "instructor",
+          // Auto-set branch for branch_admin (they can only assign their own branch)
+          branchId: currentUserRole === "branch_admin" && currentUserBranchId ? currentUserBranchId : null,
+        });
       }
       setError(null);
     }
@@ -428,10 +462,7 @@ export function TeamModal({
                     label="Branch"
                     value={formData.branchId || ""}
                     onChange={(value) => updateField("branchId", value || null)}
-                    options={[
-                      { value: "", label: "No Branch" },
-                      ...branches.map((b) => ({ value: b.id, label: b.name })),
-                    ]}
+                    options={branchOptions.map((b) => ({ value: b.id, label: b.name }))}
                   />
                 </>
               )}
@@ -451,11 +482,10 @@ export function TeamModal({
                 </label>
               </div>
             ) : (
-              <FloatingTextarea
+              <FloatingInput
                 label="Address"
                 value={formData.address || ""}
                 onChange={(e) => updateField("address", e.target.value || null)}
-                rows={2}
               />
             )}
 
@@ -468,7 +498,7 @@ export function TeamModal({
                       type="text"
                       readOnly
                       value={
-                        ROLE_OPTIONS.find((r) => r.value === record?.role)
+                        ALL_ROLE_OPTIONS.find((r) => r.value === record?.role)
                           ?.label ?? "-"
                       }
                       className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground bg-muted/50 cursor-not-allowed opacity-70"
@@ -498,7 +528,7 @@ export function TeamModal({
                     label="Role *"
                     value={formData.role}
                     onChange={(value) => updateField("role", value as UserRole)}
-                    options={ROLE_OPTIONS}
+                    options={roleOptions}
                   />
                   <FloatingSelect
                     label="Status"

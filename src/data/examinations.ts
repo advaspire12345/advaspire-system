@@ -5,8 +5,49 @@ import type {
   ExaminationUpdate,
   ExaminationTableRow,
   EligibleStudent,
+  StudentExamOption,
 } from "@/db/schema";
 import { parseISO, differenceInYears } from "date-fns";
+
+/**
+ * Resolve branch IDs for admin users: company IDs → child HQ/branch IDs
+ */
+async function resolveExamBranchIds(userEmail: string): Promise<{
+  branchIds: string[] | null;
+  useCityName: boolean;
+}> {
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const user = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || user?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && user?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  return { branchIds, useCityName };
+}
 
 // ============================================
 // READ OPERATIONS
@@ -18,8 +59,7 @@ import { parseISO, differenceInYears } from "date-fns";
 export async function getExaminationsForTable(
   userEmail: string
 ): Promise<ExaminationTableRow[]> {
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { branchIds, useCityName } = await resolveExamBranchIds(userEmail);
 
   let query = supabaseAdmin
     .from("examinations")
@@ -42,12 +82,12 @@ export async function getExaminationsForTable(
         name,
         photo,
         date_of_birth,
-        level,
         branch_id,
-        branch:branches!inner(id, name)
+        branch:branches!inner(id, name, city)
       ),
       enrollment:enrollments(
         id,
+        level,
         course:courses(id, name)
       ),
       examiner:users(
@@ -60,8 +100,8 @@ export async function getExaminationsForTable(
     .order("exam_date", { ascending: false });
 
   // Apply branch filter if user is not super admin
-  if (userBranchId) {
-    query = query.eq("student.branch_id", userBranchId);
+  if (branchIds) {
+    query = query.in("student.branch_id", branchIds);
   }
 
   const { data, error } = await query;
@@ -117,11 +157,11 @@ export async function getExaminationsForTable(
       studentPhoto: student?.photo || null,
       studentAge,
       branchId: student?.branch_id || "",
-      branchName: branch?.name || "N/A",
+      branchName: useCityName ? (branch?.city || branch?.name || "N/A") : (branch?.name || "N/A"),
       courseId: course?.id || "",
       courseName: course?.name || "N/A",
       sessionAttend: attendanceCounts[exam.enrollment_id] || 0,
-      currentLevel: student?.level || 1,
+      currentLevel: enrollment?.level || 1,
       examName: exam.exam_name,
       examLevel: exam.exam_level,
       reattemptCount: exam.reattempt_count,
@@ -145,8 +185,7 @@ export async function getExaminationsForTable(
 export async function getEligibleStudentsForExam(
   userEmail: string
 ): Promise<EligibleStudent[]> {
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { branchIds, useCityName } = await resolveExamBranchIds(userEmail);
 
   // First fetch enrollments with their course settings
   let query = supabaseAdmin
@@ -155,13 +194,14 @@ export async function getEligibleStudentsForExam(
       id,
       student_id,
       course_id,
+      level,
       student:students!inner(
         id,
         name,
         photo,
-        level,
+        date_of_birth,
         branch_id,
-        branch:branches!inner(id, name)
+        branch:branches!inner(id, name, city)
       ),
       course:courses!inner(
         id,
@@ -171,10 +211,11 @@ export async function getEligibleStudentsForExam(
       )
     `)
     .eq("status", "active")
-    .is("deleted_at", null);
+    .is("deleted_at", null)
+    .gt("course.number_of_levels", 0);
 
-  if (userBranchId) {
-    query = query.eq("student.branch_id", userBranchId);
+  if (branchIds) {
+    query = query.in("student.branch_id", branchIds);
   }
 
   const { data: enrollments, error } = await query;
@@ -204,18 +245,18 @@ export async function getEligibleStudentsForExam(
     }
   }
 
-  // Get existing examinations to exclude students already being examined at current level
-  const studentIds = enrollments.map((e) => e.student_id);
+  // Get existing examinations to exclude students already being examined at current level+program
+  const enrollmentIds2 = enrollments.map((e) => e.id);
   const { data: existingExams } = await supabaseAdmin
     .from("examinations")
-    .select("student_id, exam_level, status")
-    .in("student_id", studentIds)
+    .select("enrollment_id, exam_level, status")
+    .in("enrollment_id", enrollmentIds2)
     .is("deleted_at", null)
-    .not("status", "in", '("fail", "absent")');
+    .not("status", "in", "(fail,absent)");
 
-  // Create a set of "studentId-level" combinations that already have active exams
+  // Create a set of "enrollmentId-level" combinations that already have active exams
   const existingExamSet = new Set(
-    (existingExams ?? []).map((e) => `${e.student_id}-${e.exam_level}`)
+    (existingExams ?? []).map((e) => `${e.enrollment_id}-${e.exam_level}`)
   );
 
   const eligibleStudents: EligibleStudent[] = [];
@@ -225,20 +266,23 @@ export async function getEligibleStudentsForExam(
     const course = enrollment.course as any;
     const branch = student?.branch;
 
-    const sessionsRequired = course?.sessions_to_level_up || 8;
+    const maxLevels = course?.number_of_levels || 0;
+    const sessionsRequired = course?.sessions_to_level_up || 0;
     const sessionsAttended = attendanceCounts[enrollment.id] || 0;
-    const currentLevel = student?.level || 1;
-    const maxLevels = course?.number_of_levels || 10;
+    const currentLevel = (enrollment as any).level || 1;
+
+    // Skip programs with 0 levels (no examination)
+    if (maxLevels <= 0) continue;
 
     // Check if student has attended enough sessions
     if (sessionsAttended >= sessionsRequired) {
-      // Check if student is already at max level
-      if (currentLevel >= maxLevels) {
+      // Check if student has completed all levels
+      if (currentLevel > maxLevels) {
         continue;
       }
 
-      // Check if there's already an active exam for this level
-      const examKey = `${enrollment.student_id}-${currentLevel + 1}`;
+      // Check if there's already an active exam for this program + level
+      const examKey = `${enrollment.id}-${currentLevel}`;
       if (existingExamSet.has(examKey)) {
         continue;
       }
@@ -247,8 +291,9 @@ export async function getEligibleStudentsForExam(
         studentId: enrollment.student_id,
         studentName: student?.name || "Unknown",
         studentPhoto: student?.photo || null,
+        dateOfBirth: student?.date_of_birth || null,
         branchId: student?.branch_id || "",
-        branchName: branch?.name || "N/A",
+        branchName: useCityName ? (branch?.city || branch?.name || "N/A") : (branch?.name || "N/A"),
         enrollmentId: enrollment.id,
         courseId: enrollment.course_id,
         courseName: course?.name || "N/A",
@@ -387,6 +432,114 @@ export async function generateCertificateNumber(): Promise<string> {
 }
 
 // ============================================
+// ALL STUDENTS FOR EXAM SELECTION
+// ============================================
+
+/**
+ * Get all students with their enrollments for exam selection dropdown
+ */
+export async function getAllStudentsForExam(
+  userEmail: string
+): Promise<StudentExamOption[]> {
+  const { branchIds, useCityName } = await resolveExamBranchIds(userEmail);
+
+  let query = supabaseAdmin
+    .from("enrollments")
+    .select(`
+      id,
+      student_id,
+      course_id,
+      level,
+      student:students!inner(
+        id,
+        name,
+        photo,
+        date_of_birth,
+        branch_id,
+        branch:branches!inner(id, name, city)
+      ),
+      course:courses!inner(
+        id,
+        name,
+        sessions_to_level_up,
+        number_of_levels
+      )
+    `)
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .gt("course.number_of_levels", 0);
+
+  if (branchIds) {
+    query = query.in("student.branch_id", branchIds);
+  }
+
+  const { data: enrollments, error } = await query;
+
+  if (error) {
+    console.error("Error fetching all students for exam:", error);
+    return [];
+  }
+
+  if (!enrollments || enrollments.length === 0) return [];
+
+  // Get attendance counts
+  const enrollmentIds = enrollments.map((e) => e.id);
+  const { data: attendanceData } = await supabaseAdmin
+    .from("attendance")
+    .select("enrollment_id, status")
+    .in("enrollment_id", enrollmentIds)
+    .in("status", ["present", "late"]);
+
+  const attendanceCounts: Record<string, number> = {};
+  for (const a of attendanceData ?? []) {
+    if (a.enrollment_id) {
+      attendanceCounts[a.enrollment_id] =
+        (attendanceCounts[a.enrollment_id] || 0) + 1;
+    }
+  }
+
+  // Group by student
+  const studentMap = new Map<string, StudentExamOption>();
+
+  for (const enrollment of enrollments) {
+    const student = enrollment.student as any;
+    const course = enrollment.course as any;
+    const branch = student?.branch;
+
+    const sessionsRequired = course?.sessions_to_level_up || 8;
+    const sessionsAttended = attendanceCounts[enrollment.id] || 0;
+    const currentLevel = (enrollment as any).level || 1;
+    const maxLevels = course?.number_of_levels || 10;
+    const isEligible =
+      sessionsAttended >= sessionsRequired && currentLevel < maxLevels;
+
+    if (!studentMap.has(enrollment.student_id)) {
+      studentMap.set(enrollment.student_id, {
+        studentId: enrollment.student_id,
+        studentName: student?.name || "Unknown",
+        studentPhoto: student?.photo || null,
+        dateOfBirth: student?.date_of_birth || null,
+        branchId: student?.branch_id || "",
+        branchName: useCityName ? (branch?.city || branch?.name || "N/A") : (branch?.name || "N/A"),
+        enrollments: [],
+      });
+    }
+
+    studentMap.get(enrollment.student_id)!.enrollments.push({
+      enrollmentId: enrollment.id,
+      courseId: enrollment.course_id,
+      courseName: course?.name || "N/A",
+      currentLevel,
+      sessionsAttended,
+      sessionsRequired,
+      isEligible,
+    });
+  }
+
+  return Array.from(studentMap.values());
+}
+
+// ============================================
 // EXAMINER QUERIES
 // ============================================
 
@@ -400,8 +553,7 @@ export interface ExaminerOption {
  * Get all team members who can be examiners
  */
 export async function getExaminers(userEmail: string): Promise<ExaminerOption[]> {
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { branchIds } = await resolveExamBranchIds(userEmail);
 
   let query = supabaseAdmin
     .from("users")
@@ -410,8 +562,8 @@ export async function getExaminers(userEmail: string): Promise<ExaminerOption[]>
     .is("deleted_at", null)
     .order("name");
 
-  if (userBranchId) {
-    query = query.eq("branch_id", userBranchId);
+  if (branchIds) {
+    query = query.in("branch_id", branchIds);
   }
 
   const { data, error } = await query;

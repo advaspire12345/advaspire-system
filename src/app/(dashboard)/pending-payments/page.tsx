@@ -5,6 +5,7 @@ import { getStudentsForPayment } from "@/data/students";
 import { getCoursesAndPackages } from "@/data/courses";
 import { PendingPaymentTable } from "@/components/payments/pending-payment-table";
 import { Banner } from "@/components/ui/banner";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 // Force dynamic rendering to always get fresh data
 export const dynamic = "force-dynamic";
@@ -16,6 +17,10 @@ export default async function PendingPaymentsPage() {
   if (!user) {
     redirect("/login");
   }
+
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.pending_payments;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   // Fetch data in parallel
   const [payments, students, { courses, packages }] = await Promise.all([
@@ -37,8 +42,12 @@ export default async function PendingPaymentsPage() {
         <PendingPaymentTable
           initialData={payments}
           students={students}
+          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
           courses={courses}
           packages={packages}
+          canCreate={perms?.can_create}
+          canEdit={perms?.can_edit}
+          canDelete={perms?.can_delete}
         />
       </div>
     </main>

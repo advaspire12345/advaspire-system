@@ -699,7 +699,38 @@ export interface TransactionDisplayRow {
   branchName: string;
 }
 
-export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow[]> {
+export async function getTransactionsForDisplay(userEmail: string): Promise<TransactionDisplayRow[]> {
+  // Get user's branch access — resolve company IDs to child HQ/branch IDs
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
   // Fetch transactions
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('adcoin_transactions')
@@ -733,7 +764,7 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
       photo,
       branch_id,
       adcoin_balance,
-      branch:branches(id, name)
+      branch:branches(id, name, city)
     `)
     .in('id', idsArray);
 
@@ -750,7 +781,7 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
       photo,
       branch_id,
       adcoin_balance,
-      branch:branches!users_branch_id_branches_id_fk(id, name)
+      branch:branches!users_branch_id_branches_id_fk(id, name, city)
     `)
     .in('id', idsArray);
 
@@ -770,8 +801,7 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
 
   // Add students to map
   for (const student of students ?? []) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const branchData = student.branch as any;
+    const branchData = student.branch as unknown as { id: string; name: string; city: string | null } | null;
     // Calculate level: every 500 adcoin = 1 level, starting at 1
     const adcoinBalance = student.adcoin_balance ?? 0;
     const level = Math.floor(adcoinBalance / 500) + 1;
@@ -780,7 +810,9 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
       name: student.name,
       photo: student.photo,
       branch_id: student.branch_id,
-      branchName: branchData?.name ?? 'Unknown',
+      branchName: useCityName
+        ? (branchData?.city || branchData?.name || 'Unknown')
+        : (branchData?.name ?? 'Unknown'),
       level,
     });
   }
@@ -788,8 +820,7 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
   // Add users to map (if not already present from students)
   for (const user of users ?? []) {
     if (!participantMap.has(user.id)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const branchData = user.branch as any;
+      const branchData = user.branch as unknown as { id: string; name: string; city: string | null } | null;
       // For users, calculate level based on their adcoin_balance too
       const adcoinBalance = user.adcoin_balance ?? 0;
       const level = Math.floor(adcoinBalance / 500) + 1;
@@ -798,7 +829,9 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
         name: user.name,
         photo: user.photo,
         branch_id: user.branch_id ?? '',
-        branchName: branchData?.name ?? 'Pool',
+        branchName: useCityName
+          ? (branchData?.city || branchData?.name || 'Pool')
+          : (branchData?.name ?? 'Pool'),
         level,
       });
     }
@@ -812,6 +845,12 @@ export async function getTransactionsForDisplay(): Promise<TransactionDisplayRow
 
     // Determine branch from receiver or sender
     const branchParticipant = receiver ?? sender;
+
+    // Filter by branch if user has limited access
+    if (branchIds) {
+      const participantBranchId = branchParticipant?.branch_id;
+      if (!participantBranchId || !branchIds.includes(participantBranchId)) continue;
+    }
 
     rows.push({
       id: t.id,

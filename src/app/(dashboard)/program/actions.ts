@@ -8,6 +8,7 @@ import {
   createCategory,
   type CreateProgramPayload,
 } from "@/data/programs";
+import { authorizeAction } from "@/data/permissions";
 import type { ProgramFull } from "@/db/schema";
 
 export interface ProgramFormPayload {
@@ -77,6 +78,8 @@ export async function createProgramAction(
   payload: ProgramFormPayload
 ): Promise<{ success: boolean; error?: string; programId?: string }> {
   try {
+    await authorizeAction('programs', 'can_create');
+
     const programId = await createProgram(payload as CreateProgramPayload);
 
     if (!programId) {
@@ -99,6 +102,8 @@ export async function updateProgramAction(
   payload: ProgramFormPayload
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('programs', 'can_edit');
+
     const success = await updateProgram(programId, payload as CreateProgramPayload);
 
     if (!success) {
@@ -120,6 +125,8 @@ export async function deleteProgramAction(
   programId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('programs', 'can_delete');
+
     const success = await softDeleteProgram(programId);
 
     if (!success) {
@@ -141,6 +148,8 @@ export async function createCategoryAction(
   name: string
 ): Promise<{ success: boolean; categoryId?: string; error?: string }> {
   try {
+    await authorizeAction('programs', 'can_create');
+
     const category = await createCategory({ name });
 
     if (!category) {
@@ -183,6 +192,8 @@ export async function uploadCoverImageAction(
   formData: FormData
 ): Promise<{ success: boolean; url?: string; error?: string }> {
   try {
+    await authorizeAction('programs', 'can_edit');
+
     const { supabaseAdmin } = await import("@/db");
     const file = formData.get("file") as File;
 

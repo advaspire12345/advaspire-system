@@ -605,8 +605,12 @@ export function AttendanceLogModal({
                       id="adcoin"
                       label="Adcoin"
                       type="number"
+                      min={0}
                       value={adcoin === 0 ? "" : adcoin.toString()}
-                      onChange={(e) => setAdcoin(Number(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setAdcoin(val < 0 ? 0 : val || 0);
+                      }}
                     />
                   )}
 

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { updateSettings } from "@/data/settings";
+import { getCurrentUserPermissions } from "@/data/permissions";
 import type { SettingsMap } from "@/data/settings";
 
 export interface SettingsFormPayload {
@@ -14,6 +15,11 @@ export async function updateSettingsAction(
   payload: SettingsFormPayload
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const permData = await getCurrentUserPermissions();
+    if (permData?.role !== 'super_admin' && permData?.role !== 'admin') {
+      return { success: false, error: "Forbidden" };
+    }
+
     // Validate inputs
     const adcoinPerRm = parseInt(payload.adcoinPerRm);
     if (isNaN(adcoinPerRm) || adcoinPerRm <= 0) {

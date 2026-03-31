@@ -2,6 +2,7 @@
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import { updatePayment, deletePayment } from "@/data/payments";
+import { authorizeAction } from "@/data/permissions";
 import type { PaymentMethod } from "@/db/schema";
 
 export interface UpdatePaymentRecordData {
@@ -18,6 +19,8 @@ export async function updatePaymentRecordAction(
   data: UpdatePaymentRecordData
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('payment_record', 'can_edit');
+
     const result = await updatePayment(paymentId, {
       course_id: data.courseId,
       package_id: data.packageId,
@@ -47,6 +50,8 @@ export async function deletePaymentRecordAction(
   paymentId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('payment_record', 'can_delete');
+
     const result = await deletePayment(paymentId);
 
     if (!result) {

@@ -1,6 +1,56 @@
 import { supabaseAdmin, withRetry } from "@/db";
-import { isSuperAdmin, getUserBranchIdByEmail, getUserByEmail } from "./users";
+import { isSuperAdmin, getUserBranchIdByEmail, getUserByEmail, getUserBranchIds } from "./users";
 import { unstable_cache } from "next/cache";
+
+interface DashboardBranchAccess {
+  branchIds: string[] | null;
+  useCityName: boolean; // true for admin/branch_admin/instructor, false for super_admin
+}
+
+/**
+ * Get branch IDs relevant for dashboard data (excludes company-type entries).
+ * Returns null branchIds for super_admin (sees everything).
+ * Returns array of hq/branch IDs for admin users.
+ * Also returns whether to use city/area name instead of branch name.
+ */
+async function getDashboardBranchAccess(userEmail: string): Promise<DashboardBranchAccess> {
+  const user = await getUserByEmail(userEmail);
+  if (!user) return { branchIds: [], useCityName: false };
+  if (isSuperAdmin(userEmail) || user.role === "super_admin") {
+    return { branchIds: null, useCityName: false };
+  }
+
+  let branchIds = await getUserBranchIds(userEmail);
+  if (!branchIds) return { branchIds: null, useCityName: true };
+  if (branchIds.length === 0) return { branchIds: [], useCityName: true };
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (user.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  return { branchIds, useCityName: true };
+}
 
 // Helper function to group array items by a key
 function groupBy<T>(array: T[], key: keyof T): Record<string, T[]> {
@@ -92,20 +142,21 @@ export interface BranchOption {
 export const getBranches = unstable_cache(
   async (userEmail: string): Promise<BranchOption[]> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
       let query = supabaseAdmin
         .from('branches')
-        .select('id, name')
+        .select('id, name, city')
+        .in('type', ['hq', 'branch'])
         .is('deleted_at', null)
         .order('name');
 
-      if (userBranchId) {
-        query = query.eq('id', userBranchId);
+      if (dashBranchIds) {
+        query = query.in('id', dashBranchIds);
       }
 
       const { data } = await query;
-      return (data ?? []).map((b) => ({ id: b.id, name: b.name }));
+      return (data ?? []).map((b: any) => ({ id: b.id, name: useCityName ? (b.city || b.name) : b.name }));
     });
   },
   ["branches"],
@@ -133,8 +184,7 @@ function getTwoMonthsAgoStart(): string {
 export const getDashboardStats = unstable_cache(
   async (userEmail: string): Promise<DashboardStats> => {
     return withRetry(async () => {
-      const user = await getUserByEmail(userEmail);
-      const branchId = user ? await getUserBranchIdByEmail(userEmail) : null;
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
       const thisMonthStart = getThisMonthStart();
       const lastMonthStart = getLastMonthStart();
       const twoMonthsAgoStart = getTwoMonthsAgoStart();
@@ -147,8 +197,8 @@ export const getDashboardStats = unstable_cache(
         .in('status', ['present', 'late'])
         .is('trial_id', null);
 
-      if (branchId) {
-        enrollmentAttendanceThisMonthQuery = enrollmentAttendanceThisMonthQuery.eq('enrollments.students.branch_id', branchId);
+      if (dashBranchIds) {
+        enrollmentAttendanceThisMonthQuery = enrollmentAttendanceThisMonthQuery.in('enrollments.students.branch_id', dashBranchIds);
       }
 
       let enrollmentAttendanceLastMonthQuery = supabaseAdmin
@@ -159,8 +209,8 @@ export const getDashboardStats = unstable_cache(
         .in('status', ['present', 'late'])
         .is('trial_id', null);
 
-      if (branchId) {
-        enrollmentAttendanceLastMonthQuery = enrollmentAttendanceLastMonthQuery.eq('enrollments.students.branch_id', branchId);
+      if (dashBranchIds) {
+        enrollmentAttendanceLastMonthQuery = enrollmentAttendanceLastMonthQuery.in('enrollments.students.branch_id', dashBranchIds);
       }
 
       // Build trial attendance queries (this month vs last month) - only count present/late
@@ -171,8 +221,8 @@ export const getDashboardStats = unstable_cache(
         .in('status', ['present', 'late'])
         .not('trial_id', 'is', null);
 
-      if (branchId) {
-        trialAttendanceThisMonthQuery = trialAttendanceThisMonthQuery.eq('trial.branch_id', branchId);
+      if (dashBranchIds) {
+        trialAttendanceThisMonthQuery = trialAttendanceThisMonthQuery.in('trial.branch_id', dashBranchIds);
       }
 
       let trialAttendanceLastMonthQuery = supabaseAdmin
@@ -183,8 +233,8 @@ export const getDashboardStats = unstable_cache(
         .in('status', ['present', 'late'])
         .not('trial_id', 'is', null);
 
-      if (branchId) {
-        trialAttendanceLastMonthQuery = trialAttendanceLastMonthQuery.eq('trial.branch_id', branchId);
+      if (dashBranchIds) {
+        trialAttendanceLastMonthQuery = trialAttendanceLastMonthQuery.in('trial.branch_id', dashBranchIds);
       }
 
       // Build trial count queries (count trials ATTENDED this month vs last month)
@@ -199,8 +249,8 @@ export const getDashboardStats = unstable_cache(
         .gte('date', thisMonthStartDate)
         .in('status', ['present', 'late']);
 
-      if (branchId) {
-        trialsThisMonthQuery = trialsThisMonthQuery.eq('trial.branch_id', branchId);
+      if (dashBranchIds) {
+        trialsThisMonthQuery = trialsThisMonthQuery.in('trial.branch_id', dashBranchIds);
       }
 
       let trialsLastMonthQuery = supabaseAdmin
@@ -211,8 +261,8 @@ export const getDashboardStats = unstable_cache(
         .lt('date', thisMonthStartDate)
         .in('status', ['present', 'late']);
 
-      if (branchId) {
-        trialsLastMonthQuery = trialsLastMonthQuery.eq('trial.branch_id', branchId);
+      if (dashBranchIds) {
+        trialsLastMonthQuery = trialsLastMonthQuery.in('trial.branch_id', dashBranchIds);
       }
 
       // Build payment queries
@@ -222,8 +272,8 @@ export const getDashboardStats = unstable_cache(
         .gte('created_at', thisMonthStart)
         .eq('status', 'paid');
 
-      if (branchId) {
-        paymentsThisMonthQuery = paymentsThisMonthQuery.eq('students.branch_id', branchId);
+      if (dashBranchIds) {
+        paymentsThisMonthQuery = paymentsThisMonthQuery.in('students.branch_id', dashBranchIds);
       }
 
       let paymentsLastMonthQuery = supabaseAdmin
@@ -233,8 +283,8 @@ export const getDashboardStats = unstable_cache(
         .lt('created_at', thisMonthStart)
         .eq('status', 'paid');
 
-      if (branchId) {
-        paymentsLastMonthQuery = paymentsLastMonthQuery.eq('students.branch_id', branchId);
+      if (dashBranchIds) {
+        paymentsLastMonthQuery = paymentsLastMonthQuery.in('students.branch_id', dashBranchIds);
       }
 
       // Build adcoin transaction queries (sum total adcoins this month vs last month)
@@ -260,8 +310,8 @@ export const getDashboardStats = unstable_cache(
         .select('amount, student_id, students!inner(branch_id)')
         .eq('status', 'pending');
 
-      if (branchId) {
-        pendingPaymentsQuery = pendingPaymentsQuery.eq('students.branch_id', branchId);
+      if (dashBranchIds) {
+        pendingPaymentsQuery = pendingPaymentsQuery.in('students.branch_id', dashBranchIds);
       }
 
       // Execute all queries in parallel
@@ -346,7 +396,7 @@ export const getDashboardStats = unstable_cache(
 export const getRecentActivity = unstable_cache(
   async (userEmail: string, limit = 10): Promise<RecentActivity[]> => {
     return withRetry(async () => {
-      const branchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
       // Get recent attendance
       let attendanceQuery = supabaseAdmin
@@ -360,15 +410,15 @@ export const getRecentActivity = unstable_cache(
               photo,
               adcoin_balance,
               branch_id,
-              branches!inner(id, name)
+              branches!inner(id, name, city)
             )
           )
         `)
         .order('created_at', { ascending: false })
         .limit(limit);
 
-      if (branchId) {
-        attendanceQuery = attendanceQuery.eq('enrollments.students.branch_id', branchId);
+      if (dashBranchIds) {
+        attendanceQuery = attendanceQuery.in('enrollments.students.branch_id', dashBranchIds);
       }
 
       const { data: attendanceData } = await attendanceQuery;
@@ -377,7 +427,7 @@ export const getRecentActivity = unstable_cache(
         id: a.id,
         userName: a.enrollments?.students?.name ?? 'Unknown',
         action: 'checked in at',
-        branchName: a.enrollments?.students?.branches?.name ?? 'Unknown',
+        branchName: (useCityName ? (a.enrollments?.students?.branches?.city || a.enrollments?.students?.branches?.name) : a.enrollments?.students?.branches?.name) ?? 'Unknown',
         branchId: a.enrollments?.students?.branches?.id ?? '',
         avatarUrl: a.enrollments?.students?.photo ?? null,
         rank: index + 1,
@@ -394,16 +444,16 @@ export const getRecentActivity = unstable_cache(
 export const getAdcoinRanking = unstable_cache(
   async (userEmail: string, limit = 10): Promise<AdcoinRanking[]> => {
     return withRetry(async () => {
-      const branchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
       let query = supabaseAdmin
         .from('students')
-        .select('id, name, adcoin_balance, photo, branch_id, branches!inner(id, name)')
+        .select('id, name, adcoin_balance, photo, branch_id, branches!inner(id, name, city)')
         .order('adcoin_balance', { ascending: false })
         .limit(limit);
 
-      if (branchId) {
-        query = query.eq('branch_id', branchId);
+      if (dashBranchIds) {
+        query = query.in('branch_id', dashBranchIds);
       }
 
       const { data } = await query;
@@ -415,7 +465,7 @@ export const getAdcoinRanking = unstable_cache(
         coins: s.adcoin_balance ?? 0,
         photo: s.photo,
         branchId: s.branches?.id ?? '',
-        branchName: s.branches?.name ?? 'Unknown',
+        branchName: (useCityName ? (s.branches?.city || s.branches?.name) : s.branches?.name) ?? 'Unknown',
       }));
     });
   },
@@ -426,7 +476,7 @@ export const getAdcoinRanking = unstable_cache(
 export const getAdcoinTransactions = unstable_cache(
   async (userEmail: string, limit = 10): Promise<AdcoinTransaction[]> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
       // Fetch transactions
       const { data: transactions } = await supabaseAdmin
@@ -481,7 +531,7 @@ export const getAdcoinTransactions = unstable_cache(
         if (!participant) continue;
 
         // Filter by branch if user has branch restriction
-        if (userBranchId && participant.branchId !== userBranchId) continue;
+        if (dashBranchIds && !dashBranchIds.includes(participant.branchId)) continue;
 
         results.push({
           id: t.id,
@@ -544,23 +594,24 @@ function getWeekOfMonth(date: Date): number {
 export const getAttendanceChartData = unstable_cache(
   async (userEmail: string): Promise<AttendanceChartData> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
-      // Get branches
+      // Get branches (exclude company-type entries — only hq/branch)
       let branchQuery = supabaseAdmin
         .from('branches')
-        .select('id, name')
+        .select('id, name, city')
+        .in('type', ['hq', 'branch'])
         .is('deleted_at', null)
         .order('name');
 
-      if (userBranchId) {
-        branchQuery = branchQuery.eq('id', userBranchId);
+      if (dashBranchIds) {
+        branchQuery = branchQuery.in('id', dashBranchIds);
       }
 
       const { data: branchesData } = await branchQuery;
-      const branches: ChartBranch[] = (branchesData ?? []).map((b, idx) => ({
+      const branches: ChartBranch[] = (branchesData ?? []).map((b: any, idx) => ({
         id: b.id,
-        name: b.name,
+        name: useCityName ? (b.city || b.name) : b.name,
         color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
       }));
 
@@ -725,23 +776,24 @@ export interface OverviewChartData {
 export const getOverviewChartData = unstable_cache(
   async (userEmail: string): Promise<OverviewChartData> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
-      // Get branches
+      // Get branches (exclude company-type entries — only hq/branch)
       let branchQuery = supabaseAdmin
         .from('branches')
-        .select('id, name')
+        .select('id, name, city')
+        .in('type', ['hq', 'branch'])
         .is('deleted_at', null)
         .order('name');
 
-      if (userBranchId) {
-        branchQuery = branchQuery.eq('id', userBranchId);
+      if (dashBranchIds) {
+        branchQuery = branchQuery.in('id', dashBranchIds);
       }
 
       const { data: branchesData } = await branchQuery;
-      const branches: OverviewBranch[] = (branchesData ?? []).map((b, idx) => ({
+      const branches: OverviewBranch[] = (branchesData ?? []).map((b: any, idx) => ({
         id: b.id,
-        name: b.name,
+        name: useCityName ? (b.city || b.name) : b.name,
         color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
       }));
 
@@ -889,23 +941,24 @@ export interface PaymentDueListData {
 export const getPaymentDueListData = unstable_cache(
   async (userEmail: string): Promise<PaymentDueListData> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
-      // Get branches
+      // Get branches (exclude company-type entries — only hq/branch)
       let branchQuery = supabaseAdmin
         .from('branches')
-        .select('id, name')
+        .select('id, name, city')
+        .in('type', ['hq', 'branch'])
         .is('deleted_at', null)
         .order('name');
 
-      if (userBranchId) {
-        branchQuery = branchQuery.eq('id', userBranchId);
+      if (dashBranchIds) {
+        branchQuery = branchQuery.in('id', dashBranchIds);
       }
 
       const { data: branchesData } = await branchQuery;
-      const branches = (branchesData ?? []).map((b) => ({
+      const branches = (branchesData ?? []).map((b: any) => ({
         id: b.id,
-        name: b.name,
+        name: useCityName ? (b.city || b.name) : b.name,
       }));
 
       // Get students with payment due (pending payments or low sessions)
@@ -916,12 +969,12 @@ export const getPaymentDueListData = unstable_cache(
           name,
           photo,
           branch_id,
-          branches!inner(id, name)
+          branches!inner(id, name, city)
         `)
         .is('deleted_at', null);
 
-      if (userBranchId) {
-        studentsQuery = studentsQuery.eq('branch_id', userBranchId);
+      if (dashBranchIds) {
+        studentsQuery = studentsQuery.in('branch_id', dashBranchIds);
       }
 
       const { data: studentsData } = await studentsQuery;
@@ -983,7 +1036,7 @@ export const getPaymentDueListData = unstable_cache(
           rank: idx + 1,
           sessionsLeft: sessionsMap[s.id] ?? 0,
           branchId: s.branch_id,
-          branchName: (s.branches as any)?.name ?? 'Unknown',
+          branchName: (useCityName ? ((s.branches as any)?.city || (s.branches as any)?.name) : (s.branches as any)?.name) ?? 'Unknown',
         }))
         .sort((a, b) => a.sessionsLeft - b.sessionsLeft); // Sort by sessions left (lowest first)
 
@@ -1002,20 +1055,21 @@ export const getPaymentDueListData = unstable_cache(
 export const getBranchOverviewData = unstable_cache(
   async (userEmail: string): Promise<BranchOverview[]> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
       const lastMonth = getThisMonthStart();
       const twelveMonthsAgo = new Date();
       twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
 
-      // Get branches
+      // Get branches (exclude company-type entries — only hq/branch)
       let branchQuery = supabaseAdmin
         .from('branches')
-        .select('id, name')
+        .select('id, name, city')
+        .in('type', ['hq', 'branch'])
         .is('deleted_at', null)
         .order('name');
 
-      if (userBranchId) {
-        branchQuery = branchQuery.eq('id', userBranchId);
+      if (dashBranchIds) {
+        branchQuery = branchQuery.in('id', dashBranchIds);
       }
 
       const { data: branchesData } = await branchQuery;
@@ -1126,7 +1180,7 @@ export const getBranchOverviewData = unstable_cache(
         const avgEnroll = Math.round(enrollmentsLastYearCount / 12);
 
         return {
-          branch: branch.name,
+          branch: useCityName ? ((branch as any).city || branch.name) : branch.name,
           totalStudents,
           avgEnroll,
           active: activeStudentCount,
@@ -1151,22 +1205,23 @@ const POOL_COLORS = ["#615DFA", "#23D2E2", "#22C55E", "#F59E0B", "#EC4899"];
 export const getAdcoinPoolData = unstable_cache(
   async (userEmail: string): Promise<BranchPool[]> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
       // Get adcoin_per_rm from settings
       const { getSettings } = await import("./settings");
       const settings = await getSettings();
       const adcoinPerRm = parseInt(settings.adcoin_per_rm) || 333;
 
-      // Get branches
+      // Get branches (exclude company-type entries — only hq/branch)
       let branchQuery = supabaseAdmin
         .from('branches')
-        .select('id, name')
+        .select('id, name, city')
+        .in('type', ['hq', 'branch'])
         .is('deleted_at', null)
         .order('name');
 
-      if (userBranchId) {
-        branchQuery = branchQuery.eq('id', userBranchId);
+      if (dashBranchIds) {
+        branchQuery = branchQuery.in('id', dashBranchIds);
       }
 
       const { data: branchesData } = await branchQuery;
@@ -1195,9 +1250,9 @@ export const getAdcoinPoolData = unstable_cache(
       }
 
       // Build result - RM = adcoins / adcoin_per_rm
-      const pools: BranchPool[] = (branchesData ?? []).map((branch, idx) => ({
+      const pools: BranchPool[] = (branchesData ?? []).map((branch: any, idx) => ({
         id: branch.id,
-        name: branch.name,
+        name: useCityName ? (branch.city || branch.name) : branch.name,
         color: POOL_COLORS[idx % POOL_COLORS.length],
         adcoins: branchTotals.get(branch.id) ?? 0,
         rmValue: (branchTotals.get(branch.id) ?? 0) / adcoinPerRm,
@@ -1213,7 +1268,7 @@ export const getAdcoinPoolData = unstable_cache(
 export const getAdcoinProgressData = unstable_cache(
   async (userEmail: string): Promise<AdcoinProgressData> => {
     return withRetry(async () => {
-      const userBranchId = await getUserBranchIdByEmail(userEmail);
+      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
       // Get pool limit = total adcoin balance of team members (instructor, admin, branch_admin)
       let teamQuery = supabaseAdmin
@@ -1222,8 +1277,8 @@ export const getAdcoinProgressData = unstable_cache(
         .in('role', ['instructor', 'admin', 'branch_admin'])
         .is('deleted_at', null);
 
-      if (userBranchId) {
-        teamQuery = teamQuery.eq('branch_id', userBranchId);
+      if (dashBranchIds) {
+        teamQuery = teamQuery.in('branch_id', dashBranchIds);
       }
 
       const { data: teamMembers } = await teamQuery;
@@ -1238,8 +1293,8 @@ export const getAdcoinProgressData = unstable_cache(
         .select('id')
         .is('deleted_at', null);
 
-      if (userBranchId) {
-        studentQuery = studentQuery.eq('branch_id', userBranchId);
+      if (dashBranchIds) {
+        studentQuery = studentQuery.in('branch_id', dashBranchIds);
       }
 
       const { data: students } = await studentQuery;

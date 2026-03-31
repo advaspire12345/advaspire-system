@@ -21,6 +21,8 @@ import type { TransferParticipant } from "@/data/users";
 interface TransactionsTableProps {
   initialData: TransactionDisplayRow[];
   participants: TransferParticipant[];
+  hideBranch?: boolean;
+  currentUserId?: string;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -74,7 +76,7 @@ function getAmountDisplay(amount: number) {
   return <span className="font-bold">{Math.abs(amount).toLocaleString()}</span>;
 }
 
-export function TransactionsTable({ initialData, participants }: TransactionsTableProps) {
+export function TransactionsTable({ initialData, participants, hideBranch, currentUserId }: TransactionsTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -175,7 +177,8 @@ export function TransactionsTable({ initialData, participants }: TransactionsTab
                       idx === 0 && "rounded-tl-lg",
                       idx === columns.length - 1 && "rounded-tr-lg",
                       col.align === "center" && "text-center",
-                      col.align === "right" && "text-right"
+                      col.align === "right" && "text-right",
+                      col.key === "branch" && hideBranch && "hidden"
                     )}
                     style={{ width: col.width }}
                   >
@@ -192,7 +195,7 @@ export function TransactionsTable({ initialData, participants }: TransactionsTab
               {paginatedData.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={columns.length}
+                    colSpan={hideBranch ? columns.length - 1 : columns.length}
                     className="h-24 text-center text-muted-foreground rounded-lg"
                   >
                     No transactions found.
@@ -284,7 +287,7 @@ export function TransactionsTable({ initialData, participants }: TransactionsTab
 
                     {/* Branch */}
                     <td
-                      className="px-4 py-3"
+                      className={cn("px-4 py-3", hideBranch && "hidden")}
                       style={{ width: columns[4].width }}
                     >
                       {row.branchName}
@@ -330,6 +333,7 @@ export function TransactionsTable({ initialData, participants }: TransactionsTab
       onOpenChange={setModalOpen}
       participants={participants}
       recipientId={null}
+      defaultSenderId={currentUserId}
       onSubmit={handleTransferSubmit}
     />
     </>
