@@ -6,8 +6,11 @@ import {
   updateTrial,
   updateTrialStatus,
   softDeleteTrial,
+  getTrialByPhone,
 } from "@/data/trial";
+import type { TrialRow } from "@/data/trial";
 import type { TrialSource, TrialStatus, Trial } from "@/db/schema";
+import { authorizeAction } from "@/data/permissions";
 
 export interface AddTrialData {
   parentName: string;
@@ -42,6 +45,8 @@ export async function addTrialAction(
   data: AddTrialData
 ): Promise<{ success: boolean; error?: string; trial?: Trial }> {
   try {
+    await authorizeAction('trials', 'can_create');
+
     const result = await createTrial({
       parent_name: data.parentName,
       parent_phone: data.parentPhone,
@@ -78,6 +83,8 @@ export async function updateTrialAction(
   data: UpdateTrialData
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('trials', 'can_edit');
+
     const result = await updateTrial(trialId, {
       parent_name: data.parentName,
       parent_phone: data.parentPhone,
@@ -114,6 +121,8 @@ export async function updateTrialStatusAction(
   status: TrialStatus
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('trials', 'can_edit');
+
     const result = await updateTrialStatus(trialId, status);
 
     if (!result) {
@@ -132,10 +141,29 @@ export async function updateTrialStatusAction(
   }
 }
 
+export async function checkPhoneAction(
+  phone: string
+): Promise<{ exists: boolean; trial?: TrialRow }> {
+  try {
+    await authorizeAction('trials', 'can_view');
+
+    const trial = await getTrialByPhone(phone);
+    if (trial) {
+      return { exists: true, trial };
+    }
+    return { exists: false };
+  } catch (error) {
+    console.error("Error checking phone:", error);
+    return { exists: false };
+  }
+}
+
 export async function deleteTrialAction(
   trialId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('trials', 'can_delete');
+
     const result = await softDeleteTrial(trialId);
 
     if (!result) {

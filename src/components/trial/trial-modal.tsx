@@ -14,6 +14,7 @@ import { FloatingSelect } from "@/components/ui/floating-select";
 import { cn } from "@/lib/utils";
 import type { TrialRow } from "@/data/trial";
 import type { TrialSource, TrialStatus } from "@/db/schema";
+import { checkPhoneAction } from "@/app/(dashboard)/trial/actions";
 
 export type TrialModalMode = "add" | "edit" | "delete";
 
@@ -36,7 +37,7 @@ interface TrialModalProps {
   branches: BranchOption[];
   courses: CourseOption[];
   onAdd: (data: TrialFormData) => Promise<void>;
-  onEdit: (data: TrialFormData) => Promise<void>;
+  onEdit: (data: TrialFormData, recordId?: string) => Promise<void>;
   onDelete: () => Promise<void>;
 }
 
@@ -70,6 +71,7 @@ const STATUS_OPTIONS = [
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" },
   { value: "no_show", label: "No Show" },
+  { value: "converted", label: "Converted" },
 ];
 
 export function TrialModal({
@@ -86,6 +88,9 @@ export function TrialModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Duplicate phone detection state
+  const [duplicateRecord, setDuplicateRecord] = useState<TrialRow | null>(null);
+
   // Form fields
   const [parentName, setParentName] = useState("");
   const [parentPhone, setParentPhone] = useState("");
@@ -100,9 +105,13 @@ export function TrialModal({
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<TrialStatus>("pending");
 
+  // Effective mode: switches from "add" to "edit" when duplicate phone found
+  const effectiveMode = mode === "add" && duplicateRecord ? "edit" : mode;
+
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open) {
+      setDuplicateRecord(null);
       if (mode === "add") {
         setParentName("");
         setParentPhone("");
@@ -169,6 +178,30 @@ export function TrialModal({
     setError(null);
 
     try {
+      // Check for duplicate phone when adding (first time only)
+      if (mode === "add" && !duplicateRecord) {
+        const phoneCheck = await checkPhoneAction(parentPhone.trim());
+        if (phoneCheck.exists && phoneCheck.trial) {
+          // Populate form with existing data and switch to edit mode
+          const existing = phoneCheck.trial;
+          setDuplicateRecord(existing);
+          setParentName(existing.parentName);
+          setParentPhone(existing.parentPhone);
+          setParentEmail(existing.parentEmail ?? "");
+          setChildName(existing.childName);
+          setChildAge(String(existing.childAge));
+          setBranchId(existing.branchId);
+          setCourseId(existing.courseId ?? "");
+          setSource(existing.source as TrialSource);
+          setScheduledDate(existing.scheduledDate);
+          setScheduledTime(existing.scheduledTime);
+          setMessage(existing.message ?? "");
+          setStatus(existing.status as TrialStatus);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       const formData: TrialFormData = {
         parentName: parentName.trim(),
         parentPhone: parentPhone.trim(),
@@ -186,6 +219,9 @@ export function TrialModal({
 
       if (mode === "delete") {
         await onDelete();
+      } else if (duplicateRecord) {
+        // Editing an existing duplicate record
+        await onEdit(formData, duplicateRecord.id);
       } else if (mode === "add") {
         await onAdd(formData);
       } else {
@@ -202,6 +238,7 @@ export function TrialModal({
   const isReadonly = mode === "delete";
 
   const getModalTitle = () => {
+    if (duplicateRecord) return "Edit Trial";
     if (mode === "add") return "Add Trial";
     if (mode === "delete") return "Delete Trial";
     return "Edit Trial";
@@ -209,16 +246,19 @@ export function TrialModal({
 
   const getSubmitButtonText = () => {
     if (isSubmitting) {
+      if (duplicateRecord) return "Saving...";
       if (mode === "add") return "Adding...";
       if (mode === "delete") return "Deleting...";
       return "Saving...";
     }
+    if (duplicateRecord) return "Save Changes";
     if (mode === "add") return "Add Trial";
     if (mode === "delete") return "Confirm Delete";
     return "Save Changes";
   };
 
   const getSubtitleText = () => {
+    if (duplicateRecord) return "Update existing trial details";
     if (mode === "add") return "Create a new trial booking";
     if (mode === "delete") return "This action cannot be undone";
     return "Update trial details";
@@ -254,6 +294,17 @@ export function TrialModal({
               Are you sure you want to delete this trial booking? This action
               cannot be undone.
             </p>
+          )}
+
+          {duplicateRecord && (
+            <div className="mt-4 rounded-[10px] border border-amber-300 bg-amber-50 p-4">
+              <p className="text-sm font-bold text-amber-800">
+                This phone number already exists in the system.
+              </p>
+              <p className="text-sm text-amber-700 mt-1">
+                The form has been pre-filled with the existing record. You can now edit and save changes.
+              </p>
+            </div>
           )}
 
           <div className="space-y-5 mt-8">
@@ -505,7 +556,7 @@ export function TrialModal({
                   value={status}
                   onChange={(val) => setStatus(val as TrialStatus)}
                   options={STATUS_OPTIONS}
-                  disabled={mode === "add"}
+                  disabled={mode === "add" && !duplicateRecord}
                 />
               )}
             </div>

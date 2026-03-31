@@ -1,17 +1,21 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingSelect } from "@/components/ui/floating-select";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type {
   ExaminationTableRow,
-  EligibleStudent,
   ExaminationStatus,
+  StudentExamOption,
 } from "@/db/schema";
 import type { ExaminationFormPayload } from "@/app/(dashboard)/examination/actions";
 
@@ -34,7 +38,7 @@ interface ExaminationModalProps {
   onOpenChange: (open: boolean) => void;
   mode: ExaminationModalMode;
   record: ExaminationTableRow | null;
-  eligibleStudents: EligibleStudent[];
+  allStudents: StudentExamOption[];
   examiners: ExaminerOption[];
   courses: CourseOption[];
   onAdd: (payload: ExaminationFormPayload) => Promise<void>;
@@ -51,12 +55,14 @@ const STATUS_OPTIONS: { value: ExaminationStatus; label: string }[] = [
   { value: "absent", label: "Absent" },
 ];
 
+const readonlyFieldClass = "bg-muted/50 cursor-not-allowed opacity-70";
+
 export function ExaminationModal({
   open,
   onOpenChange,
   mode,
   record,
-  eligibleStudents,
+  allStudents,
   examiners,
   courses,
   onAdd,
@@ -69,6 +75,7 @@ export function ExaminationModal({
 
   // Form state
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
+  const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string>("");
   const [examName, setExamName] = useState("");
   const [examLevel, setExamLevel] = useState<number>(1);
   const [examDate, setExamDate] = useState(
@@ -87,6 +94,7 @@ export function ExaminationModal({
 
       if (mode === "edit" && record) {
         setSelectedStudentId(record.studentId);
+        setSelectedEnrollmentId("");
         setExamName(record.examName);
         setExamLevel(record.examLevel);
         setExamDate(record.examDate);
@@ -96,6 +104,7 @@ export function ExaminationModal({
         setStatus(record.status);
       } else if (mode === "add") {
         setSelectedStudentId("");
+        setSelectedEnrollmentId("");
         setExamName("");
         setExamLevel(1);
         setExamDate(new Date().toISOString().split("T")[0]);
@@ -109,33 +118,48 @@ export function ExaminationModal({
 
   // Get selected student info
   const selectedStudent = useMemo(() => {
-    if (mode === "edit" && record) {
-      return {
-        studentId: record.studentId,
-        studentName: record.studentName,
-        enrollmentId: null,
-        courseId: record.courseId,
-        courseName: record.courseName,
-        currentLevel: record.currentLevel,
-      };
-    }
-    return eligibleStudents.find((s) => s.studentId === selectedStudentId);
-  }, [selectedStudentId, eligibleStudents, mode, record]);
+    return allStudents.find((s) => s.studentId === selectedStudentId);
+  }, [selectedStudentId, allStudents]);
 
-  // Auto-generate exam name when student is selected
+  // Get selected enrollment info
+  const selectedEnrollment = useMemo(() => {
+    if (!selectedStudent) return null;
+    return selectedStudent.enrollments.find(
+      (e) => e.enrollmentId === selectedEnrollmentId
+    );
+  }, [selectedStudent, selectedEnrollmentId]);
+
+  // Auto-select first enrollment when student changes
   useEffect(() => {
-    if (mode === "add" && selectedStudent) {
-      const level = selectedStudent.currentLevel + 1;
-      setExamLevel(level);
-      setExamName(`Level ${level} Assessment`);
+    if (mode === "add" && selectedStudent && selectedStudent.enrollments.length > 0) {
+      setSelectedEnrollmentId(selectedStudent.enrollments[0].enrollmentId);
     }
-  }, [selectedStudent, mode]);
+  }, [mode, selectedStudent]);
+
+  // Auto-generate exam name and level when enrollment is selected
+  useEffect(() => {
+    if (mode === "add" && selectedEnrollment) {
+      const level = selectedEnrollment.currentLevel;
+      setExamLevel(level);
+      setExamName(`${selectedEnrollment.courseName} Level ${level}`);
+    }
+  }, [selectedEnrollment, mode]);
+
+  // Keep exam name in sync with level changes
+  useEffect(() => {
+    if (mode === "add" && selectedEnrollment) {
+      setExamName(`${selectedEnrollment.courseName} Level ${examLevel}`);
+    }
+  }, [examLevel, selectedEnrollment, mode]);
 
   // Get course info for max levels
   const courseInfo = useMemo(() => {
-    if (!selectedStudent) return null;
-    return courses.find((c) => c.id === selectedStudent.courseId);
-  }, [selectedStudent, courses]);
+    if (mode === "edit" && record) {
+      return courses.find((c) => c.id === record.courseId);
+    }
+    if (!selectedEnrollment) return null;
+    return courses.find((c) => c.id === selectedEnrollment.courseId);
+  }, [selectedEnrollment, courses, mode, record]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,10 +169,9 @@ export function ExaminationModal({
     try {
       const payload: ExaminationFormPayload = {
         studentId: selectedStudentId || record?.studentId || "",
-        enrollmentId:
-          mode === "add" && selectedStudent
-            ? (selectedStudent as EligibleStudent).enrollmentId
-            : null,
+        enrollmentId: selectedEnrollment
+          ? selectedEnrollment.enrollmentId
+          : null,
         examName,
         examLevel,
         examDate,
@@ -194,23 +217,32 @@ export function ExaminationModal({
     }
   };
 
-  // Student options for add mode
+  // Student options for dropdown - all students
   const studentOptions = useMemo(() => {
-    return eligibleStudents.map((s) => ({
-      value: s.studentId,
-      label: `${s.studentName} - ${s.courseName} (Level ${s.currentLevel})`,
+    return allStudents.map((s) => {
+      const hasEligible = s.enrollments.some((e) => e.isEligible);
+      return {
+        value: s.studentId,
+        label: `${s.studentName} - ${s.branchName}${hasEligible ? " ★" : ""}`,
+      };
+    });
+  }, [allStudents]);
+
+  // Program options for selected student
+  const programOptions = useMemo(() => {
+    if (!selectedStudent) return [];
+    return selectedStudent.enrollments.map((e) => ({
+      value: e.enrollmentId,
+      label: `${e.courseName}${e.isEligible ? " ★ Eligible" : ""}`,
     }));
-  }, [eligibleStudents]);
+  }, [selectedStudent]);
 
   // Examiner options
   const examinerOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select examiner" },
-      ...examiners.map((e) => ({
-        value: e.id,
-        label: e.name,
-      })),
-    ];
+    return examiners.map((e) => ({
+      value: e.id,
+      label: e.name,
+    }));
   }, [examiners]);
 
   // Level options (1 to max levels of course)
@@ -226,21 +258,23 @@ export function ExaminationModal({
   if (mode === "delete") {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-md">
-          <DialogTitle className="text-xl font-bold">
-            Delete Examination
-          </DialogTitle>
+        <DialogContent className="sm:max-w-md p-0" floatingCloseButton>
+          <div className="max-h-[90vh] overflow-y-auto p-10">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold">
+                Delete Examination
+              </DialogTitle>
+            </DialogHeader>
 
-          {success ? (
-            <div className="flex flex-col items-center py-8">
-              <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
-              <p className="text-lg font-medium">
-                Examination deleted successfully
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="py-4">
+            {success ? (
+              <div className="flex flex-col items-center py-8">
+                <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
+                <p className="text-lg font-medium">
+                  Examination deleted successfully
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-5 mt-8">
                 <p className="text-muted-foreground">
                   Are you sure you want to delete the examination for{" "}
                   <span className="font-bold text-foreground">
@@ -248,43 +282,39 @@ export function ExaminationModal({
                   </span>
                   ?
                 </p>
-                <p className="text-sm text-muted-foreground mt-2">
+                <p className="text-sm text-muted-foreground">
                   Exam: {record?.examName} (Level {record?.examLevel})
                 </p>
-              </div>
 
-              {error && (
-                <div className="flex items-center gap-2 p-3 bg-red-50 text-red-600 rounded-lg mb-4">
-                  <AlertTriangle className="h-4 w-4" />
-                  <span className="text-sm">{error}</span>
+                {error && (
+                  <div className="flex items-center gap-2 p-3 bg-red-50 text-red-600 rounded-lg">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="text-sm">{error}</span>
+                  </div>
+                )}
+
+                <div className="mt-12">
+                  <Button
+                    onClick={handleDelete}
+                    disabled={isLoading}
+                    className="w-full h-[50px] bg-[#fd434f] hover:bg-[#e03a45] text-white font-bold rounded-[10px]"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      "Delete Examination"
+                    )}
+                  </Button>
+                  <span className="text-center block mt-2 text-xs text-muted-foreground">
+                    This action cannot be undone
+                  </span>
                 </div>
-              )}
-
-              <div className="flex gap-3 justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => onOpenChange(false)}
-                  disabled={isLoading}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleDelete}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Deleting...
-                    </>
-                  ) : (
-                    "Delete"
-                  )}
-                </Button>
               </div>
-            </>
-          )}
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     );
@@ -293,220 +323,235 @@ export function ExaminationModal({
   // Add/Edit form
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogTitle className="text-xl font-bold">
-          {mode === "add" ? "Add Examination" : "Edit Examination"}
-        </DialogTitle>
+      <DialogContent className="sm:max-w-lg p-0" floatingCloseButton>
+        <div className="max-h-[90vh] overflow-y-auto p-10">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">
+              {mode === "add" ? "Add Examination" : "Edit Examination"}
+            </DialogTitle>
+          </DialogHeader>
 
-        {success ? (
-          <div className="flex flex-col items-center py-8">
-            <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
-            <p className="text-lg font-medium">
-              {mode === "add"
-                ? "Examination created successfully"
-                : "Examination updated successfully"}
-            </p>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Student Selection (Add mode only) */}
-            {mode === "add" && (
-              <div className="space-y-2">
+          {success ? (
+            <div className="flex flex-col items-center py-8">
+              <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
+              <p className="text-lg font-medium">
+                {mode === "add"
+                  ? "Examination created successfully"
+                  : "Examination updated successfully"}
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-5 mt-8">
+              {/* Student Selection / Display */}
+              {mode === "add" ? (
                 <FloatingSelect
-                  id="student"
-                  label="Select Student"
-                  value={selectedStudentId}
-                  onChange={(value) => setSelectedStudentId(value)}
-                  options={[
-                    { value: "", label: "Select eligible student..." },
-                    ...studentOptions,
-                  ]}
-                  required
+                  id="select-student"
+                  label="Student"
+                  placeholder="Choose a student..."
                   searchable
+                  value={selectedStudentId}
+                  onChange={setSelectedStudentId}
+                  options={studentOptions}
                 />
-                {eligibleStudents.length === 0 && (
-                  <p className="text-sm text-amber-600">
-                    No students are currently eligible for examination. Students
-                    become eligible when their attendance meets the required
-                    sessions for level up.
-                  </p>
-                )}
-              </div>
-            )}
+              ) : (
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value={record?.studentName ?? ""}
+                    className={cn(
+                      "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                      readonlyFieldClass
+                    )}
+                  />
+                  <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                    Student
+                  </label>
+                </div>
+              )}
 
-            {/* Student Info (Edit mode) */}
-            {mode === "edit" && record && (
-              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                <Avatar className="h-12 w-12">
-                  <AvatarImage src={record.studentPhoto || undefined} />
-                  <AvatarFallback className="bg-gradient-to-r from-[#615DFA] to-[#23D2E2] text-white">
-                    {record.studentName.charAt(0)}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-bold">{record.studentName}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {record.courseName} - Current Level: {record.currentLevel}
+              {/* Program + Exam Level (one row) */}
+              <div className="grid grid-cols-2 gap-4">
+                {mode === "add" ? (
+                  <FloatingSelect
+                    id="select-program"
+                    label="Program"
+                    placeholder={
+                      selectedStudentId
+                        ? "Select a program..."
+                        : "Select a student first..."
+                    }
+                    value={selectedEnrollmentId}
+                    onChange={setSelectedEnrollmentId}
+                    options={programOptions}
+                    disabled={!selectedStudentId}
+                  />
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      readOnly
+                      value={record?.courseName ?? "-"}
+                      className={cn(
+                        "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                        readonlyFieldClass
+                      )}
+                    />
+                    <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                      Program
+                    </label>
+                  </div>
+                )}
+
+                <FloatingSelect
+                  id="examLevel"
+                  label="Exam Level"
+                  value={String(examLevel)}
+                  onChange={(value) => setExamLevel(parseInt(value, 10))}
+                  options={levelOptions}
+                  required
+                />
+              </div>
+
+              {/* Eligibility info */}
+              {mode === "add" && selectedEnrollment && (
+                <div
+                  className={cn(
+                    "p-3 rounded-[10px] text-sm",
+                    selectedEnrollment.isEligible
+                      ? "bg-blue-50 text-blue-700"
+                      : "bg-amber-50 text-amber-700"
+                  )}
+                >
+                  <p>
+                    Sessions: {selectedEnrollment.sessionsAttended} /{" "}
+                    {selectedEnrollment.sessionsRequired} required
+                    {selectedEnrollment.isEligible
+                      ? " — Eligible for exam"
+                      : " — Not yet eligible"}
                   </p>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Selected student info (Add mode) */}
-            {mode === "add" && selectedStudent && (
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-700">
-                  <span className="font-medium">
-                    {selectedStudent.studentName}
-                  </span>{" "}
-                  is eligible for Level {selectedStudent.currentLevel + 1} exam
-                  in{" "}
-                  <span className="font-medium">
-                    {selectedStudent.courseName}
-                  </span>
-                </p>
-                <p className="text-xs text-blue-600 mt-1">
-                  Sessions attended:{" "}
-                  {(selectedStudent as EligibleStudent).sessionsAttended} /{" "}
-                  {(selectedStudent as EligibleStudent).sessionsRequired}{" "}
+              {/* Exam Date and Examiner */}
+              <div className="grid grid-cols-2 gap-4">
+                <FloatingInput
+                  id="examDate"
+                  label="Exam Date"
+                  type="date"
+                  value={examDate}
+                  onChange={(e) => setExamDate(e.target.value)}
                   required
-                </p>
+                />
+
+                <FloatingSelect
+                  id="examiner"
+                  label="Examiner (PIC)"
+                  placeholder="Select examiner..."
+                  value={examinerId}
+                  onChange={setExaminerId}
+                  options={examinerOptions}
+                  searchable
+                />
               </div>
-            )}
 
-            {/* Exam Details */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FloatingInput
-                id="examName"
-                label="Exam Name"
-                value={examName}
-                onChange={(e) => setExamName(e.target.value)}
-                required
-              />
+              {/* Mark and Status */}
+              <div className="grid grid-cols-2 gap-4">
+                <FloatingInput
+                  id="mark"
+                  label="Mark (0-100)"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={mark}
+                  onChange={(e) => setMark(e.target.value)}
+                />
 
-              <FloatingSelect
-                id="examLevel"
-                label="Exam Level"
-                value={String(examLevel)}
-                onChange={(value) => setExamLevel(parseInt(value, 10))}
-                options={levelOptions}
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FloatingInput
-                id="examDate"
-                label="Exam Date"
-                type="date"
-                value={examDate}
-                onChange={(e) => setExamDate(e.target.value)}
-                required
-              />
-
-              <FloatingSelect
-                id="examiner"
-                label="Examiner (PIC)"
-                value={examinerId}
-                onChange={(value) => setExaminerId(value)}
-                options={examinerOptions}
-                searchable
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FloatingInput
-                id="mark"
-                label="Mark (0-100)"
-                type="number"
-                min="0"
-                max="100"
-                value={mark}
-                onChange={(e) => setMark(e.target.value)}
-              />
-
-              <FloatingSelect
-                id="status"
-                label="Status"
-                value={status}
-                onChange={(value) => setStatus(value as ExaminationStatus)}
-                options={STATUS_OPTIONS.map((s) => ({
-                  value: s.value,
-                  label: s.label,
-                }))}
-                required
-              />
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label
-                htmlFor="notes"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
-                Notes / Detail
-              </label>
-              <textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#615DFA] resize-none"
-                rows={3}
-                placeholder="Add any notes about the examination..."
-              />
-            </div>
-
-            {/* Pass warning */}
-            {status === "pass" && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-sm text-green-700">
-                  <span className="font-medium">Note:</span> Setting status to
-                  &quot;Pass&quot; will automatically:
-                </p>
-                <ul className="list-disc list-inside text-sm text-green-600 mt-1">
-                  <li>Increase the student&apos;s level</li>
-                  <li>Generate a certificate</li>
-                </ul>
+                <FloatingSelect
+                  id="status"
+                  label="Status"
+                  value={status}
+                  onChange={(value) => setStatus(value as ExaminationStatus)}
+                  options={STATUS_OPTIONS.map((s) => ({
+                    value: s.value,
+                    label: s.label,
+                  }))}
+                  required
+                />
               </div>
-            )}
 
-            {/* Error message */}
-            {error && (
-              <div className="flex items-center gap-2 p-3 bg-red-50 text-red-600 rounded-lg">
-                <AlertTriangle className="h-4 w-4" />
-                <span className="text-sm">{error}</span>
+              {/* Notes */}
+              <div className="relative w-full">
+                <textarea
+                  id="notes"
+                  placeholder="Notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  className={cn(
+                    "peer w-full py-4 px-4 rounded-[10px] border border-[#ADAFCA] text-base font-bold text-foreground placeholder-transparent resize-none focus:outline-none focus:border-[#23D2E2]"
+                  )}
+                />
+                <label
+                  htmlFor="notes"
+                  className={cn(
+                    "pointer-events-none absolute left-3 px-1 font-bold bg-white transition-all text-[#ADAFCA]",
+                    notes ? "-top-2.5 text-xs" : "top-4 text-base",
+                    "peer-focus:-top-2.5 peer-focus:text-xs peer-focus:text-[#23D2E2]"
+                  )}
+                >
+                  Notes / Detail
+                </label>
               </div>
-            )}
 
-            {/* Form actions */}
-            <div className="flex gap-3 justify-end pt-4 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isLoading}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="bg-[#615DFA] hover:bg-[#615DFA]/90 text-white"
-                disabled={isLoading || (mode === "add" && !selectedStudentId)}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {mode === "add" ? "Creating..." : "Saving..."}
-                  </>
-                ) : mode === "add" ? (
-                  "Create Examination"
-                ) : (
-                  "Save Changes"
-                )}
-              </Button>
-            </div>
-          </form>
-        )}
+              {/* Pass warning */}
+              {status === "pass" && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-[10px] text-sm text-green-700">
+                  <p className="font-medium">Setting status to &quot;Pass&quot; will:</p>
+                  <ul className="list-disc list-inside text-green-600 mt-1">
+                    <li>Increase the student&apos;s level</li>
+                    <li>Generate a certificate</li>
+                  </ul>
+                </div>
+              )}
+
+              {/* Error message */}
+              {error && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 text-red-600 rounded-[10px]">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span className="text-sm">{error}</span>
+                </div>
+              )}
+
+              {/* Submit button */}
+              <div className="mt-12">
+                <Button
+                  type="submit"
+                  disabled={
+                    isLoading || (mode === "add" && !selectedStudentId)
+                  }
+                  className="w-full h-[50px] bg-[#23D2E2] hover:bg-[#18a9b8] text-white font-bold rounded-[10px]"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      {mode === "add" ? "Creating..." : "Saving..."}
+                    </>
+                  ) : mode === "add" ? (
+                    "Create Examination"
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+                <span className="text-center block mt-2 text-xs text-muted-foreground">
+                  {mode === "add"
+                    ? "Create a new examination record for the student"
+                    : "Update the examination details"}
+                </span>
+              </div>
+            </form>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

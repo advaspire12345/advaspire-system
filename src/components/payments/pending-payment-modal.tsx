@@ -31,6 +31,8 @@ export interface StudentOption {
   parentName: string | null;
   parentPhone: string | null;
   enrollments: StudentEnrollment[];
+  poolId?: string;
+  poolStudentIds?: string[];
 }
 
 export interface CourseOption {
@@ -78,6 +80,8 @@ export interface AddPaymentFormData {
   paymentMethod: PaymentMethod | null;
   paidAt: string | null;
   receiptPhoto: string | null;
+  poolId?: string;
+  poolStudentIds?: string[];
 }
 
 const PAYMENT_METHODS = [
@@ -185,14 +189,19 @@ export function PendingPaymentModal({
         await onApprove();
       } else if (mode === "add") {
         if (!onAdd || !selectedStudentId || !selectedPackageId) return;
+        // For shared pool entries, extract the real student ID and pass pool info
+        const isPool = selectedStudentId.startsWith("pool:");
+        const realStudentId = isPool ? selectedStudentId.split(":")[2] : selectedStudentId;
         await onAdd({
-          studentId: selectedStudentId,
+          studentId: realStudentId,
           courseId: selectedCourseId,
           packageId: selectedPackageId,
           price,
           paymentMethod: paymentMethod || null,
           paidAt: paidAt ? new Date(paidAt).toISOString() : null,
           receiptPhoto: receiptPhoto[0] || null,
+          poolId: selectedStudent?.poolId,
+          poolStudentIds: selectedStudent?.poolStudentIds,
         });
       } else {
         if (!record) return;
@@ -255,7 +264,7 @@ export function PendingPaymentModal({
   // Dropdown options
   const studentOptions = students.map((s) => ({
     value: s.id,
-    label: s.name,
+    label: s.poolId ? `${s.name} (Shared)` : s.name,
   }));
 
   // In add mode, use filtered courses based on student enrollments

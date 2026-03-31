@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingSelect } from "@/components/ui/floating-select";
 import { cn } from "@/lib/utils";
-import type { BranchEntry, AdminOption } from "@/data/branches";
+import type { BranchEntry, CompanyOption } from "@/data/branches";
+import type { BranchType, UserRole } from "@/db/schema";
 
 export type BranchModalMode = "add" | "edit" | "delete";
 
@@ -20,7 +21,9 @@ interface BranchModalProps {
   onOpenChange: (open: boolean) => void;
   mode: BranchModalMode;
   record: BranchEntry | null;
-  admins: AdminOption[];
+  companyOptions: CompanyOption[];
+  userRole: UserRole;
+  canCreateCompany: boolean;
   onAdd: (data: BranchFormData) => Promise<void>;
   onEdit: (data: BranchFormData) => Promise<void>;
   onDelete: () => Promise<void>;
@@ -28,24 +31,33 @@ interface BranchModalProps {
 
 export interface BranchFormData {
   name: string;
-  companyName: string | null;
+  type: BranchType;
+  parentId: string | null;
   address: string | null;
-  postcode: string | null;
   city: string | null;
-  state: string | null;
   phone: string | null;
   email: string | null;
   bankName: string | null;
   bankAccount: string | null;
-  adminId: string | null;
+  website: string | null;
+  logoUrl: string | null;
+  registrationNumber: string | null;
 }
+
+const TYPE_LABELS: Record<BranchType, string> = {
+  company: "Company",
+  hq: "HQ (Headquarters)",
+  branch: "Branch",
+};
 
 export function BranchModal({
   open,
   onOpenChange,
   mode,
   record,
-  admins,
+  companyOptions,
+  userRole,
+  canCreateCompany,
   onAdd,
   onEdit,
   onDelete,
@@ -54,46 +66,62 @@ export function BranchModal({
   const [error, setError] = useState<string | null>(null);
 
   // Form fields
+  const [type, setType] = useState<BranchType>("branch");
   const [name, setName] = useState("");
-  const [companyName, setCompanyName] = useState("");
+  const [parentId, setParentId] = useState("");
   const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [bankName, setBankName] = useState("");
   const [bankAccount, setBankAccount] = useState("");
-  const [adminId, setAdminId] = useState("");
+  const [website, setWebsite] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [registrationNumber, setRegistrationNumber] = useState("");
 
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open) {
       if (mode === "add") {
+        setType(canCreateCompany ? "branch" : "branch");
         setName("");
-        setCompanyName("");
+        setParentId("");
         setAddress("");
+        setCity("");
         setPhone("");
         setEmail("");
         setBankName("");
         setBankAccount("");
-        setAdminId("");
+        setWebsite("");
+        setLogoUrl("");
+        setRegistrationNumber("");
       } else if (record) {
+        setType(record.type);
         setName(record.branchName);
-        setCompanyName(record.branchCompany ?? "");
+        setParentId(record.parentId ?? "");
         setAddress(record.branchAddress ?? "");
+        setCity(record.city ?? "");
         setPhone(record.branchPhone ?? "");
         setEmail(record.branchEmail ?? "");
         setBankName(record.bankName ?? "");
         setBankAccount(record.bankAccount ?? "");
-        setAdminId(record.adminId ?? "");
+        setWebsite(record.website ?? "");
+        setLogoUrl(record.logoUrl ?? "");
+        setRegistrationNumber(record.registrationNumber ?? "");
       }
       setError(null);
     }
-  }, [open, record, mode]);
+  }, [open, record, mode, canCreateCompany]);
 
   const handleSubmit = async () => {
     // Validation (only for add/edit)
     if (mode !== "delete") {
       if (!name.trim()) {
-        setError("Please enter branch name");
+        setError("Please enter a name");
+        return;
+      }
+      if ((type === "hq" || type === "branch") && !parentId) {
+        setError("Please select a company");
         return;
       }
     }
@@ -104,16 +132,17 @@ export function BranchModal({
     try {
       const formData: BranchFormData = {
         name: name.trim(),
-        companyName: companyName.trim() || null,
+        type,
+        parentId: type !== "company" && parentId ? parentId : null,
         address: address.trim() || null,
-        postcode: null,
-        city: null,
-        state: null,
+        city: city.trim() || null,
         phone: phone.trim() || null,
         email: email.trim() || null,
         bankName: bankName.trim() || null,
         bankAccount: bankAccount.trim() || null,
-        adminId: adminId || null,
+        website: type === "company" ? (website.trim() || null) : null,
+        logoUrl: type === "company" ? (logoUrl.trim() || null) : null,
+        registrationNumber: type === "company" ? (registrationNumber.trim() || null) : null,
       };
 
       if (mode === "delete") {
@@ -134,9 +163,9 @@ export function BranchModal({
   const isReadonly = mode === "delete";
 
   const getModalTitle = () => {
-    if (mode === "add") return "Add Branch";
-    if (mode === "delete") return "Delete Branch";
-    return "Edit Branch";
+    if (mode === "add") return "Add Entry";
+    if (mode === "delete") return `Delete ${TYPE_LABELS[type]}`;
+    return `Edit ${TYPE_LABELS[type]}`;
   };
 
   const getSubmitButtonText = () => {
@@ -145,26 +174,44 @@ export function BranchModal({
       if (mode === "delete") return "Deleting...";
       return "Saving...";
     }
-    if (mode === "add") return "Add Branch";
+    if (mode === "add") return "Add";
     if (mode === "delete") return "Confirm Delete";
     return "Save Changes";
   };
 
   const getSubtitleText = () => {
-    if (mode === "add") return "Create a new branch";
+    if (mode === "add") return "Create a new company, HQ, or branch";
     if (mode === "delete") return "This action cannot be undone";
-    return "Update branch details";
+    return "Update details";
   };
 
   // For edit/delete mode, we need a record
   if (mode !== "add" && !record) return null;
 
-  const adminOptions = admins.map((a) => ({
-    value: a.id,
-    label: a.name,
+  const companySelectOptions = companyOptions.map((c) => ({
+    value: c.id,
+    label: c.name,
   }));
 
+  // Type options depend on permissions
+  const typeOptions = canCreateCompany
+    ? [
+        { value: "company", label: "Company" },
+        { value: "hq", label: "HQ (Headquarters)" },
+        { value: "branch", label: "Branch" },
+      ]
+    : [
+        { value: "hq", label: "HQ (Headquarters)" },
+        { value: "branch", label: "Branch" },
+      ];
+
   const readonlyFieldClass = "bg-muted/50 cursor-not-allowed opacity-70";
+
+  // Whether to show the parent company dropdown
+  const showParentCompany = type === "hq" || type === "branch";
+
+  // Admin editing their own company: hide type selector and city/area
+  const isAdminEditingCompany = mode === "edit" && type === "company" && userRole === "admin";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -178,13 +225,69 @@ export function BranchModal({
 
           {mode === "delete" && (
             <p className="text-sm text-muted-foreground mt-2">
-              Are you sure you want to delete this branch? This action
+              Are you sure you want to delete this {TYPE_LABELS[type].toLowerCase()}? This action
               cannot be undone.
             </p>
           )}
 
           <div className="space-y-5 mt-8">
-            {/* Branch Name */}
+            {/* Type Selector - hidden for admin editing company */}
+            {!isAdminEditingCompany && (isReadonly ? (
+              <div className="relative">
+                <input
+                  type="text"
+                  readOnly
+                  value={TYPE_LABELS[type]}
+                  className={cn(
+                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
+                    readonlyFieldClass
+                  )}
+                />
+                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                  Type
+                </label>
+              </div>
+            ) : (
+              <FloatingSelect
+                id="type"
+                label="Type"
+                placeholder="Select type..."
+                value={type}
+                onChange={(val) => setType(val as BranchType)}
+                options={typeOptions}
+              />
+            ))}
+
+            {/* Parent Company - for HQ and Branch */}
+            {showParentCompany && (
+              isReadonly ? (
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value={companyOptions.find((c) => c.id === parentId)?.name ?? "-"}
+                    className={cn(
+                      "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
+                      readonlyFieldClass
+                    )}
+                  />
+                  <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                    Company
+                  </label>
+                </div>
+              ) : (
+                <FloatingSelect
+                  id="parent-company"
+                  label="Company"
+                  placeholder="Select company..."
+                  value={parentId}
+                  onChange={setParentId}
+                  options={companySelectOptions}
+                />
+              )
+            )}
+
+            {/* Name */}
             {isReadonly ? (
               <div className="relative">
                 <input
@@ -197,40 +300,15 @@ export function BranchModal({
                   )}
                 />
                 <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                  Branch Name
+                  Name
                 </label>
               </div>
             ) : (
               <FloatingInput
                 id="name"
-                label="Branch Name"
+                label="Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-              />
-            )}
-
-            {/* Company Name */}
-            {isReadonly ? (
-              <div className="relative">
-                <input
-                  type="text"
-                  readOnly
-                  value={companyName || "-"}
-                  className={cn(
-                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
-                    readonlyFieldClass
-                  )}
-                />
-                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                  Company Name
-                </label>
-              </div>
-            ) : (
-              <FloatingInput
-                id="company-name"
-                label="Company Name"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
               />
             )}
 
@@ -258,6 +336,31 @@ export function BranchModal({
                 onChange={(e) => setAddress(e.target.value)}
               />
             )}
+
+            {/* City/Area - hidden for admin editing company */}
+            {!isAdminEditingCompany && (isReadonly ? (
+              <div className="relative">
+                <input
+                  type="text"
+                  readOnly
+                  value={city || "-"}
+                  className={cn(
+                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
+                    readonlyFieldClass
+                  )}
+                />
+                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                  City/Area
+                </label>
+              </div>
+            ) : (
+              <FloatingInput
+                id="city"
+                label="City/Area"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+              />
+            ))}
 
             {/* Phone and Email */}
             <div className="grid grid-cols-2 gap-4">
@@ -363,31 +466,83 @@ export function BranchModal({
               )}
             </div>
 
-            {/* Admin Select */}
-            {isReadonly ? (
-              <div className="relative">
-                <input
-                  type="text"
-                  readOnly
-                  value={admins.find((a) => a.id === adminId)?.name ?? "-"}
-                  className={cn(
-                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
-                    readonlyFieldClass
+            {/* Company-specific fields */}
+            {type === "company" && (
+              <>
+                {isReadonly ? (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      readOnly
+                      value={website || "-"}
+                      className={cn(
+                        "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
+                        readonlyFieldClass
+                      )}
+                    />
+                    <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                      Website
+                    </label>
+                  </div>
+                ) : (
+                  <FloatingInput
+                    id="website"
+                    label="Website"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                  />
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  {isReadonly ? (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        value={logoUrl || "-"}
+                        className={cn(
+                          "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
+                          readonlyFieldClass
+                        )}
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Logo URL
+                      </label>
+                    </div>
+                  ) : (
+                    <FloatingInput
+                      id="logo-url"
+                      label="Logo URL"
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                    />
                   )}
-                />
-                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                  Admin
-                </label>
-              </div>
-            ) : (
-              <FloatingSelect
-                id="admin"
-                label="Admin"
-                placeholder="Select admin..."
-                value={adminId}
-                onChange={setAdminId}
-                options={adminOptions}
-              />
+
+                  {isReadonly ? (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        value={registrationNumber || "-"}
+                        className={cn(
+                          "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
+                          readonlyFieldClass
+                        )}
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Registration No.
+                      </label>
+                    </div>
+                  ) : (
+                    <FloatingInput
+                      id="registration-number"
+                      label="Registration No."
+                      value={registrationNumber}
+                      onChange={(e) => setRegistrationNumber(e.target.value)}
+                    />
+                  )}
+                </div>
+              </>
             )}
 
             {/* Error Message */}

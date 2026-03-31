@@ -2,6 +2,7 @@
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import { updateAttendance, deleteAttendance } from "@/data/attendance";
+import { authorizeAction } from "@/data/permissions";
 import type { AttendanceStatus } from "@/db/schema";
 
 export interface UpdateAttendanceLogData {
@@ -14,6 +15,8 @@ export interface UpdateAttendanceLogData {
   notes: string;
   projectPhotos: string[];
   adcoin?: number;
+  lesson?: string;
+  mission?: string;
 }
 
 export async function updateAttendanceLogAction(
@@ -21,6 +24,8 @@ export async function updateAttendanceLogAction(
   data: UpdateAttendanceLogData
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('attendance_log', 'can_edit');
+
     const result = await updateAttendance(attendanceId, {
       status: data.status,
       class_type: data.classType,
@@ -31,6 +36,8 @@ export async function updateAttendanceLogAction(
       notes: data.notes || null,
       project_photos: data.projectPhotos.length > 0 ? data.projectPhotos : null,
       adcoin: data.adcoin ?? 0,
+      lesson: data.lesson || null,
+      mission: data.mission || null,
     });
 
     if (!result) {
@@ -53,6 +60,8 @@ export async function deleteAttendanceLogAction(
   attendanceId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('attendance_log', 'can_delete');
+
     const result = await deleteAttendance(attendanceId);
 
     if (!result) {

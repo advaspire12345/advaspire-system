@@ -122,6 +122,17 @@ export async function GET(request: NextRequest) {
           .single();
 
         if (pricingData) {
+          // Monthly packages cannot be shared — only session packages
+          if (pricingData.package_type === 'monthly') {
+            return NextResponse.json({
+              hasPool: false,
+              hasSiblingInCourse: false,
+              siblings: [],
+              siblingPackageInfo: null,
+              poolInfo: null,
+            });
+          }
+
           siblingPackageInfo = {
             packageId: pricingData.id,
             packageType: pricingData.package_type,

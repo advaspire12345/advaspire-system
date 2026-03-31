@@ -17,6 +17,8 @@ interface TransferAdcoinModalProps {
   onOpenChange: (open: boolean) => void;
   participants: TransferParticipant[];
   recipientId?: string | null;
+  /** Pre-select sender (current logged-in user). User can still change it. */
+  defaultSenderId?: string;
   onSubmit: (data: TransferFormData) => Promise<void>;
 }
 
@@ -42,6 +44,7 @@ export function TransferAdcoinModal({
   onOpenChange,
   participants,
   recipientId: initialRecipientId,
+  defaultSenderId,
   onSubmit,
 }: TransferAdcoinModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,7 +78,7 @@ export function TransferAdcoinModal({
   // Reset form when modal opens
   useEffect(() => {
     if (open) {
-      setSenderId("");
+      setSenderId(defaultSenderId ?? "");
       setRecipientId(initialRecipientId ?? "");
       setTransactionType("transfer");
       setAmount("");
@@ -83,7 +86,7 @@ export function TransferAdcoinModal({
       setPassword("");
       setError(null);
     }
-  }, [open, initialRecipientId]);
+  }, [open, initialRecipientId, defaultSenderId]);
 
   const handleSubmit = async () => {
     // Validation
@@ -215,10 +218,10 @@ export function TransferAdcoinModal({
               onChange={(e) => setMessage(e.target.value)}
             />
 
-            {/* Password Confirmation */}
+            {/* Sender's Password Confirmation */}
             <FloatingInput
               id="password"
-              label="Password"
+              label="Sender's Password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

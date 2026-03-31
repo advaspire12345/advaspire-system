@@ -60,8 +60,7 @@ export function AdcoinPool({ branches }: AdcoinPoolProps) {
   // Navigation
   const canNavigate = branches.length > 2;
   const leftBranch = branches[pairIndex];
-  const rightBranch =
-    branches[(pairIndex + 1) % branches.length] ?? leftBranch;
+  const rightBranch = branches[(pairIndex + 1) % branches.length] ?? leftBranch;
 
   function handlePrev() {
     if (!canNavigate) return;
@@ -84,11 +83,15 @@ export function AdcoinPool({ branches }: AdcoinPoolProps) {
           <CardTitle className="font-bold">Adcoin Pool</CardTitle>
         </CardHeader>
         <CardContent className="flex items-center justify-center h-64">
-          <p className="text-sm text-muted-foreground">No branch data available</p>
+          <p className="text-sm text-muted-foreground">
+            No branch data available
+          </p>
         </CardContent>
       </Card>
     );
   }
+
+  const isSingle = branches.length === 1;
 
   return (
     <Card className="h-full flex flex-col">
@@ -100,10 +103,7 @@ export function AdcoinPool({ branches }: AdcoinPoolProps) {
         {/* Main donut chart */}
         <div className="flex justify-center mb-4">
           <div className="relative h-40 w-40">
-            <svg
-              viewBox="0 0 140 140"
-              className="h-full w-full -rotate-90"
-            >
+            <svg viewBox="0 0 140 140" className="h-full w-full -rotate-90">
               {/* Background circle */}
               <circle
                 cx="70"
@@ -143,7 +143,9 @@ export function AdcoinPool({ branches }: AdcoinPoolProps) {
         </div>
 
         {/* Branch labels with navigation */}
-        <div className="mt-auto mb-4 flex items-stretch gap-4">
+        <div
+          className={`${isSingle ? "mt-10" : "mt-auto"} mb-4 flex items-stretch gap-4`}
+        >
           {/* Prev button */}
           <div className="flex items-center">
             {canNavigate && (
@@ -169,7 +171,7 @@ export function AdcoinPool({ branches }: AdcoinPoolProps) {
             <span className="mt-1 text-2xl font-black text-muted-foreground">
               {leftBranch.adcoins.toLocaleString()}
             </span>
-            <span className="font-semibold text-muted-foreground">
+            <span className="font-semibold text-muted-foreground text-center line-clamp-2">
               {leftBranch.name}
             </span>
             <span className="text-xs font-bold">
@@ -177,27 +179,30 @@ export function AdcoinPool({ branches }: AdcoinPoolProps) {
             </span>
           </div>
 
-          {/* Divider */}
-          <Separator orientation="vertical" className="h-16 self-center" />
+          {/* Divider + Right branch label (hidden for single branch) */}
+          {!isSingle && (
+            <>
+              <Separator orientation="vertical" className="h-16 self-center" />
 
-          {/* Right branch label */}
-          <div className="flex flex-1 flex-col items-center text-sm">
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-block h-2 w-2 rounded-sm"
-                style={{ backgroundColor: rightBranch.color }}
-              />
-            </div>
-            <span className="mt-1 text-2xl font-black text-muted-foreground">
-              {rightBranch.adcoins.toLocaleString()}
-            </span>
-            <span className="font-semibold text-muted-foreground">
-              {rightBranch.name}
-            </span>
-            <span className="text-xs font-bold">
-              (RM {rightBranch.rmValue.toFixed(2)})
-            </span>
-          </div>
+              <div className="flex flex-1 flex-col items-center text-sm">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-2 w-2 rounded-sm"
+                    style={{ backgroundColor: rightBranch.color }}
+                  />
+                </div>
+                <span className="mt-1 text-2xl font-black text-muted-foreground">
+                  {rightBranch.adcoins.toLocaleString()}
+                </span>
+                <span className="font-semibold text-muted-foreground text-center line-clamp-2">
+                  {rightBranch.name}
+                </span>
+                <span className="text-xs font-bold">
+                  (RM {rightBranch.rmValue.toFixed(2)})
+                </span>
+              </div>
+            </>
+          )}
 
           {/* Next button */}
           <div className="flex items-center">
@@ -214,59 +219,61 @@ export function AdcoinPool({ branches }: AdcoinPoolProps) {
           </div>
         </div>
 
-        {/* Mini donut charts */}
-        <div className="mt-2 flex items-stretch gap-4">
-          {[leftBranch, rightBranch].map((branch, idx) => {
-            const pct = getPercentage(branch);
-            const length = MINI_CIRCUMFERENCE * (pct / 100);
+        {/* Mini donut charts (hidden for single branch) */}
+        {!isSingle && (
+          <div className="mt-2 flex items-stretch gap-4">
+            {[leftBranch, rightBranch].map((branch, idx) => {
+              const pct = getPercentage(branch);
+              const length = MINI_CIRCUMFERENCE * (pct / 100);
 
-            return (
-              <div key={branch.id} className="flex flex-1 items-center">
-                {/* Mini donut */}
-                <div
-                  className={`flex flex-1 flex-col items-center justify-center ${
-                    idx === 0 ? "translate-x-3" : "-translate-x-3"
-                  }`}
-                >
-                  <div className="relative h-20 w-20 mb-1 flex items-center justify-center">
-                    <svg
-                      viewBox="0 0 80 80"
-                      className="h-full w-full -rotate-90"
-                    >
-                      <circle
-                        cx="40"
-                        cy="40"
-                        r={MINI_RADIUS}
-                        fill="none"
-                        stroke="hsl(var(--muted))"
-                        strokeWidth={MINI_STROKE}
-                      />
-                      <circle
-                        cx="40"
-                        cy="40"
-                        r={MINI_RADIUS}
-                        fill="none"
-                        stroke={branch.color}
-                        strokeWidth={MINI_STROKE}
-                        strokeDasharray={`${length} ${MINI_CIRCUMFERENCE - length}`}
-                        strokeDashoffset={0}
-                      />
-                    </svg>
+              return (
+                <div key={branch.id} className="flex flex-1 items-center">
+                  {/* Mini donut */}
+                  <div
+                    className={`flex flex-1 flex-col items-center justify-center ${
+                      idx === 0 ? "translate-x-3" : "-translate-x-3"
+                    }`}
+                  >
+                    <div className="relative h-20 w-20 mb-1 flex items-center justify-center">
+                      <svg
+                        viewBox="0 0 80 80"
+                        className="h-full w-full -rotate-90"
+                      >
+                        <circle
+                          cx="40"
+                          cy="40"
+                          r={MINI_RADIUS}
+                          fill="none"
+                          stroke="hsl(var(--muted))"
+                          strokeWidth={MINI_STROKE}
+                        />
+                        <circle
+                          cx="40"
+                          cy="40"
+                          r={MINI_RADIUS}
+                          fill="none"
+                          stroke={branch.color}
+                          strokeWidth={MINI_STROKE}
+                          strokeDasharray={`${length} ${MINI_CIRCUMFERENCE - length}`}
+                          strokeDashoffset={0}
+                        />
+                      </svg>
 
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <span className="text-lg font-bold">{pct}%</span>
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <span className="text-lg font-bold">{pct}%</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Divider between mini donuts */}
-                {idx === 0 && (
-                  <Separator orientation="vertical" className="h-10" />
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  {/* Divider between mini donuts */}
+                  {idx === 0 && (
+                    <Separator orientation="vertical" className="h-10" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

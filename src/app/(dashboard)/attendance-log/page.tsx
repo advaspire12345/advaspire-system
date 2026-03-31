@@ -4,6 +4,7 @@ import { Banner } from "@/components/ui/banner";
 import { AttendanceLogTable } from "@/components/attendance/attendance-log-table";
 import { getAttendanceLog } from "@/data/attendance";
 import { getAllInstructors } from "@/data/users";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 export default async function AttendanceLogPage() {
   const user = await getUser();
@@ -11,6 +12,10 @@ export default async function AttendanceLogPage() {
   if (!user?.email) {
     redirect("/login");
   }
+
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.attendance_log;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   // Fetch data in parallel
   const [attendanceLog, instructors] = await Promise.all([
@@ -28,7 +33,7 @@ export default async function AttendanceLogPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <AttendanceLogTable initialData={attendanceLog} instructors={instructors} />
+        <AttendanceLogTable initialData={attendanceLog} instructors={instructors} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} canEdit={perms?.can_edit} canDelete={perms?.can_delete} />
       </div>
     </main>
   );

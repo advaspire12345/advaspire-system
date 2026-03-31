@@ -60,6 +60,25 @@ export interface ParentOption {
   city: string | null;
 }
 
+export interface StudentSelectOption {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  gender: "male" | "female" | "other" | null;
+  schoolName: string | null;
+  photo: string | null;
+  coverPhoto: string | null;
+  branchId: string;
+  level: number;
+  adcoinBalance: number;
+  studentId: string | null;
+  enrolledCourseIds: string[];
+  parentId: string | null;
+  parentRelationship: string | null;
+}
+
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
 
 // Upload Image Field Component with immediate upload
@@ -179,6 +198,7 @@ export type StudentModalMode = "add" | "edit" | "delete";
 export interface StudentFormData {
   // Basic Info
   name: string;
+  username: string | null;
   email: string | null;
   phone: string | null;
   photoUrl: string | null;
@@ -214,9 +234,15 @@ export interface StudentFormData {
   numberOfSessions: number | null;
   scheduleEntries: { day: string; time: string }[];
 
+  // Existing student (when enrolling in new program)
+  existingStudentId: string | null;
+
   // Sibling Sharing
   shareWithSibling: boolean;
   existingPoolId: string | null;
+
+  // Enrollment Status (edit only)
+  enrollmentStatus: string | null;
 
   // Notes
   notes: string | null;
@@ -256,6 +282,7 @@ interface StudentModalProps {
   coursePricing: CoursePricingOption[];
   courseSlots: CourseSlotOption[];
   parents: ParentOption[];
+  students: StudentSelectOption[];
   onAdd: (data: StudentFormData) => Promise<void>;
   onEdit: (data: StudentFormData) => Promise<void>;
   onDelete: () => Promise<void>;
@@ -271,6 +298,14 @@ const GENDER_OPTIONS = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
   { value: "other", label: "Other/Prefer not to say" },
+];
+
+const ENROLLMENT_STATUS_OPTIONS = [
+  { value: "active", label: "Active" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "expired", label: "Expired" },
+  { value: "pending", label: "Pending" },
 ];
 
 const RELATIONSHIP_OPTIONS = [
@@ -292,6 +327,7 @@ export function StudentModal({
   coursePricing,
   courseSlots,
   parents,
+  students,
   onAdd,
   onEdit,
   onDelete,
@@ -307,6 +343,9 @@ export function StudentModal({
   const [poolSiblings, setPoolSiblings] = useState<string[]>([]);
   const [isGeneratingId, setIsGeneratingId] = useState(false);
 
+  // Track whether user is adding a new student or editing existing
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+
   // Store sibling's package info for restoring when switching package types
   const [siblingPackage, setSiblingPackage] = useState<{
     packageId: string | null;
@@ -317,6 +356,7 @@ export function StudentModal({
   // Form state
   const [formData, setFormData] = useState<StudentFormData>({
     name: "",
+    username: "",
     email: "",
     phone: "",
     photoUrl: null,
@@ -344,11 +384,21 @@ export function StudentModal({
     packageType: null,
     numberOfMonths: null,
     numberOfSessions: null,
+    existingStudentId: null,
     scheduleEntries: [],
     shareWithSibling: false,
     existingPoolId: null,
+    enrollmentStatus: null,
     notes: "",
   });
+
+  // Filter courses for existing students (exclude already enrolled programs) - add mode only
+  const availableCourses = useMemo(() => {
+    if (mode !== "add" || !selectedStudentId || selectedStudentId === "new") return courses;
+    const student = students.find((s) => s.id === selectedStudentId);
+    if (!student) return courses;
+    return courses.filter((c) => !student.enrolledCourseIds.includes(c.id));
+  }, [courses, students, selectedStudentId, mode]);
 
   // Filter pricing options based on selected course
   const availablePricing = useMemo(() => {
@@ -519,10 +569,10 @@ export function StudentModal({
     checkSiblingPool();
   }, [mode, formData.parentId, formData.courseId]);
 
-  // Auto-generate student ID when opening add modal
+  // Auto-generate student ID when add modal opens or "Add New Student" is selected
   useEffect(() => {
     const generateStudentId = async () => {
-      if (mode === "add" && open) {
+      if (mode === "add" && open && (!selectedStudentId || selectedStudentId === "new")) {
         setIsGeneratingId(true);
         try {
           const response = await fetch('/api/student/generate-id');
@@ -542,7 +592,7 @@ export function StudentModal({
     };
 
     generateStudentId();
-  }, [mode, open]);
+  }, [mode, open, selectedStudentId]);
 
   // Fetch pool siblings for edit mode when student is pooled
   useEffect(() => {
@@ -590,8 +640,15 @@ export function StudentModal({
       setSiblingPackage(null);
 
       if (mode === "add") {
+        setSelectedStudentId(null);
+      } else if (record) {
+        setSelectedStudentId(record.id);
+      }
+
+      if (mode === "add") {
         setFormData({
           name: "",
+          username: "",
           email: "",
           phone: "",
           photoUrl: null,
@@ -619,15 +676,18 @@ export function StudentModal({
           packageType: null,
           numberOfMonths: null,
           numberOfSessions: null,
+          existingStudentId: null,
           scheduleEntries: [],
           shareWithSibling: false,
           existingPoolId: null,
+          enrollmentStatus: null,
           notes: "",
         });
         setActiveTab("basic");
       } else if (record) {
         setFormData({
           name: record.name,
+          username: record.email ? record.email.split("@")[0] : "",
           email: record.email || "",
           phone: record.phone || "",
           photoUrl: record.photo || null,
@@ -668,8 +728,10 @@ export function StudentModal({
                 }));
               })()
             : [],
+          existingStudentId: null,
           shareWithSibling: record.isPooled || false,
           existingPoolId: record.poolId || null,
+          enrollmentStatus: record.enrollmentStatus || null,
           notes: "",
         });
         setActiveTab("basic");
@@ -679,9 +741,17 @@ export function StudentModal({
   }, [open, record, mode]);
 
   const handleSubmit = async () => {
-    // Basic validation
+    // Basic validation — always check name regardless of active tab
     if (activeTab === "basic") {
-      if (!formData.name.trim()) {
+      if (mode === "add" && selectedStudentId === "new" && !formData.name.trim()) {
+        setError("Student name is required");
+        return;
+      }
+      if (mode === "add" && !selectedStudentId) {
+        setError("Please select or add a student");
+        return;
+      }
+      if (mode === "edit" && !formData.name.trim()) {
         setError("Student name is required");
         return;
       }
@@ -699,6 +769,25 @@ export function StudentModal({
       const currentIndex = TABS.findIndex((tab) => tab.id === activeTab);
       if (currentIndex < TABS.length - 1) {
         setActiveTab(TABS[currentIndex + 1].id);
+        return;
+      }
+    }
+
+    // Final submission — validate basic info even if user navigated directly to enrollment tab
+    if (isLastTab && mode !== "delete") {
+      if (mode === "add" && selectedStudentId === "new" && !formData.name.trim()) {
+        setError("Student name is required. Please go back to Basic Info tab.");
+        setActiveTab("basic");
+        return;
+      }
+      if (mode === "add" && !selectedStudentId) {
+        setError("Please select or add a student in the Basic Info tab.");
+        setActiveTab("basic");
+        return;
+      }
+      if (mode === "edit" && !formData.name.trim()) {
+        setError("Student name is required. Please go back to Basic Info tab.");
+        setActiveTab("basic");
         return;
       }
     }
@@ -933,35 +1022,176 @@ export function StudentModal({
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {mode === "add" ? (
+                        <>
+                          {/* Student select + Student ID for existing student */}
+                          <div className={selectedStudentId === "new" ? "md:col-span-2" : ""}>
+                          <FloatingSelect
+                            label={selectedStudentId === "new" ? "Student" : "Student Full Name"}
+                            value={selectedStudentId || ""}
+                            onChange={(val) => {
+                              if (val === "new") {
+                                setSelectedStudentId("new");
+                                setFormData({
+                                  ...formData,
+                                  name: "",
+                                  username: "",
+                                  email: "",
+                                  phone: "",
+                                  photoUrl: null,
+                                  coverPhotoUrl: null,
+                                  dateOfBirth: "",
+                                  gender: null,
+                                  schoolName: "",
+                                  studentId: "",
+                                  level: 1,
+                                  adcoinBalance: 0,
+                                  existingStudentId: null,
+                                  courseId: "",
+                                  parentId: null,
+                                  parentName: "",
+                                  parentPhone: "",
+                                  parentEmail: "",
+                                  parentRelationship: null,
+                                  parentAddress: "",
+                                  parentPostcode: "",
+                                  parentCity: "",
+                                });
+                              } else if (val) {
+                                const selected = students.find((s) => s.id === val);
+                                if (selected) {
+                                  setSelectedStudentId(val);
+                                  // Auto-select parent if student has one
+                                  const parentUpdate: Partial<StudentFormData> = {};
+                                  if (selected.parentId) {
+                                    const selectedParent = parents.find((p) => p.id === selected.parentId);
+                                    if (selectedParent) {
+                                      parentUpdate.parentId = selectedParent.id;
+                                      parentUpdate.parentName = selectedParent.name;
+                                      parentUpdate.parentPhone = selectedParent.phone || "";
+                                      parentUpdate.parentEmail = selectedParent.email || "";
+                                      parentUpdate.parentAddress = selectedParent.address || "";
+                                      parentUpdate.parentPostcode = selectedParent.postcode || "";
+                                      parentUpdate.parentCity = selectedParent.city || "";
+                                      parentUpdate.parentRelationship = selected.parentRelationship || null;
+                                    }
+                                  }
+                                  setFormData({
+                                    ...formData,
+                                    name: selected.name,
+                                    username: selected.email ? selected.email.split("@")[0] : "",
+                                    email: selected.email || "",
+                                    phone: selected.phone || "",
+                                    photoUrl: selected.photo || null,
+                                    coverPhotoUrl: selected.coverPhoto || null,
+                                    dateOfBirth: selected.dateOfBirth || "",
+                                    gender: selected.gender || null,
+                                    schoolName: selected.schoolName || "",
+                                    studentId: selected.studentId || "",
+                                    branchId: selected.branchId,
+                                    level: selected.level,
+                                    adcoinBalance: selected.adcoinBalance,
+                                    existingStudentId: val,
+                                    courseId: "",
+                                    ...parentUpdate,
+                                  });
+                                }
+                              } else {
+                                setSelectedStudentId(null);
+                              }
+                            }}
+                            options={[
+                              { value: "new", label: "+ Add New Student" },
+                              ...students.map((s) => ({
+                                value: s.id,
+                                label: `${s.name}${s.studentId ? ` (${s.studentId})` : ""}`,
+                              })),
+                            ]}
+                            searchable
+                          />
+                          </div>
+                          {/* Student ID - shown next to select for initial state and existing student */}
+                          {selectedStudentId !== "new" && (
+                            <FloatingInput
+                              label="Student ID"
+                              value={isGeneratingId ? "Generating..." : (formData.studentId || "")}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  studentId: e.target.value,
+                                })
+                              }
+                              disabled={isGeneratingId || (!!selectedStudentId && selectedStudentId !== "new")}
+                            />
+                          )}
+                          {/* Full Name + Student ID row - only when adding new */}
+                          {selectedStudentId === "new" && (
+                            <>
+                              <FloatingInput
+                                label="Full Name"
+                                value={formData.name}
+                                onChange={(e) =>
+                                  setFormData({ ...formData, name: e.target.value })
+                                }
+                                required
+                              />
+                              <FloatingInput
+                                label="Student ID"
+                                value={isGeneratingId ? "Generating..." : (formData.studentId || "")}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    studentId: e.target.value,
+                                  })
+                                }
+                                disabled={isGeneratingId}
+                              />
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {/* Edit mode - plain inputs, no selection */}
+                          <FloatingInput
+                            label="Full Name"
+                            value={formData.name}
+                            onChange={(e) =>
+                              setFormData({ ...formData, name: e.target.value })
+                            }
+                            required
+                          />
+                          <FloatingInput
+                            label="Student ID"
+                            value={formData.studentId || ""}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                studentId: e.target.value,
+                              })
+                            }
+                          />
+                        </>
+                      )}
                       <FloatingInput
-                        label="Full Name"
-                        value={formData.name}
-                        onChange={(e) =>
-                          setFormData({ ...formData, name: e.target.value })
-                        }
-                        required
-                      />
-                      <FloatingInput
-                        label="Student ID"
-                        value={isGeneratingId ? "Generating..." : (formData.studentId || "")}
-                        onChange={(e) =>
+                        label="Username"
+                        value={formData.username || ""}
+                        onChange={(e) => {
+                          const username = e.target.value;
                           setFormData({
                             ...formData,
-                            studentId: e.target.value,
-                          })
-                        }
-                        disabled={isGeneratingId}
+                            username,
+                            email: username ? `${username}@example.com` : "",
+                          });
+                        }}
                       />
-                      <div className="md:col-span-2">
-                        <FloatingInput
-                          label="Email Address"
-                          type="email"
-                          value={formData.email || ""}
-                          onChange={(e) =>
-                            setFormData({ ...formData, email: e.target.value })
-                          }
-                        />
-                      </div>
+                      <FloatingInput
+                        label="Email Address"
+                        type="email"
+                        value={formData.email || ""}
+                        onChange={(e) =>
+                          setFormData({ ...formData, email: e.target.value })
+                        }
+                      />
 
                       <FloatingInput
                         label="Date of Birth"
@@ -1101,9 +1331,10 @@ export function StudentModal({
                           { value: "new", label: "+ Add New Parent" },
                           ...parents.map((p) => ({
                             value: p.id,
-                            label: `${p.name}${p.email ? ` (${p.email})` : ""}`,
+                            label: `${p.name}${p.phone ? ` (${p.phone})` : ""}${p.email ? ` - ${p.email}` : ""}`,
                           })),
                         ]}
+                        searchable
                       />
 
                       {/* Show existing parent info if selected */}
@@ -1277,7 +1508,7 @@ export function StudentModal({
                             scheduleEntries: [], // Reset schedule when course changes
                           })
                         }
-                        options={courses.map((c) => ({
+                        options={availableCourses.map((c) => ({
                           value: c.id,
                           label: c.name,
                         }))}
@@ -1298,14 +1529,30 @@ export function StudentModal({
                       <FloatingInput
                         label="Adcoin Balance"
                         type="number"
+                        min={0}
                         value={formData.adcoinBalance.toString()}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
                           setFormData({
                             ...formData,
-                            adcoinBalance: parseInt(e.target.value) || 0,
-                          })
-                        }
+                            adcoinBalance: val < 0 ? 0 : val,
+                          });
+                        }}
                       />
+                      {/* Enrollment Status - Edit mode only */}
+                      {mode === "edit" && (
+                        <FloatingSelect
+                          label="Status"
+                          value={formData.enrollmentStatus || ""}
+                          onChange={(val) =>
+                            setFormData({
+                              ...formData,
+                              enrollmentStatus: val || null,
+                            })
+                          }
+                          options={ENROLLMENT_STATUS_OPTIONS}
+                        />
+                      )}
                     </div>
 
                     {/* Package Type Selection - Only show if program has pricing */}
@@ -1327,10 +1574,15 @@ export function StudentModal({
                             ? "grid-cols-3"
                             : "grid-cols-2"
                         )}>
-                          {hasMonthlyPricing && (
+                          {hasMonthlyPricing && (() => {
+                            // Disable Monthly when sibling sharing is available (session-based siblings detected)
+                            const siblingCanShare = mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse);
+                            return (
                             <button
                               type="button"
+                              disabled={!!siblingCanShare}
                               onClick={() => {
+                                if (siblingCanShare) return;
                                 // If sibling has monthly package, restore it
                                 if (formData.shareWithSibling && siblingPackage?.packageType === "monthly") {
                                   setFormData({
@@ -1350,18 +1602,21 @@ export function StudentModal({
                               }}
                               className={cn(
                                 "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
-                                formData.packageType === "monthly"
-                                  ? "border-[#23D2E2] bg-[#23D2E2]/10"
-                                  : "border-border hover:border-[#23D2E2]/50",
+                                siblingCanShare
+                                  ? "border-border opacity-40 cursor-not-allowed"
+                                  : formData.packageType === "monthly"
+                                    ? "border-[#23D2E2] bg-[#23D2E2]/10"
+                                    : "border-border hover:border-[#23D2E2]/50",
                               )}
                             >
                               <span className="text-2xl mb-2">📅</span>
                               <span className="font-bold">Monthly</span>
                               <span className="text-xs text-muted-foreground">
-                                Pay per month
+                                {siblingCanShare ? "Not available for shared" : "Pay per month"}
                               </span>
                             </button>
-                          )}
+                            );
+                          })()}
                           {hasSessionPricing && (
                             <button
                               type="button"
@@ -1398,7 +1653,9 @@ export function StudentModal({
                             </button>
                           )}
                           {/* Shared button - show in add mode when siblings detected, or edit mode when student is pooled */}
-                          {((mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse))
+                          {/* Only for session packages — monthly packages cannot be shared */}
+                          {((mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse)
+                            && siblingPoolCheck.siblingPackageInfo?.packageType !== 'monthly')
                             || (mode === "edit" && record?.isPooled)) && (
                             <button
                               type="button"

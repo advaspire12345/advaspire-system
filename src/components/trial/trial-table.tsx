@@ -26,6 +26,10 @@ interface TrialTableProps {
   initialData: TrialRow[];
   branches: BranchOption[];
   courses: CourseOption[];
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  hideBranch?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -56,6 +60,7 @@ const STATUS_STYLES: Record<string, string> = {
   completed: "bg-green-100 text-green-700",
   cancelled: "bg-gray-100 text-gray-700",
   no_show: "bg-red-100 text-red-700",
+  converted: "bg-purple-100 text-purple-700",
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -73,12 +78,17 @@ const STATUS_LABELS: Record<string, string> = {
   completed: "Completed",
   cancelled: "Cancelled",
   no_show: "No Show",
+  converted: "Converted",
 };
 
 export function TrialTable({
   initialData,
   branches,
   courses,
+  canCreate,
+  canEdit,
+  canDelete,
+  hideBranch,
 }: TrialTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -138,6 +148,7 @@ export function TrialTable({
 
   // Handle add
   const handleAdd = async (formData: TrialFormData) => {
+    if (!canCreate) return;
     const result = await addTrialAction({
       parentName: formData.parentName,
       parentPhone: formData.parentPhone,
@@ -159,10 +170,12 @@ export function TrialTable({
   };
 
   // Handle edit
-  const handleEdit = async (formData: TrialFormData) => {
-    if (!selectedRecord) return;
+  const handleEdit = async (formData: TrialFormData, recordId?: string) => {
+    if (!canEdit) return;
+    const id = recordId || selectedRecord?.id;
+    if (!id) return;
 
-    const result = await updateTrialAction(selectedRecord.id, {
+    const result = await updateTrialAction(id, {
       parentName: formData.parentName,
       parentPhone: formData.parentPhone,
       parentEmail: formData.parentEmail,
@@ -185,6 +198,7 @@ export function TrialTable({
 
   // Handle delete
   const handleDelete = async () => {
+    if (!canDelete) return;
     if (!selectedRecord) return;
 
     const result = await deleteTrialAction(selectedRecord.id);
@@ -236,13 +250,15 @@ export function TrialTable({
             />
 
             {/* Add Trial Button */}
-            <Button
-              onClick={openAddModal}
-              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-            >
-              <Plus className="h-4 w-4" />
-              Add Trial
-            </Button>
+            {canCreate && (
+              <Button
+                onClick={openAddModal}
+                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+              >
+                <Plus className="h-4 w-4" />
+                Add Trial
+              </Button>
+            )}
           </div>
 
           {/* Table */}
@@ -260,6 +276,8 @@ export function TrialTable({
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
                         col.align === "right" && "text-right",
+                        col.key === "branch" && hideBranch && "hidden",
+                        col.key === "action" && !canEdit && !canDelete && "hidden",
                       )}
                       style={{
                         width: col.width,
@@ -280,7 +298,7 @@ export function TrialTable({
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length}
+                      colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       No trials found.
@@ -324,7 +342,7 @@ export function TrialTable({
 
                       {/* Branch */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", hideBranch && "hidden")}
                         style={{ width: columns[3].width }}
                       >
                         {row.branchName}
@@ -399,28 +417,32 @@ export function TrialTable({
 
                       {/* Action */}
                       <td
-                        className="px-4 py-3"
+                        className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")}
                         style={{ width: columns[11].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                            aria-label={`Edit trial for ${row.childName}`}
-                            title="Edit"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openDeleteModal(row)}
-                            className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                            aria-label={`Delete trial for ${row.childName}`}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              aria-label={`Edit trial for ${row.childName}`}
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              aria-label={`Delete trial for ${row.childName}`}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,8 @@ interface StudentAttendanceModalProps {
   onSubmit: (formData: AttendanceFormData) => Promise<void>;
   /** Function to fetch curriculum lessons for a course */
   fetchCurriculumLessons?: (courseId: string) => Promise<CurriculumLesson[]>;
+  /** If set, the instructor name is fixed (instructor role — auto-fill, read-only) */
+  currentUserName?: string;
 }
 
 export interface AttendanceFormData {
@@ -62,6 +64,13 @@ export interface AttendanceFormData {
   // Trial-specific field
   instructorFeedback?: string;
   isTrial?: boolean;
+  // Existing attendance ID for updates (prevents creating duplicates)
+  attendanceId?: string;
+  // Original slot info from enrollment schedule (never changes)
+  slotDay?: string;
+  slotTime?: string;
+  // Password for adcoin transfer verification
+  adcoinPassword?: string;
 }
 
 const DAYS_OF_WEEK = [
@@ -78,6 +87,11 @@ const CLASS_TYPES = [
   { value: "Physical", label: "Physical" },
   { value: "Online", label: "Online" },
 ];
+
+function getCurrentTime(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
 
 function getCurrentDayOfWeek(): string {
   const days = [
@@ -159,25 +173,34 @@ export function StudentAttendanceModal({
   instructors,
   onSubmit,
   fetchCurriculumLessons,
+  currentUserName,
 }: StudentAttendanceModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [duplicateError, setDuplicateError] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState("");
   const [classType, setClassType] = useState<"Physical" | "Online">("Physical");
   const [actualDay, setActualDay] = useState("");
   const [actualStartTime, setActualStartTime] = useState("");
-  const [instructorName, setInstructorName] = useState("");
+  const [instructorName, setInstructorName] = useState(currentUserName ?? "");
   const [lastActivity, setLastActivity] = useState("");
   const [adcoin, setAdcoin] = useState<number>(0);
   const [projectPhotos, setProjectPhotos] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [instructorFeedback, setInstructorFeedback] = useState("");
+  const [adcoinPassword, setAdcoinPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  // Track whether the adcoin field was touched by the user
+  const [adcoinTouched, setAdcoinTouched] = useState(false);
+  const originalAdcoinRef = useRef<number>(0);
 
   // Lesson and mission state
   const [lesson, setLesson] = useState("");
   const [mission, setMission] = useState("");
   const [curriculumLessons, setCurriculumLessons] = useState<CurriculumLesson[]>([]);
   const [isLoadingCurriculum, setIsLoadingCurriculum] = useState(false);
+  // Ref to skip mission reset when lesson is pre-filled on modal open
+  const skipMissionResetRef = useRef(false);
 
   // Check if the selected row is a trial
   const isTrial = selectedRow?.type === 'trial';
@@ -212,6 +235,10 @@ export function StudentAttendanceModal({
   // Reset form when modal opens or mode/selectedRow changes
   useEffect(() => {
     if (open) {
+      setDuplicateError("");
+      setAdcoinPassword("");
+      setPasswordError("");
+      setAdcoinTouched(false);
       if (mode === "add") {
         // Take Attendance mode - start fresh
         setSelectedStudentId("");
@@ -219,9 +246,10 @@ export function StudentAttendanceModal({
         setClassType("Physical");
         setActualDay(getCurrentDayOfWeek());
         setActualStartTime("");
-        setInstructorName("");
+        setInstructorName(currentUserName ?? "");
         setLastActivity("");
         setAdcoin(0);
+        originalAdcoinRef.current = 0;
         setProjectPhotos([]);
         setReason("");
         setInstructorFeedback("");
@@ -236,23 +264,30 @@ export function StudentAttendanceModal({
         // If there's existing attendance data, use it; otherwise use defaults
         const existing = selectedRow.existingAttendance;
         if (existing) {
+          // Editing existing current week attendance — show saved data
           setClassType(existing.classType || "Physical");
           setActualDay(existing.actualDay || selectedRow.slotDay || selectedRow.dayOfWeek || getCurrentDayOfWeek());
           setActualStartTime(formatTimeForInput(existing.actualStartTime || selectedRow.slotTime || selectedRow.startTime));
-          setInstructorName(existing.instructorName || "");
+          setInstructorName(existing.instructorName || currentUserName || "");
           setLastActivity(existing.lastActivity || "");
-          setAdcoin(existing.adcoin || 0);
+          setAdcoin(existing.adcoin ?? 0);
+          originalAdcoinRef.current = existing.adcoin ?? 0;
           setProjectPhotos(existing.projectPhotos || []);
           setReason(existing.notes || "");
-          setLesson(existing.lesson || "");
-          setMission(existing.mission || "");
+          const initialLesson = existing.lesson || "";
+          const initialMission = existing.mission || "";
+          if (initialMission) skipMissionResetRef.current = true;
+          setLesson(initialLesson);
+          setMission(initialMission);
         } else {
+          // New attendance — default to current day and current time
           setClassType("Physical");
-          setActualDay(selectedRow.slotDay || selectedRow.dayOfWeek || getCurrentDayOfWeek());
-          setActualStartTime(formatTimeForInput(selectedRow.slotTime || selectedRow.startTime));
-          setInstructorName("");
+          setActualDay(getCurrentDayOfWeek());
+          setActualStartTime(getCurrentTime());
+          setInstructorName(currentUserName ?? "");
           setLastActivity("");
           setAdcoin(0);
+          originalAdcoinRef.current = 0;
           setProjectPhotos([]);
           setReason("");
           setInstructorFeedback("");
@@ -312,8 +347,12 @@ export function StudentAttendanceModal({
     }
   }, [open, mode, selectedEnrollment, selectedRow, fetchCurriculumLessons]);
 
-  // Reset mission when lesson changes
+  // Reset mission when lesson changes (but skip on initial pre-fill)
   useEffect(() => {
+    if (skipMissionResetRef.current) {
+      skipMissionResetRef.current = false;
+      return;
+    }
     setMission("");
   }, [lesson]);
 
@@ -328,9 +367,10 @@ export function StudentAttendanceModal({
     }
   }, [mode, selectedStudentId, studentEnrollments]);
 
-  // Update times when enrollment changes
+  // Update times when enrollment changes (only in "add" mode — in present/absent mode
+  // the main open-effect already sets day/time from existing attendance data)
   useEffect(() => {
-    if (selectedEnrollment && mode !== "absent") {
+    if (selectedEnrollment && mode === "add") {
       setActualDay(selectedEnrollment.slotDay || selectedEnrollment.dayOfWeek || getCurrentDayOfWeek());
       setActualStartTime(formatTimeForInput(selectedEnrollment.slotTime || selectedEnrollment.startTime));
     }
@@ -341,11 +381,48 @@ export function StudentAttendanceModal({
     const enrollmentId = selectedEnrollment?.enrollmentId || selectedRow?.enrollmentId;
     if (!enrollmentId) return;
 
-    // Use existing attendance date if updating, otherwise use today's date
+    // Check for duplicate day + time within the same week for the same student
+    const studentId = selectedRow?.studentId || (mode === "add" ? selectedStudentId : undefined);
+    if (studentId && actualDay && actualStartTime) {
+      const currentAttendanceId = selectedRow?.existingAttendance?.id;
+      const normalizeTime = (t: string) => t.split(':').slice(0, 2).join(':');
+
+      const duplicate = allStudents.find(row => {
+        if (row.studentId !== studentId) return false;
+        if (!row.existingAttendance) return false;
+        // Skip the current record being edited
+        if (currentAttendanceId && row.existingAttendance.id === currentAttendanceId) return false;
+        // Check if same day AND same time
+        return (
+          row.existingAttendance.actualDay?.toLowerCase() === actualDay.toLowerCase() &&
+          normalizeTime(row.existingAttendance.actualStartTime || '') === normalizeTime(actualStartTime)
+        );
+      });
+
+      if (duplicate) {
+        setDuplicateError(
+          `This student already has attendance on ${actualDay} at ${actualStartTime} (${duplicate.courseName}). Please choose a different day or time.`
+        );
+        return;
+      }
+    }
+
+    setDuplicateError("");
+    setPasswordError("");
+
+    // Require password only when adcoin was changed by the user and the new value differs
+    const adcoinRequiresPassword = mode !== "absent" && !isTrial && adcoinTouched && adcoin !== originalAdcoinRef.current;
+    if (adcoinRequiresPassword && !adcoinPassword.trim()) {
+      setPasswordError("Please enter your password to transfer adcoin.");
+      return;
+    }
+
+    // Use existing attendance date if updating, otherwise calculate from the SLOT's day (not user-changed day).
+    // This keeps the date tied to the enrollment slot so it can be matched back after refresh.
     const existingDate = selectedRow?.existingAttendance?.date;
     const attendanceDate = existingDate
       ? (existingDate.includes('T') ? existingDate.split('T')[0] : existingDate)
-      : format(new Date(), "yyyy-MM-dd");
+      : getDateForDayInCurrentWeek(selectedRow?.slotDay || actualDay);
 
     setIsSubmitting(true);
     try {
@@ -365,10 +442,20 @@ export function StudentAttendanceModal({
         mission: mode === "absent" ? "" : mission,
         instructorFeedback: isTrial ? instructorFeedback : undefined,
         isTrial: isTrial,
+        attendanceId: selectedRow?.existingAttendance?.id || undefined,
+        // Original slot info — used for permanent slot matching
+        slotDay: selectedRow?.slotDay || undefined,
+        slotTime: selectedRow?.slotTime || selectedRow?.startTime || undefined,
+        // Password for adcoin transfer verification
+        adcoinPassword: adcoinRequiresPassword ? adcoinPassword : undefined,
       });
       onOpenChange(false);
     } catch (error) {
       console.error("Failed to submit attendance:", error);
+      // Show API error (e.g. duplicate) to the user
+      if (error instanceof Error && error.message) {
+        setDuplicateError(error.message);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -405,9 +492,9 @@ export function StudentAttendanceModal({
     });
   }, [studentEnrollments]);
 
-  // Show all programs in dropdown, but use student's enrollment if available
-  const programOptions = allUniquePrograms.map((p) => ({
-    value: p.courseName, // Use courseName as value to match across students
+  // Show only the selected student's enrolled programs, or all programs if no student selected
+  const programOptions = (selectedStudentId ? studentPrograms : allUniquePrograms).map((p) => ({
+    value: p.courseName,
     label: p.courseName,
   }));
 
@@ -605,7 +692,7 @@ export function StudentAttendanceModal({
                   label="Day"
                   placeholder="Select day..."
                   value={actualDay}
-                  onChange={setActualDay}
+                  onChange={(val) => { setActualDay(val); setDuplicateError(""); }}
                   options={DAYS_OF_WEEK}
                 />
               ) : (
@@ -631,7 +718,7 @@ export function StudentAttendanceModal({
                     type="time"
                     id="start-time"
                     value={actualStartTime}
-                    onChange={(e) => setActualStartTime(e.target.value)}
+                    onChange={(e) => { setActualStartTime(e.target.value); setDuplicateError(""); }}
                     className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] bg-transparent px-4 text-base font-bold text-foreground transition-colors focus:border-[#23D2E2] focus:outline-none"
                   />
                   <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
@@ -655,6 +742,11 @@ export function StudentAttendanceModal({
                 </div>
               )}
             </div>
+
+            {/* Duplicate day+time error */}
+            {duplicateError && (
+              <p className="text-sm font-medium text-red-500">{duplicateError}</p>
+            )}
 
             {/* Activity Fields - Only for add/present modes */}
             {showActivityFields && (
@@ -704,21 +796,52 @@ export function StudentAttendanceModal({
                       id="adcoin"
                       label="Adcoin"
                       type="number"
+                      min={0}
                       value={adcoin === 0 ? "" : adcoin.toString()}
-                      onChange={(e) => setAdcoin(Number(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setAdcoin(val < 0 ? 0 : val || 0);
+                        setAdcoinTouched(true);
+                      }}
                     />
                   )}
 
-                  <FloatingSelect
-                    id="select-instructor"
-                    label="Instructor Name"
-                    placeholder="Select instructor..."
-                    value={instructorName}
-                    onChange={setInstructorName}
-                    options={instructorOptions}
-                    searchable
-                  />
+                  {currentUserName ? (
+                    <FloatingInput
+                      id="instructor-name"
+                      label="Instructor Name"
+                      value={currentUserName}
+                      readOnly
+                      className="bg-muted"
+                    />
+                  ) : (
+                    <FloatingSelect
+                      id="select-instructor"
+                      label="Instructor Name"
+                      placeholder="Select instructor..."
+                      value={instructorName}
+                      onChange={setInstructorName}
+                      options={instructorOptions}
+                      searchable
+                    />
+                  )}
                 </div>
+
+                {/* Password field — shown only when adcoin value was changed */}
+                {!isTrial && adcoinTouched && adcoin !== originalAdcoinRef.current && (
+                  <>
+                    <FloatingInput
+                      id="adcoin-password"
+                      label="Password to Transfer Adcoin"
+                      type="password"
+                      value={adcoinPassword}
+                      onChange={(e) => { setAdcoinPassword(e.target.value); setPasswordError(""); }}
+                    />
+                    {passwordError && (
+                      <p className="text-sm font-medium text-red-500 -mt-3">{passwordError}</p>
+                    )}
+                  </>
+                )}
 
                 <PhotoUpload
                   value={projectPhotos}

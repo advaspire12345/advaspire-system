@@ -9,7 +9,9 @@ import {
   generateCertificateNumber,
 } from "@/data/examinations";
 import { updateStudent } from "@/data/students";
+import { updateEnrollment } from "@/data/enrollments";
 import { supabaseAdmin } from "@/db";
+import { authorizeAction } from "@/data/permissions";
 import type { ExaminationStatus } from "@/db/schema";
 
 export interface ExaminationFormPayload {
@@ -31,30 +33,43 @@ export async function createExaminationAction(
   payload: ExaminationFormPayload
 ): Promise<{ success: boolean; error?: string; examId?: string }> {
   try {
-    // Check for existing active exam for this student at this level
-    const { data: existingExam } = await supabaseAdmin
+    await authorizeAction('examinations', 'can_create');
+
+    // Check for existing active exam for this student + program + level
+    let duplicateQuery = supabaseAdmin
       .from("examinations")
       .select("id")
       .eq("student_id", payload.studentId)
       .eq("exam_level", payload.examLevel)
       .is("deleted_at", null)
-      .not("status", "in", '("fail", "absent")')
-      .maybeSingle();
+      .not("status", "in", "(fail,absent)");
+
+    if (payload.enrollmentId) {
+      duplicateQuery = duplicateQuery.eq("enrollment_id", payload.enrollmentId);
+    }
+
+    const { data: existingExam } = await duplicateQuery.maybeSingle();
 
     if (existingExam) {
       return {
         success: false,
-        error: "Student already has an active examination for this level",
+        error: "Student already has an active examination for this program and level",
       };
     }
 
-    // Count reattempts for this student and level
-    const { count: reattemptCount } = await supabaseAdmin
+    // Count reattempts for this student + program + level
+    let reattemptQuery = supabaseAdmin
       .from("examinations")
       .select("id", { count: "exact", head: true })
       .eq("student_id", payload.studentId)
       .eq("exam_level", payload.examLevel)
       .is("deleted_at", null);
+
+    if (payload.enrollmentId) {
+      reattemptQuery = reattemptQuery.eq("enrollment_id", payload.enrollmentId);
+    }
+
+    const { count: reattemptCount } = await reattemptQuery;
 
     const exam = await createExamination({
       student_id: payload.studentId,
@@ -75,7 +90,7 @@ export async function createExaminationAction(
 
     // If status is 'pass', handle level up and certificate generation
     if (payload.status === "pass") {
-      await handlePassStatus(exam.id, payload.studentId, payload.examLevel);
+      await handlePassStatus(exam.id, payload.studentId);
     }
 
     revalidatePath("/examination");
@@ -98,6 +113,8 @@ export async function updateExaminationAction(
   payload: Partial<ExaminationFormPayload>
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('examinations', 'can_edit');
+
     // Get the current exam to check for status change
     const currentExam = await getExaminationById(examId);
     if (!currentExam) {
@@ -124,11 +141,7 @@ export async function updateExaminationAction(
       payload.status === "pass" &&
       currentExam.status !== "pass"
     ) {
-      await handlePassStatus(
-        examId,
-        currentExam.student_id,
-        payload.examLevel ?? currentExam.exam_level
-      );
+      await handlePassStatus(examId, currentExam.student_id);
     }
 
     revalidatePath("/examination");
@@ -150,6 +163,8 @@ export async function deleteExaminationAction(
   examId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('examinations', 'can_delete');
+
     const success = await softDeleteExamination(examId);
 
     if (!success) {
@@ -168,91 +183,63 @@ export async function deleteExaminationAction(
 }
 
 /**
- * Handle pass status - level up student and generate certificate
+ * Handle pass status - level up student enrollment and generate certificate number
  */
 async function handlePassStatus(
   examId: string,
-  studentId: string,
-  examLevel: number
+  studentId: string
 ): Promise<void> {
-  // 1. Get student and course info
-  const { data: student } = await supabaseAdmin
-    .from("students")
-    .select(`
-      id,
-      level,
-      name,
-      enrollments!inner(
-        course:courses(
-          id,
-          name,
-          number_of_levels
-        )
-      )
-    `)
-    .eq("id", studentId)
-    .is("deleted_at", null)
-    .single();
-
-  if (!student) {
-    console.error("Student not found for level up:", studentId);
+  // 1. Get the exam to find enrollment_id
+  const exam = await getExaminationById(examId);
+  if (!exam) {
+    console.error("Exam not found for level up:", examId);
     return;
   }
 
-  const enrollment = (student.enrollments as any)?.[0];
-  const course = enrollment?.course;
-  const maxLevels = course?.number_of_levels || 10;
-  const currentLevel = student.level || 1;
+  // 2. Level up the enrollment (per-program level)
+  if (exam.enrollment_id) {
+    const { data: enrollment } = await supabaseAdmin
+      .from("enrollments")
+      .select("id, level, course:courses(number_of_levels)")
+      .eq("id", exam.enrollment_id)
+      .single();
 
-  // 2. Level up the student (only if examLevel matches current level + 1 and not at max)
-  if (examLevel === currentLevel + 1 && currentLevel < maxLevels) {
-    await updateStudent(studentId, { level: examLevel });
-  } else if (examLevel === currentLevel && currentLevel < maxLevels) {
-    // If exam was for current level, level them up
-    await updateStudent(studentId, { level: currentLevel + 1 });
-  }
+    if (enrollment) {
+      const currentLevel = enrollment.level || 1;
+      const newLevel = currentLevel + 1;
+      const maxLevels = (enrollment.course as any)?.number_of_levels || 0;
 
-  // 3. Generate certificate number
-  const certificateNumber = await generateCertificateNumber();
+      // Level up
+      await updateEnrollment(exam.enrollment_id, { level: newLevel });
 
-  // 4. Trigger certificate generation
-  try {
-    // Call the certificate generation API
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const response = await fetch(`${baseUrl}/api/certificate/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        examId,
-        studentId,
-        studentName: student.name,
-        courseName: course?.name || "Course",
-        examLevel,
-        certificateNumber,
-      }),
-    });
+      // If passed the last level, mark enrollment as completed
+      if (maxLevels > 0 && currentLevel >= maxLevels) {
+        await updateEnrollment(exam.enrollment_id, { status: "completed" });
 
-    if (response.ok) {
-      const { certificateUrl } = await response.json();
-      // Update exam with certificate info
-      await updateExamination(examId, {
-        certificate_number: certificateNumber,
-        certificate_url: certificateUrl,
-      });
-    } else {
-      console.error("Certificate generation failed:", await response.text());
-      // Still save the certificate number even if generation failed
-      await updateExamination(examId, {
-        certificate_number: certificateNumber,
-      });
+        // Redistribute pool sessions if this student was in a pool
+        const { redistributePoolOnInactive } = await import("@/data/pools");
+        await redistributePoolOnInactive(exam.enrollment_id, studentId);
+      }
     }
-  } catch (error) {
-    console.error("Error generating certificate:", error);
-    // Save certificate number anyway
-    await updateExamination(examId, {
-      certificate_number: certificateNumber,
-    });
   }
+
+  // 3. Also update student level to the max across all enrollments
+  const { data: enrollments } = await supabaseAdmin
+    .from("enrollments")
+    .select("level")
+    .eq("student_id", studentId)
+    .is("deleted_at", null);
+
+  if (enrollments && enrollments.length > 0) {
+    const maxLevel = Math.max(...enrollments.map((e) => e.level || 1));
+    await updateStudent(studentId, { level: maxLevel });
+  }
+
+  // 4. Generate certificate number and save it
+  const certificateNumber = await generateCertificateNumber();
+  await updateExamination(examId, {
+    certificate_number: certificateNumber,
+  });
 }
 
 /**
@@ -263,6 +250,8 @@ export async function uploadCertificateAction(
   certificateUrl: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await authorizeAction('examinations', 'can_edit');
+
     const updated = await updateExamination(examId, {
       certificate_url: certificateUrl,
     });

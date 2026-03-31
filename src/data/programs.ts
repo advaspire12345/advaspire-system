@@ -52,8 +52,35 @@ export async function createCategory(categoryData: CourseCategoryInsert): Promis
 // ============================================
 
 export async function getProgramsForTable(userEmail: string): Promise<ProgramTableRow[]> {
-  const { getUserBranchIdByEmail } = await import("./users");
-  const userBranchId = await getUserBranchIdByEmail(userEmail);
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
 
   // Fetch programs with related data
   const { data: programs, error } = await supabaseAdmin
@@ -72,7 +99,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
       assessment_enabled,
       levelling_time_minutes,
       course_categories(name),
-      course_branches(branch_id, branches(id, name)),
+      course_branches(branch_id, branches(id, name, city)),
       course_sections(
         id,
         course_lessons(id)
@@ -104,7 +131,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
   // Fetch slot counts per course and branch
   const { data: slotsData } = await supabaseAdmin
     .from("course_slots")
-    .select("course_id, branch_id, branches(name)")
+    .select("course_id, branch_id, branches(name, city)")
     .in("course_id", courseIds)
     .is("deleted_at", null);
 
@@ -112,7 +139,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
   const slotCountsMap = new Map<string, { branch_name: string; count: number }[]>();
   (slotsData ?? []).forEach((slot: any) => {
     const courseId = slot.course_id;
-    const branchName = slot.branches?.name || "Unknown";
+    const branchName = useCityName ? (slot.branches?.city || slot.branches?.name || "Unknown") : (slot.branches?.name || "Unknown");
 
     if (!slotCountsMap.has(courseId)) {
       slotCountsMap.set(courseId, []);
@@ -129,7 +156,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
 
   return (programs ?? []).map((program: any) => {
     const branchNames = program.course_branches
-      ?.map((cb: any) => cb.branches?.name)
+      ?.map((cb: any) => useCityName ? (cb.branches?.city || cb.branches?.name) : cb.branches?.name)
       .filter(Boolean) ?? [];
 
     const lessonCount = program.course_sections?.reduce(

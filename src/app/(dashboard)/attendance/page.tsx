@@ -6,7 +6,8 @@ import {
   getEnrollmentsForAttendance,
   getAllStudentsForManualAttendance,
 } from "@/data/attendance";
-import { getAllInstructors } from "@/data/users";
+import { getAllInstructorsForAttendance, getInstructorsByBranchForAttendance, getUserByEmail } from "@/data/users";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 // Disable caching for this page to always get fresh data
 export const dynamic = 'force-dynamic';
@@ -19,11 +20,30 @@ export default async function AttendancePage() {
     redirect("/login");
   }
 
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.attendance;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+
+  const dbUser = await getUserByEmail(user.email);
+  const role = permData!.role;
+
+  // Fetch instructors based on role:
+  // - instructor: no need to fetch (auto-fill with own name)
+  // - branch_admin: instructors + branch_admins in same branch
+  // - admin/super_admin: all instructors + branch_admins
+  const getInstructors = () => {
+    if (role === "instructor") return Promise.resolve([]);
+    if (role === "branch_admin" && dbUser?.branch_id) {
+      return getInstructorsByBranchForAttendance(dbUser.branch_id);
+    }
+    return getAllInstructorsForAttendance();
+  };
+
   // Fetch data in parallel
   const [enrollments, allStudentsForManual, instructors] = await Promise.all([
     getEnrollmentsForAttendance(user.email),
     getAllStudentsForManualAttendance(user.email),
-    getAllInstructors(),
+    getInstructors(),
   ]);
 
   return (
@@ -40,6 +60,9 @@ export default async function AttendancePage() {
           initialData={enrollments}
           allStudentsForManualAdd={allStudentsForManual}
           instructors={instructors}
+          hideBranch={role === "branch_admin" || role === "instructor"}
+          canCreate={perms?.can_create}
+          currentUserName={role === "instructor" ? dbUser?.name : undefined}
         />
       </div>
     </main>

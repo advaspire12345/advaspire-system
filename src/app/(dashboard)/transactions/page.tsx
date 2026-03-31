@@ -4,6 +4,7 @@ import { Banner } from "@/components/ui/banner";
 import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { getTransactionsForDisplay } from "@/data/adcoins";
 import { getTransferParticipants } from "@/data/users";
+import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 export default async function TransactionsPage() {
   const user = await getUser();
@@ -12,8 +13,12 @@ export default async function TransactionsPage() {
     redirect("/login");
   }
 
+  const permData = await getCurrentUserPermissions();
+  const perms = permData?.permissions.transactions;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+
   const [transactions, participants] = await Promise.all([
-    getTransactionsForDisplay(),
+    getTransactionsForDisplay(user.email),
     getTransferParticipants(),
   ]);
 
@@ -27,7 +32,7 @@ export default async function TransactionsPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <TransactionsTable initialData={transactions} participants={participants} />
+        <TransactionsTable initialData={transactions} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} currentUserId={permData!.userId} />
       </div>
     </main>
   );

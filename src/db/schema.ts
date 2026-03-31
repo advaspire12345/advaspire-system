@@ -32,7 +32,9 @@ export type AuditAction = 'INSERT' | 'UPDATE' | 'DELETE';
 
 export type TrialSource = 'walk_in' | 'phone' | 'online' | 'referral' | 'social_media' | 'other';
 
-export type TrialStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
+export type TrialStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'no_show' | 'converted';
+
+export type BranchType = 'company' | 'hq' | 'branch';
 
 // ============================================
 // SHARED SESSION POOL TYPES
@@ -84,6 +86,7 @@ export interface User {
   photo: string | null;
   phone: string | null;
   address: string | null;
+  city: string | null;
   cv_url: string | null;
   employed_date: string | null;
   status: TeamMemberStatus;
@@ -111,13 +114,18 @@ export interface AppSettings {
 export interface Branch {
   id: string;
   name: string;
-  company_name: string | null;
+  type: BranchType;
+  parent_id: string | null;
   address: string | null;
+  city: string | null;
   phone: string | null;
   email: string | null;
   bank_name: string | null;
   bank_account: string | null;
   admin_id: string | null;
+  website: string | null;
+  logo_url: string | null;
+  registration_number: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -225,6 +233,8 @@ export interface Enrollment {
   sessions_remaining: number;
   period_start: string | null;
   pool_id: string | null;
+  level: number;
+  adcoin_balance: number;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -253,6 +263,8 @@ export interface Attendance {
   adcoin: number;
   lesson: string | null;
   mission: string | null;
+  slot_day: string | null;
+  slot_time: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -485,6 +497,7 @@ export interface UserInsert {
   auth_id?: string | null;
   phone?: string | null;
   address?: string | null;
+  city?: string | null;
   cv_url?: string | null;
   employed_date?: string | null;
   status?: TeamMemberStatus;
@@ -499,13 +512,18 @@ export interface AppSettingsInsert {
 
 export interface BranchInsert {
   name: string;
-  company_name?: string | null;
+  type?: BranchType;
+  parent_id?: string | null;
   address?: string | null;
+  city?: string | null;
   phone?: string | null;
   email?: string | null;
   bank_name?: string | null;
   bank_account?: string | null;
   admin_id?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  registration_number?: string | null;
 }
 
 export interface StudentInsert {
@@ -567,6 +585,8 @@ export interface EnrollmentInsert {
   sessions_remaining?: number;
   period_start?: string | null;
   pool_id?: string | null;
+  level?: number;
+  adcoin_balance?: number;
 }
 
 export interface AttendanceInsert {
@@ -587,6 +607,8 @@ export interface AttendanceInsert {
   adcoin?: number;
   lesson?: string | null;
   mission?: string | null;
+  slot_day?: string | null;
+  slot_time?: string | null;
 }
 
 export interface PaymentInsert {
@@ -689,6 +711,7 @@ export interface UserUpdate {
   photo?: string | null;
   phone?: string | null;
   address?: string | null;
+  city?: string | null;
   cv_url?: string | null;
   employed_date?: string | null;
   status?: TeamMemberStatus;
@@ -702,13 +725,18 @@ export interface AppSettingsUpdate {
 
 export interface BranchUpdate {
   name?: string;
-  company_name?: string | null;
+  type?: BranchType;
+  parent_id?: string | null;
   address?: string | null;
+  city?: string | null;
   phone?: string | null;
   email?: string | null;
   bank_name?: string | null;
   bank_account?: string | null;
   admin_id?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  registration_number?: string | null;
 }
 
 export interface StudentUpdate {
@@ -761,6 +789,8 @@ export interface EnrollmentUpdate {
   sessions_remaining?: number;
   period_start?: string | null;
   pool_id?: string | null;
+  level?: number;
+  adcoin_balance?: number;
 }
 
 export interface AttendanceUpdate {
@@ -778,6 +808,8 @@ export interface AttendanceUpdate {
   adcoin?: number;
   lesson?: string | null;
   mission?: string | null;
+  slot_day?: string | null;
+  slot_time?: string | null;
 }
 
 export interface PaymentUpdate {
@@ -1611,6 +1643,7 @@ export interface EligibleStudent {
   studentId: string;
   studentName: string;
   studentPhoto: string | null;
+  dateOfBirth: string | null;
   branchId: string;
   branchName: string;
   enrollmentId: string;
@@ -1620,3 +1653,96 @@ export interface EligibleStudent {
   sessionsAttended: number;
   sessionsRequired: number;
 }
+
+/**
+ * StudentExamOption - Student with enrollments for exam selection
+ */
+export interface StudentExamEnrollment {
+  enrollmentId: string;
+  courseId: string;
+  courseName: string;
+  currentLevel: number;
+  sessionsAttended: number;
+  sessionsRequired: number;
+  isEligible: boolean;
+}
+
+export interface StudentExamOption {
+  studentId: string;
+  studentName: string;
+  studentPhoto: string | null;
+  dateOfBirth: string | null;
+  branchId: string;
+  branchName: string;
+  enrollments: StudentExamEnrollment[];
+}
+
+// ============================================
+// PERMISSION TYPES
+// ============================================
+
+export type PermissionResource =
+  | 'dashboard'
+  | 'companies'
+  | 'branches'
+  | 'trials'
+  | 'students'
+  | 'examinations'
+  | 'programs'
+  | 'team'
+  | 'attendance'
+  | 'attendance_log'
+  | 'payment_record'
+  | 'pending_payments'
+  | 'leaderboard'
+  | 'transactions';
+
+export const ALL_RESOURCES: PermissionResource[] = [
+  'dashboard',
+  'companies',
+  'branches',
+  'trials',
+  'students',
+  'examinations',
+  'programs',
+  'team',
+  'attendance',
+  'attendance_log',
+  'payment_record',
+  'pending_payments',
+  'leaderboard',
+  'transactions',
+];
+
+export interface ResourcePermission {
+  can_view: boolean;
+  can_create: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+}
+
+export type PermissionsMap = Record<PermissionResource, ResourcePermission>;
+
+export interface UserPermission {
+  id: string;
+  user_id: string;
+  resource: PermissionResource;
+  can_view: boolean;
+  can_create: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type UserPermissionInsert = Omit<UserPermission, 'id' | 'created_at' | 'updated_at'>;
+export type UserPermissionUpdate = Partial<Pick<UserPermission, 'can_view' | 'can_create' | 'can_edit' | 'can_delete'>>;
+
+export interface AdminBranch {
+  id: string;
+  user_id: string;
+  branch_id: string;
+  created_at: string;
+}
+
+export type AdminBranchInsert = Omit<AdminBranch, 'id' | 'created_at'>;
