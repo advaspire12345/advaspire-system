@@ -150,6 +150,8 @@ export interface Student {
   branch_id: string;
   level: number;
   adcoin_balance: number;
+  username: string | null;
+  password_hash: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -233,6 +235,7 @@ export interface Enrollment {
   sessions_remaining: number;
   period_start: string | null;
   pool_id: string | null;
+  expires_at: string | null;
   level: number;
   adcoin_balance: number;
   created_at: string;
@@ -290,8 +293,39 @@ export interface Payment {
   pool_id: string | null;
   receipt_photo: string | null;
   notes: string | null;
+  voucher_id: string | null;
+  discount_amount: number | null;
+  invoice_snapshot: InvoiceSnapshot | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * InvoiceSnapshot - Frozen invoice data captured when payment is paid.
+ * After 1 week, this data is immutable and used for all invoice rendering.
+ */
+export interface InvoiceSnapshot {
+  billToName: string;
+  billToAddress: string | null;
+  billToContact: string | null;
+  studentName: string;
+  sharedStudentNames: string[] | null;
+  isSharedPackage: boolean;
+  courseName: string | null;
+  courseCode: string | null;
+  packageName: string | null;
+  packageDuration: number | null;
+  packageType: "monthly" | "session" | null;
+  price: number;
+  branchName: string;
+  branchCompanyName: string | null;
+  branchAddress: string | null;
+  branchPhone: string | null;
+  branchEmail: string | null;
+  branchBankName: string | null;
+  branchBankAccount: string | null;
+  items: Array<{ code: string; product: string; qty: number; rate: number }>;
+  total: number;
 }
 
 /**
@@ -539,6 +573,8 @@ export interface StudentInsert {
   branch_id: string;
   level?: number;
   adcoin_balance?: number;
+  username?: string | null;
+  password_hash?: string | null;
 }
 
 export interface ParentInsert {
@@ -585,6 +621,7 @@ export interface EnrollmentInsert {
   sessions_remaining?: number;
   period_start?: string | null;
   pool_id?: string | null;
+  expires_at?: string | null;
   level?: number;
   adcoin_balance?: number;
 }
@@ -627,6 +664,9 @@ export interface PaymentInsert {
   pool_id?: string | null;
   receipt_photo?: string | null;
   notes?: string | null;
+  voucher_id?: string | null;
+  discount_amount?: number | null;
+  invoice_snapshot?: InvoiceSnapshot | null;
 }
 
 export interface AdcoinTransactionInsert {
@@ -752,6 +792,8 @@ export interface StudentUpdate {
   branch_id?: string;
   level?: number;
   adcoin_balance?: number;
+  username?: string | null;
+  password_hash?: string | null;
 }
 
 export interface ParentUpdate {
@@ -789,6 +831,7 @@ export interface EnrollmentUpdate {
   sessions_remaining?: number;
   period_start?: string | null;
   pool_id?: string | null;
+  expires_at?: string | null;
   level?: number;
   adcoin_balance?: number;
 }
@@ -822,6 +865,9 @@ export interface PaymentUpdate {
   receipt_photo?: string | null;
   pool_id?: string | null;
   notes?: string | null;
+  voucher_id?: string | null;
+  discount_amount?: number | null;
+  invoice_snapshot?: InvoiceSnapshot | null;
 }
 
 export interface ItemUpdate {
@@ -1341,6 +1387,9 @@ export interface CoursePricing {
   duration: number;
   description: string | null;
   is_default: boolean;
+  expiry_months: number | null;
+  voucher_amount: number | null;
+  voucher_deadline_months: number | null;
   deleted_at: string | null;
 }
 
@@ -1423,6 +1472,9 @@ export interface CoursePricingInsert {
   duration: number;
   description?: string | null;
   is_default?: boolean;
+  expiry_months?: number | null;
+  voucher_amount?: number | null;
+  voucher_deadline_months?: number | null;
 }
 
 // ============================================
@@ -1483,6 +1535,42 @@ export interface CoursePricingUpdate {
   duration?: number;
   description?: string | null;
   is_default?: boolean;
+  expiry_months?: number | null;
+  voucher_amount?: number | null;
+  voucher_deadline_months?: number | null;
+}
+
+// ============================================
+// VOUCHER TYPES
+// ============================================
+
+export type VoucherStatus = 'available' | 'redeemed' | 'expired';
+
+export interface Voucher {
+  id: string;
+  student_id: string;
+  enrollment_id: string;
+  pricing_id: string;
+  course_id: string;
+  amount: number;
+  status: VoucherStatus;
+  earned_at: string;
+  redeemed_at: string | null;
+  redeemed_payment_id: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VoucherInsert {
+  student_id: string;
+  enrollment_id: string;
+  pricing_id: string;
+  course_id: string;
+  amount: number;
+  status?: VoucherStatus;
+  earned_at?: string;
+  expires_at?: string | null;
 }
 
 // ============================================

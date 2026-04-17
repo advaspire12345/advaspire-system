@@ -59,6 +59,7 @@ const columns = [
   { key: "package", label: "Package", width: "100px" },
   { key: "price", label: "Price", width: "90px", align: "right" as const },
   { key: "payMethod", label: "Pay Method", width: "100px" },
+  { key: "voucher", label: "Voucher", width: "70px", align: "center" as const },
   { key: "createdOn", label: "Created On", width: "100px" },
   { key: "paidOn", label: "Paid On", width: "100px" },
   { key: "receipt", label: "Receipt", width: "70px", align: "center" as const },
@@ -209,6 +210,8 @@ export function PendingPaymentTable({
           isSharedPackage: isShared,
           poolId: formData.poolId ?? null,
           sharedStudentNames: sharedNames,
+          hasVoucher: false,
+          voucherAmount: null,
         };
         setData((prev) => [newRow, ...prev]);
       } else {
@@ -517,10 +520,24 @@ export function PendingPaymentTable({
                           : "-"}
                       </td>
 
+                      {/* Voucher */}
+                      <td
+                        className="px-4 py-3 text-center"
+                        style={{ width: columns[7].width }}
+                      >
+                        {row.hasVoucher ? (
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">No</span>
+                        )}
+                      </td>
+
                       {/* Created On */}
                       <td
                         className="px-4 py-3"
-                        style={{ width: columns[7].width }}
+                        style={{ width: columns[8].width }}
                       >
                         {formatDate(row.createdAt)}
                       </td>
@@ -528,7 +545,7 @@ export function PendingPaymentTable({
                       {/* Paid On */}
                       <td
                         className="px-4 py-3"
-                        style={{ width: columns[8].width }}
+                        style={{ width: columns[9].width }}
                       >
                         {formatDate(row.paidAt)}
                       </td>
@@ -536,7 +553,7 @@ export function PendingPaymentTable({
                       {/* Receipt */}
                       <td
                         className="px-4 py-3 text-center"
-                        style={{ width: columns[9].width }}
+                        style={{ width: columns[10].width }}
                       >
                         {row.receiptPhoto ? (
                           <button
@@ -560,7 +577,7 @@ export function PendingPaymentTable({
                       {/* Phone */}
                       <td
                         className="px-4 py-3"
-                        style={{ width: columns[10].width }}
+                        style={{ width: columns[11].width }}
                       >
                         {row.parentPhone ?? row.studentPhone ?? "-"}
                       </td>
@@ -568,7 +585,7 @@ export function PendingPaymentTable({
                       {/* Status */}
                       <td
                         className="px-4 py-3 text-center"
-                        style={{ width: columns[11].width }}
+                        style={{ width: columns[12].width }}
                       >
                         {getStatusBadge(row.status)}
                       </td>
@@ -576,7 +593,7 @@ export function PendingPaymentTable({
                       {/* Actions */}
                       <td
                         className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")}
-                        style={{ width: columns[12].width }}
+                        style={{ width: columns[13].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
                           {/* Edit Button */}

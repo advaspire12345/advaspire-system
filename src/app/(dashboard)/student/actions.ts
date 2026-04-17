@@ -8,11 +8,12 @@ import {
   createEnrollment,
   linkParentToStudent,
 } from "@/data/students";
-import { createParent, getParentByEmail, updateParent } from "@/data/parents";
+import { createParentWithAuth, getParentByEmail, updateParent, ensureParentAuth } from "@/data/parents";
 import { checkEmailExists, getEmailConflictMessage } from "@/data/email-validation";
 import { createPayment } from "@/data/payments";
 import { supabaseAdmin } from "@/db";
 import { authorizeAction } from "@/data/permissions";
+import { hashPassword } from "@/lib/student-auth";
 import type { StudentInsert, StudentUpdate, EnrollmentInsert, ParentInsert, ParentUpdate, Gender, PaymentInsert, AdcoinTransactionInsert } from "@/db/schema";
 
 /**
@@ -71,6 +72,8 @@ export interface StudentFormPayload {
 
   // Student Account
   studentId: string | null;
+  username: string | null;
+  portalPassword: string | null;
   level: number | null;
   adcoinBalance: number;
 
@@ -177,6 +180,10 @@ export async function createStudentAction(
       }
 
       // 4. Create the student
+      const portalPasswordHash = payload.portalPassword?.trim()
+        ? await hashPassword(payload.portalPassword.trim())
+        : null;
+
       const studentData: StudentInsert = {
         student_id: studentId,
         name: payload.name,
@@ -190,6 +197,8 @@ export async function createStudentAction(
         branch_id: payload.branchId,
         level: payload.level || 1,
         adcoin_balance: payload.adcoinBalance || 0,
+        username: payload.username?.trim() || null,
+        password_hash: portalPasswordHash,
       };
 
       const student = await createStudent(studentData);
@@ -210,6 +219,8 @@ export async function createStudentAction(
         if (existingParent) {
           // Link existing parent instead of creating duplicate
           await linkParentToStudent(existingParent.id, studentDbId, payload.parentRelationship);
+          // Ensure existing parent has an auth account
+          await ensureParentAuth(existingParent.id);
         } else {
           // Email was already validated above, safe to create new parent
           const parentData: ParentInsert = {
@@ -221,7 +232,7 @@ export async function createStudentAction(
             city: payload.parentCity?.trim() || null,
           };
 
-          const parent = await createParent(parentData);
+          const parent = await createParentWithAuth(parentData);
           if (parent) {
             await linkParentToStudent(parent.id, studentDbId, payload.parentRelationship);
           }
@@ -301,8 +312,7 @@ export async function createStudentAction(
               .in('status', ['pending', 'paid']);
           }
         } else {
-          // Need to create a new pool with first sibling
-          // Check if parent has other children enrolled in this course
+          // Need to create a new pool — include ALL siblings enrolled in the same course
           const { data: parentStudents } = await supabaseAdmin
             .from('parent_students')
             .select('student_id')
@@ -310,18 +320,17 @@ export async function createStudentAction(
 
           const siblingStudentIds = (parentStudents ?? []).map(ps => ps.student_id);
 
-          // Find sibling enrollment in same course
-          const { data: siblingEnrollmentData } = await supabaseAdmin
+          // Find ALL sibling enrollments in same course (not just one)
+          const { data: siblingEnrollments } = await supabaseAdmin
             .from('enrollments')
             .select('id, student_id')
             .eq('course_id', payload.courseId)
             .in('student_id', siblingStudentIds)
             .neq('student_id', studentDbId)
             .eq('status', 'active')
-            .is('deleted_at', null)
-            .maybeSingle();
+            .is('deleted_at', null);
 
-          if (siblingEnrollmentData) {
+          if (siblingEnrollments && siblingEnrollments.length > 0) {
             // Get parent name and course name for pool name
             const { data: parentData } = await supabaseAdmin
               .from('parents')
@@ -335,39 +344,60 @@ export async function createStudentAction(
               .eq('id', payload.courseId)
               .single();
 
+            // Create pool with the first sibling + current student
+            const firstSibling = siblingEnrollments[0];
             const pool = await createPoolWithSiblings(
               payload.parentId,
               payload.courseId,
               payload.packageId,
               parentData?.name || 'Family',
               courseData?.name || 'Course',
-              { studentId: siblingEnrollmentData.student_id, enrollmentId: siblingEnrollmentData.id },
+              { studentId: firstSibling.student_id, enrollmentId: firstSibling.id },
               { studentId: studentDbId, enrollmentId: enrollmentId }
             );
 
             if (pool) {
-              console.log(`Created new sibling pool ${pool.id} with students`);
+              // Add remaining siblings (2nd, 3rd, etc.) to the pool
+              for (let i = 1; i < siblingEnrollments.length; i++) {
+                const sibling = siblingEnrollments[i];
+                await addStudentToPool(pool.id, sibling.student_id, sibling.id);
+                console.log(`Added sibling ${sibling.student_id} to pool ${pool.id}`);
+              }
 
-              // If there's a pending payment for the first sibling, convert it to pool payment
-              const { data: siblingPendingPayment } = await supabaseAdmin
+              const allMemberIds = [
+                ...siblingEnrollments.map(s => s.student_id),
+                studentDbId,
+              ];
+              console.log(`Created new sibling pool ${pool.id} with ${allMemberIds.length} students`);
+
+              // Convert any pending payments from siblings to pool payments
+              const { data: siblingPendingPayments } = await supabaseAdmin
                 .from('payments')
-                .select('id')
-                .eq('student_id', siblingEnrollmentData.student_id)
+                .select('id, student_id')
+                .in('student_id', siblingEnrollments.map(s => s.student_id))
                 .eq('course_id', payload.courseId)
-                .eq('status', 'pending')
-                .maybeSingle();
+                .eq('status', 'pending');
 
-              if (siblingPendingPayment) {
-                // Convert to shared pool payment
+              if (siblingPendingPayments && siblingPendingPayments.length > 0) {
+                // Convert the first pending payment to a pool payment, delete the rest
+                const firstPayment = siblingPendingPayments[0];
                 await supabaseAdmin
                   .from('payments')
                   .update({
                     pool_id: pool.id,
                     is_shared_package: true,
-                    shared_with: [siblingEnrollmentData.student_id, studentDbId],
+                    shared_with: allMemberIds,
                     notes: `Shared package for ${parentData?.name || 'Family'} siblings`,
                   })
-                  .eq('id', siblingPendingPayment.id);
+                  .eq('id', firstPayment.id);
+
+                // Remove duplicate pending payments from other siblings
+                for (let i = 1; i < siblingPendingPayments.length; i++) {
+                  await supabaseAdmin
+                    .from('payments')
+                    .delete()
+                    .eq('id', siblingPendingPayments[i].id);
+                }
               } else {
                 // No existing pending payment — create a new one for the shared pool
                 const { createPoolRenewalPayment } = await import("@/data/payments");
@@ -531,6 +561,10 @@ export async function updateStudentAction(
       branch_id: payload.branchId,
       level: payload.level || 1,
       adcoin_balance: payload.adcoinBalance || 0,
+      username: payload.username?.trim() || null,
+      ...(payload.portalPassword?.trim()
+        ? { password_hash: await hashPassword(payload.portalPassword.trim()) }
+        : {}),
     };
 
     const result = await updateStudent(studentId, updateData);
@@ -559,6 +593,8 @@ export async function updateStudentAction(
       if (existingParent) {
         // Link existing parent instead of creating duplicate
         await linkParentToStudent(existingParent.id, studentId, payload.parentRelationship);
+        // Ensure existing parent has an auth account
+        await ensureParentAuth(existingParent.id);
       } else {
         // Check if email is used elsewhere (student/user)
         const parentEmailCheck = await checkEmailExists(parentEmail, "parents");
@@ -580,7 +616,7 @@ export async function updateStudentAction(
           city: payload.parentCity?.trim() || null,
         };
 
-        const parent = await createParent(parentData);
+        const parent = await createParentWithAuth(parentData);
         if (parent) {
           await linkParentToStudent(parent.id, studentId, payload.parentRelationship);
         }
@@ -658,7 +694,315 @@ export async function updateStudentAction(
         adcoin_balance: payload.adcoinBalance || 0,
       });
 
-      // 4b. Handle pool redistribution on enrollment status change
+      // 4b. Handle pool dissolution when shareWithSibling toggled off
+      if (!payload.shareWithSibling) {
+        // Check if student is currently in a pool
+        const { data: currentEnrollment } = await supabaseAdmin
+          .from('enrollments')
+          .select('id, pool_id, sessions_remaining')
+          .eq('student_id', studentId)
+          .eq('course_id', payload.courseId)
+          .is('deleted_at', null)
+          .order('enrolled_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (currentEnrollment?.pool_id) {
+          const poolId = currentEnrollment.pool_id;
+
+          // Fetch pool data (don't filter deleted_at — may be a stale breadcrumb to soft-deleted pool)
+          const { data: poolData } = await supabaseAdmin
+            .from('shared_session_pools')
+            .select('sessions_remaining, total_sessions, deleted_at')
+            .eq('id', poolId)
+            .single();
+
+          // Get all active students in the pool
+          const { data: poolStudents } = await supabaseAdmin
+            .from('pool_students')
+            .select('student_id, enrollment_id, joined_at')
+            .eq('pool_id', poolId)
+            .order('joined_at', { ascending: true });
+
+          if (poolData && !poolData.deleted_at && (poolStudents ?? []).length > 0) {
+            // Active pool — dissolve it and give each student their display value
+            console.log(`[Pool Dissolution] Dissolving pool ${poolId} — shareWithSibling toggled off for student ${studentId}`);
+
+            const allStudentIds = (poolStudents ?? []).map(ps => ps.student_id);
+            const siblingCount = (poolStudents ?? []).length || 1;
+            const poolRemaining = poolData.sessions_remaining ?? 0;
+
+            // Each student gets their equal share of pool sessions
+            // Unified formula: first-joined gets more (sessions or debt)
+            for (let i = 0; i < (poolStudents ?? []).length; i++) {
+              const ps = poolStudents![i];
+              const perStudent = Math.floor(poolRemaining / siblingCount);
+              // Use proper remainder (not JS %) to handle negatives correctly
+              const remainder = poolRemaining - perStudent * siblingCount;
+              let positionBonus: number;
+              if (poolRemaining >= 0) {
+                positionBonus = i < remainder ? 1 : 0;
+              } else {
+                positionBonus = i >= (siblingCount - remainder) ? 1 : 0;
+              }
+              const displayValue = perStudent + positionBonus;
+
+              await supabaseAdmin
+                .from('enrollments')
+                .update({
+                  sessions_remaining: displayValue,
+                  pool_id: null,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', ps.enrollment_id);
+            }
+
+            // Remove all students from pool_students
+            await supabaseAdmin
+              .from('pool_students')
+              .delete()
+              .eq('pool_id', poolId);
+
+            // Delete the shared pending payment (if any)
+            await supabaseAdmin
+              .from('payments')
+              .delete()
+              .eq('pool_id', poolId)
+              .eq('status', 'pending');
+
+            // Create individual pending payments for each student who has depleted sessions
+            for (const sid of allStudentIds) {
+              const { data: enroll } = await supabaseAdmin
+                .from('enrollments')
+                .select('id, sessions_remaining, package_id, course_id')
+                .eq('student_id', sid)
+                .eq('course_id', payload.courseId)
+                .is('deleted_at', null)
+                .eq('status', 'active')
+                .maybeSingle();
+
+              if (enroll && (enroll.sessions_remaining ?? 0) <= 0) {
+                const { data: existingPayment } = await supabaseAdmin
+                  .from('payments')
+                  .select('id')
+                  .eq('student_id', sid)
+                  .eq('course_id', payload.courseId)
+                  .eq('status', 'pending')
+                  .is('pool_id', null)
+                  .maybeSingle();
+
+                if (!existingPayment) {
+                  let price = 0;
+                  if (enroll.package_id) {
+                    const { data: pricing } = await supabaseAdmin
+                      .from('course_pricing')
+                      .select('price')
+                      .eq('id', enroll.package_id)
+                      .single();
+                    if (pricing) price = pricing.price;
+                  }
+
+                  if (price > 0) {
+                    await createPayment({
+                      student_id: sid,
+                      course_id: payload.courseId,
+                      package_id: enroll.package_id,
+                      amount: price,
+                      payment_type: 'package',
+                      status: 'pending',
+                      notes: 'Individual renewal after pool dissolution',
+                    });
+                  }
+                }
+              }
+            }
+
+            // Delete the pool itself
+            await supabaseAdmin
+              .from('shared_session_pools')
+              .delete()
+              .eq('id', poolId);
+
+            console.log(`[Pool Dissolution] Pool ${poolId} dissolved. ${allStudentIds.length} students converted to individual.`);
+          } else {
+            // Stale pool_id breadcrumb (pool deleted or no members) — just clear it
+            console.log(`[Pool Dissolution] Clearing stale pool_id ${poolId} from enrollment ${currentEnrollment.id}`);
+            await supabaseAdmin
+              .from('enrollments')
+              .update({ pool_id: null, updated_at: new Date().toISOString() })
+              .eq('id', currentEnrollment.id);
+          }
+        }
+      }
+
+      // 4c. Handle pool creation when shareWithSibling toggled ON for a non-pooled student
+      if (payload.shareWithSibling && payload.parentId && payload.parentId !== "new") {
+        // Check if student is NOT currently in a pool
+        const { data: enrollForPool } = await supabaseAdmin
+          .from('enrollments')
+          .select('id, pool_id')
+          .eq('student_id', studentId)
+          .eq('course_id', payload.courseId)
+          .is('deleted_at', null)
+          .order('enrolled_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        // Check if pool_id is a stale breadcrumb (pool deleted or no members)
+        let effectivePoolId = enrollForPool?.pool_id ?? null;
+        if (effectivePoolId) {
+          const { data: poolCheck } = await supabaseAdmin
+            .from('shared_session_pools')
+            .select('id, deleted_at')
+            .eq('id', effectivePoolId)
+            .single();
+          const { data: memberCheck } = await supabaseAdmin
+            .from('pool_students')
+            .select('id')
+            .eq('pool_id', effectivePoolId)
+            .eq('student_id', studentId)
+            .maybeSingle();
+          // If pool doesn't exist, is soft-deleted, or student is not a member → treat as no pool
+          if (!poolCheck || poolCheck.deleted_at || !memberCheck) {
+            effectivePoolId = null;
+            // Clear the stale breadcrumb
+            await supabaseAdmin
+              .from('enrollments')
+              .update({ pool_id: null, updated_at: new Date().toISOString() })
+              .eq('id', enrollForPool!.id);
+          }
+        }
+
+        if (enrollForPool && !effectivePoolId) {
+          const enrollmentId = enrollForPool.id;
+          const { createPoolWithSiblings, addStudentToPool } = await import("@/data/pools");
+
+          if (payload.existingPoolId) {
+            // Join existing pool
+            await addStudentToPool(payload.existingPoolId, studentId, enrollmentId);
+            console.log(`[Pool Creation] Student ${studentId} joined existing pool ${payload.existingPoolId}`);
+
+            // Update shared_with on pool payments
+            const { data: allPoolMembers } = await supabaseAdmin
+              .from('pool_students')
+              .select('student_id')
+              .eq('pool_id', payload.existingPoolId);
+            const allMemberIds = (allPoolMembers ?? []).map(ps => ps.student_id);
+
+            if (allMemberIds.length > 0) {
+              await supabaseAdmin
+                .from('payments')
+                .update({ shared_with: allMemberIds })
+                .eq('pool_id', payload.existingPoolId)
+                .in('status', ['pending', 'paid']);
+            }
+
+            // Delete this student's individual pending payment (will be covered by pool payment)
+            await supabaseAdmin
+              .from('payments')
+              .delete()
+              .eq('student_id', studentId)
+              .eq('course_id', payload.courseId)
+              .eq('status', 'pending')
+              .is('pool_id', null);
+
+          } else {
+            // Create a new pool — find ALL siblings in same course under same parent
+            const { data: parentStudents } = await supabaseAdmin
+              .from('parent_students')
+              .select('student_id')
+              .eq('parent_id', payload.parentId);
+
+            const siblingStudentIds = (parentStudents ?? []).map(ps => ps.student_id);
+
+            // Find ALL sibling enrollments in same course (not just one)
+            const { data: siblingEnrollments } = await supabaseAdmin
+              .from('enrollments')
+              .select('id, student_id')
+              .eq('course_id', payload.courseId)
+              .in('student_id', siblingStudentIds)
+              .neq('student_id', studentId)
+              .eq('status', 'active')
+              .is('deleted_at', null);
+
+            if (siblingEnrollments && siblingEnrollments.length > 0) {
+              const { data: parentData } = await supabaseAdmin
+                .from('parents')
+                .select('name')
+                .eq('id', payload.parentId)
+                .single();
+
+              const { data: courseData } = await supabaseAdmin
+                .from('courses')
+                .select('name')
+                .eq('id', payload.courseId)
+                .single();
+
+              // Create pool with first sibling + current student
+              const firstSibling = siblingEnrollments[0];
+              const pool = await createPoolWithSiblings(
+                payload.parentId,
+                payload.courseId,
+                payload.packageId,
+                parentData?.name || 'Family',
+                courseData?.name || 'Course',
+                { studentId: firstSibling.student_id, enrollmentId: firstSibling.id },
+                { studentId: studentId, enrollmentId: enrollmentId }
+              );
+
+              if (pool) {
+                // Add remaining siblings (2nd, 3rd, etc.) to the pool
+                for (let i = 1; i < siblingEnrollments.length; i++) {
+                  const sibling = siblingEnrollments[i];
+                  await addStudentToPool(pool.id, sibling.student_id, sibling.id);
+                  console.log(`[Pool Creation] Added sibling ${sibling.student_id} to pool ${pool.id}`);
+                }
+
+                const allMemberIds = [
+                  ...siblingEnrollments.map(s => s.student_id),
+                  studentId,
+                ];
+                console.log(`[Pool Creation] Created new pool ${pool.id} with ${allMemberIds.length} students`);
+
+                // Convert any existing individual pending payment to a pool payment
+                const { data: existingPendingPayments } = await supabaseAdmin
+                  .from('payments')
+                  .select('id')
+                  .eq('course_id', payload.courseId)
+                  .eq('status', 'pending')
+                  .is('pool_id', null)
+                  .in('student_id', allMemberIds);
+
+                if (existingPendingPayments && existingPendingPayments.length > 0) {
+                  // Convert first to pool payment
+                  await supabaseAdmin
+                    .from('payments')
+                    .update({
+                      pool_id: pool.id,
+                      is_shared_package: true,
+                      shared_with: allMemberIds,
+                    })
+                    .eq('id', existingPendingPayments[0].id);
+
+                  // Delete the rest (duplicates)
+                  for (let i = 1; i < existingPendingPayments.length; i++) {
+                    await supabaseAdmin
+                      .from('payments')
+                      .delete()
+                      .eq('id', existingPendingPayments[i].id);
+                  }
+                } else {
+                  // Create pool renewal payment if needed
+                  const { createPoolRenewalPayment } = await import("@/data/payments");
+                  await createPoolRenewalPayment(pool.id);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 4d. Handle pool redistribution on enrollment status change
       if (payload.enrollmentStatus) {
         const { data: enrollmentForPool } = await supabaseAdmin
           .from('enrollments')
@@ -695,6 +1039,18 @@ export async function updateStudentAction(
           .single();
 
         if (newPricing?.price) {
+          // Universal guard: check if there's ALREADY a pending payment for this student+course
+          // This prevents duplicates regardless of pool state changes
+          const { data: anyExistingPending } = await supabaseAdmin
+            .from('payments')
+            .select('id, pool_id')
+            .eq('student_id', studentId)
+            .eq('course_id', payload.courseId)
+            .eq('status', 'pending')
+            .limit(1);
+
+          const existingPendingPayment = anyExistingPending?.[0] ?? null;
+
           // Check if this student is part of a shared pool
           const { data: enrollmentWithPool } = await supabaseAdmin
             .from('enrollments')
@@ -706,11 +1062,28 @@ export async function updateStudentAction(
             .limit(1)
             .maybeSingle();
 
-          const poolId = enrollmentWithPool?.pool_id;
+          let poolId = enrollmentWithPool?.pool_id;
 
+          // Verify pool is active and has members (pool_id may be a stale breadcrumb)
+          let poolStudentIds: string[] = [];
+          let poolEnrollmentIds: string[] = [];
           if (poolId) {
+            const { data: poolStudents } = await supabaseAdmin
+              .from('pool_students')
+              .select('student_id, enrollment_id')
+              .eq('pool_id', poolId);
+
+            poolStudentIds = (poolStudents ?? []).map(ps => ps.student_id);
+            poolEnrollmentIds = (poolStudents ?? []).map(ps => ps.enrollment_id);
+
+            // If pool has no active members, treat as non-pooled (stale breadcrumb)
+            if (poolStudentIds.length === 0) {
+              poolId = null;
+            }
+          }
+
+          if (poolId && poolStudentIds.length > 0) {
             // SHARED POOL: Update pool's package and sync all sibling enrollments
-            // Update the pool's package_id
             await supabaseAdmin
               .from('shared_session_pools')
               .update({
@@ -718,15 +1091,6 @@ export async function updateStudentAction(
                 updated_at: new Date().toISOString(),
               })
               .eq('id', poolId);
-
-            // Get all students in the pool
-            const { data: poolStudents } = await supabaseAdmin
-              .from('pool_students')
-              .select('student_id, enrollment_id')
-              .eq('pool_id', poolId);
-
-            const poolStudentIds = (poolStudents ?? []).map(ps => ps.student_id);
-            const poolEnrollmentIds = (poolStudents ?? []).map(ps => ps.enrollment_id);
 
             // Update all sibling enrollments with the same package
             if (poolEnrollmentIds.length > 0) {
@@ -736,84 +1100,96 @@ export async function updateStudentAction(
                 .in('id', poolEnrollmentIds);
             }
 
-            // Update/create shared pending payment for the pool
-            // First check if there's already a pool payment
-            const { data: existingPoolPayment } = await supabaseAdmin
-              .from('payments')
-              .select('id')
-              .eq('pool_id', poolId)
-              .eq('status', 'pending')
-              .maybeSingle();
-
-            if (existingPoolPayment) {
-              // Update existing pool payment
+            if (existingPendingPayment) {
+              // Update existing pending payment (convert to pool payment if needed)
               await supabaseAdmin
                 .from('payments')
                 .update({
                   amount: newPricing.price,
-                  notes: newPricing.description || 'Updated shared package payment',
+                  pool_id: poolId,
+                  is_shared_package: true,
                   shared_with: poolStudentIds,
+                  notes: newPricing.description || 'Updated shared package payment',
                 })
-                .eq('id', existingPoolPayment.id);
+                .eq('id', existingPendingPayment.id);
             } else {
-              // Check if any sibling has a pending payment for this course and convert it
-              const { data: siblingPayment } = await supabaseAdmin
+              // Check if there's a pool-level pending payment (student_id might be a sibling's)
+              const { data: existingPoolPayments } = await supabaseAdmin
                 .from('payments')
                 .select('id')
-                .eq('course_id', payload.courseId)
+                .eq('pool_id', poolId)
                 .eq('status', 'pending')
-                .in('student_id', poolStudentIds)
-                .maybeSingle();
+                .limit(1);
 
-              if (siblingPayment) {
-                // Convert to pool payment
+              const existingPoolPayment = existingPoolPayments?.[0] ?? null;
+
+              if (existingPoolPayment) {
                 await supabaseAdmin
                   .from('payments')
                   .update({
                     amount: newPricing.price,
+                    notes: newPricing.description || 'Updated shared package payment',
+                    shared_with: poolStudentIds,
+                  })
+                  .eq('id', existingPoolPayment.id);
+              } else {
+                // Check if any sibling has a pending payment for this course and convert it
+                const { data: siblingPayments } = await supabaseAdmin
+                  .from('payments')
+                  .select('id')
+                  .eq('course_id', payload.courseId)
+                  .eq('status', 'pending')
+                  .in('student_id', poolStudentIds)
+                  .limit(1);
+
+                const siblingPayment = siblingPayments?.[0] ?? null;
+
+                if (siblingPayment) {
+                  // Convert to pool payment
+                  await supabaseAdmin
+                    .from('payments')
+                    .update({
+                      amount: newPricing.price,
+                      pool_id: poolId,
+                      is_shared_package: true,
+                      shared_with: poolStudentIds,
+                      notes: newPricing.description || 'Shared package payment',
+                    })
+                    .eq('id', siblingPayment.id);
+                } else {
+                  // Create new pool payment only if truly no pending payment exists
+                  const paymentData: PaymentInsert = {
+                    student_id: poolStudentIds[0],
+                    course_id: payload.courseId,
+                    amount: newPricing.price,
+                    payment_type: 'registration',
+                    status: 'pending',
                     pool_id: poolId,
                     is_shared_package: true,
                     shared_with: poolStudentIds,
                     notes: newPricing.description || 'Shared package payment',
-                  })
-                  .eq('id', siblingPayment.id);
-              } else {
-                // Create new pool payment
-                const paymentData: PaymentInsert = {
-                  student_id: poolStudentIds[0], // Use first student as primary
-                  course_id: payload.courseId,
-                  amount: newPricing.price,
-                  payment_type: 'registration',
-                  status: 'pending',
-                  pool_id: poolId,
-                  is_shared_package: true,
-                  shared_with: poolStudentIds,
-                  notes: newPricing.description || 'Shared package payment',
-                };
-                await createPayment(paymentData);
+                  };
+                  await createPayment(paymentData);
+                }
               }
             }
           } else {
             // NON-SHARED: Update just this student's payment
-            const { data: existingPayment } = await supabaseAdmin
-              .from('payments')
-              .select('id')
-              .eq('student_id', studentId)
-              .eq('course_id', payload.courseId)
-              .eq('status', 'pending')
-              .maybeSingle();
-
-            if (existingPayment) {
+            if (existingPendingPayment) {
               // Update existing pending payment with new amount
               await supabaseAdmin
                 .from('payments')
                 .update({
                   amount: newPricing.price,
                   notes: newPricing.description || 'Updated package payment',
+                  // Clear pool fields if previously pooled
+                  pool_id: null,
+                  is_shared_package: false,
+                  shared_with: null,
                 })
-                .eq('id', existingPayment.id);
+                .eq('id', existingPendingPayment.id);
             } else {
-              // Create new pending payment if none exists
+              // Create new pending payment only if none exists
               const paymentData: PaymentInsert = {
                 student_id: studentId,
                 course_id: payload.courseId,
@@ -848,6 +1224,66 @@ export async function deleteStudentAction(
   try {
     await authorizeAction('students', 'can_delete');
 
+    // 0. Block deletion if the student has any attendance (present/late)
+    const { data: enrollmentsForAttCheck } = await supabaseAdmin
+      .from('enrollments')
+      .select('id')
+      .eq('student_id', studentId)
+      .is('deleted_at', null);
+
+    if (enrollmentsForAttCheck && enrollmentsForAttCheck.length > 0) {
+      const enrollmentIds = enrollmentsForAttCheck.map(e => e.id);
+      const { count: attendanceCount } = await supabaseAdmin
+        .from('attendance')
+        .select('id', { count: 'exact', head: true })
+        .in('enrollment_id', enrollmentIds)
+        .in('status', ['present', 'late']);
+
+      if (attendanceCount && attendanceCount > 0) {
+        return {
+          success: false,
+          error: "Cannot delete a student who has attended classes. Please cancel or complete the enrollment instead.",
+        };
+      }
+    }
+
+    // 1. Handle pool redistribution before deleting the student
+    const { data: pooledEnrollments } = await supabaseAdmin
+      .from('enrollments')
+      .select('id, pool_id')
+      .eq('student_id', studentId)
+      .not('pool_id', 'is', null)
+      .is('deleted_at', null);
+
+    if (pooledEnrollments && pooledEnrollments.length > 0) {
+      const { redistributePoolOnInactive } = await import("@/data/pools");
+
+      for (const enrollment of pooledEnrollments) {
+        await redistributePoolOnInactive(enrollment.id, studentId);
+      }
+    }
+
+    // 2. Fully clean up all references so the deleted student doesn't appear in pools or sibling checks
+    // Soft-delete all enrollments
+    await supabaseAdmin
+      .from('enrollments')
+      .update({ deleted_at: new Date().toISOString(), pool_id: null, status: 'cancelled' })
+      .eq('student_id', studentId)
+      .is('deleted_at', null);
+
+    // Remove from pool_students (safety net — redistributePoolOnInactive should have done this)
+    await supabaseAdmin
+      .from('pool_students')
+      .delete()
+      .eq('student_id', studentId);
+
+    // Remove parent_students links so the deleted student doesn't count as a sibling
+    await supabaseAdmin
+      .from('parent_students')
+      .delete()
+      .eq('student_id', studentId);
+
+    // 3. Soft-delete the student
     const success = await softDeleteStudent(studentId);
 
     if (!success) {
@@ -855,6 +1291,7 @@ export async function deleteStudentAction(
     }
 
     revalidatePath("/student");
+    revalidatePath("/pending-payments");
     revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {

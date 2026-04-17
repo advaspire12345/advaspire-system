@@ -61,6 +61,10 @@ export interface ProgramFormPayload {
     duration: number;
     description: string | null;
     is_default: boolean;
+    expiry_months: number | null;
+    completion_months: number | null;
+    voucher_amount: number | null;
+    voucher_deadline_months: number | null;
   }[];
 
   // Slots

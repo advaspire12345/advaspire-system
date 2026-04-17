@@ -33,11 +33,9 @@ export async function updatePendingPaymentAction(
   try {
     await authorizeAction('pending_payments', 'can_edit');
 
-    // Note: We don't set package_id because payments.package_id references
-    // the legacy 'packages' table, not 'course_pricing'.
-    // The package is looked up by course_id + amount in getPendingPaymentsForTable.
     const result = await updatePayment(paymentId, {
       course_id: data.courseId,
+      package_id: data.packageId,
       amount: data.price,
       payment_method: data.paymentMethod,
       paid_at: data.paidAt || null,
@@ -125,12 +123,10 @@ export async function addPendingPaymentAction(
   try {
     await authorizeAction('pending_payments', 'can_create');
 
-    // Note: We don't set package_id because payments.package_id references
-    // the legacy 'packages' table, not 'course_pricing'.
-    // The package is looked up by course_id + amount in getPendingPaymentsForTable.
     const paymentInsert: Record<string, unknown> = {
       student_id: data.studentId,
       course_id: data.courseId || null,
+      package_id: data.packageId || null,
       amount: data.price,
       payment_type: "package",
       status: "pending",

@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
     const parentId = searchParams.get('parentId');
     const courseId = searchParams.get('courseId');
     const poolId = searchParams.get('poolId');
+    const excludeStudentId = searchParams.get('excludeStudentId');
 
     // Direct pool lookup by poolId
     if (poolId) {
@@ -48,41 +49,82 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get pool info if exists
-    const poolInfo = await getSiblingPoolInfo(parentId, courseId);
+    // Count total children under this parent FIRST — frontend uses this to show/hide shared button
+    // Join with students to exclude soft-deleted students
+    const { data: parentStudentsRaw } = await supabaseAdmin
+      .from('parent_students')
+      .select('student_id, student:students!inner(id, deleted_at)')
+      .eq('parent_id', parentId);
 
-    if (poolInfo) {
+    // Filter out soft-deleted students
+    const parentStudents = (parentStudentsRaw ?? []).filter(
+      (ps) => !(ps.student as unknown as { deleted_at: string | null })?.deleted_at
+    );
+
+    const parentChildCount = parentStudents?.length ?? 0;
+
+    // If parent has no siblings to share with, return early
+    // Edit mode (excludeStudentId set): current student is counted, so need > 1
+    // Add mode (no excludeStudentId): new student not yet in DB, so need >= 1 existing child
+    const minChildrenForSharing = excludeStudentId ? 2 : 1;
+    if (parentChildCount < minChildrenForSharing) {
       return NextResponse.json({
-        hasPool: true,
-        poolInfo,
+        hasPool: false,
+        hasSiblingInCourse: false,
+        parentChildCount,
+        siblings: [],
+        siblingPackageInfo: null,
+        poolInfo: null,
       });
     }
 
-    // No existing pool - check if parent has other children enrolled in this course
-    // This determines if we should show the "share sessions" option
+    // Get pool info if exists
+    const poolInfo = await getSiblingPoolInfo(parentId, courseId);
 
-    // Get all students linked to this parent
-    const { data: parentStudents } = await supabaseAdmin
-      .from('parent_students')
-      .select('student_id')
-      .eq('parent_id', parentId);
+    if (poolInfo && poolInfo.siblings.length > 0) {
+      return NextResponse.json({
+        hasPool: true,
+        parentChildCount,
+        poolInfo,
+      });
+    }
+    // If pool exists but has no active members, continue to check sibling enrollments
+
+    // No existing pool - check if parent has other children enrolled in this course
 
     if (!parentStudents || parentStudents.length === 0) {
       return NextResponse.json({
         hasPool: false,
         hasSiblingInCourse: false,
+        parentChildCount,
         poolInfo: null,
       });
     }
 
     const studentIds = parentStudents.map(ps => ps.student_id);
 
+    // Exclude the current student being edited so they don't count as their own sibling
+    const siblingStudentIds = excludeStudentId
+      ? studentIds.filter(id => id !== excludeStudentId)
+      : studentIds;
+
+    if (siblingStudentIds.length === 0) {
+      return NextResponse.json({
+        hasPool: false,
+        hasSiblingInCourse: false,
+        parentChildCount,
+        siblings: [],
+        siblingPackageInfo: null,
+        poolInfo: null,
+      });
+    }
+
     // Check if any of these students are enrolled in this course (include package info)
     const { data: siblingEnrollments, error: enrollmentError } = await supabaseAdmin
       .from('enrollments')
       .select('id, student_id, package_id')
       .eq('course_id', courseId)
-      .in('student_id', studentIds)
+      .in('student_id', siblingStudentIds)
       .eq('status', 'active')
       .is('deleted_at', null);
 
@@ -122,17 +164,6 @@ export async function GET(request: NextRequest) {
           .single();
 
         if (pricingData) {
-          // Monthly packages cannot be shared — only session packages
-          if (pricingData.package_type === 'monthly') {
-            return NextResponse.json({
-              hasPool: false,
-              hasSiblingInCourse: false,
-              siblings: [],
-              siblingPackageInfo: null,
-              poolInfo: null,
-            });
-          }
-
           siblingPackageInfo = {
             packageId: pricingData.id,
             packageType: pricingData.package_type,
@@ -145,6 +176,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       hasPool: false,
       hasSiblingInCourse,
+      parentChildCount,
       siblings,
       siblingPackageInfo,
       poolInfo: null,

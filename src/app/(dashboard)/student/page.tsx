@@ -29,6 +29,10 @@ export default async function StudentsPage() {
   const perms = permData?.permissions.students;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
+  // Run on-demand expiry check before fetching data
+  const { checkAndExpireEnrollments } = await import("@/data/enrollments");
+  await checkAndExpireEnrollments();
+
   // Fetch real data from database
   const [students, branchesData, coursesData, pricingData, slotsData, parentsData] = await Promise.all([
     getStudentsForTable(user.email),

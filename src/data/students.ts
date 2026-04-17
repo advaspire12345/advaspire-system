@@ -291,7 +291,7 @@ export async function searchStudents(query: string, branchId?: string): Promise<
     .from('students')
     .select('*')
     .is('deleted_at', null)
-    .or(`name.ilike.%${query}%,email.ilike.%${query}%`)
+    .or(`name.ilike.%${query}%,student_id.ilike.%${query}%`)
     .order('name')
     .limit(50);
 
@@ -317,20 +317,22 @@ export interface AdcoinRankingEntry {
   rank: number;
   studentId: string;
   studentName: string;
+  displayId: string | null;
   coins: number;
   photo: string | null;
 }
 
 export async function getAdcoinRanking(
   branchId?: string,
-  limit = 10
-): Promise<AdcoinRankingEntry[]> {
+  limit = 20,
+  offset = 0
+): Promise<{ entries: AdcoinRankingEntry[]; hasMore: boolean }> {
   let query = supabaseAdmin
     .from('students')
-    .select('id, name, adcoin_balance, photo')
+    .select('id, name, student_id, adcoin_balance, photo')
     .is('deleted_at', null)
     .order('adcoin_balance', { ascending: false })
-    .limit(limit);
+    .range(offset, offset + limit - 1);
 
   if (branchId) {
     query = query.eq('branch_id', branchId);
@@ -340,16 +342,84 @@ export async function getAdcoinRanking(
 
   if (error) {
     console.error('Error fetching adcoin ranking:', error);
-    return [];
+    return { entries: [], hasMore: false };
   }
 
-  return (data ?? []).map((s, index) => ({
-    rank: index + 1,
+  const entries = (data ?? []).map((s, index) => ({
+    rank: offset + index + 1,
     studentId: s.id,
     studentName: s.name,
+    displayId: s.student_id,
     coins: s.adcoin_balance ?? 0,
     photo: s.photo,
   }));
+
+  return { entries, hasMore: (data ?? []).length > limit };
+}
+
+export async function getStudentRank(
+  studentId: string,
+  branchId?: string
+): Promise<number> {
+  // Get the student's balance
+  const { data: student } = await supabaseAdmin
+    .from('students')
+    .select('adcoin_balance')
+    .eq('id', studentId)
+    .is('deleted_at', null)
+    .single();
+
+  if (!student) return 1;
+
+  // Count students with higher balance
+  let query = supabaseAdmin
+    .from('students')
+    .select('id', { count: 'exact', head: true })
+    .is('deleted_at', null)
+    .gt('adcoin_balance', student.adcoin_balance ?? 0);
+
+  if (branchId) {
+    query = query.eq('branch_id', branchId);
+  }
+
+  const { count } = await query;
+  return (count ?? 0) + 1;
+}
+
+// ============================================
+// AUTH OPERATIONS
+// ============================================
+
+export async function getStudentByUsername(username: string): Promise<Student | null> {
+  const { data, error } = await supabaseAdmin
+    .from('students')
+    .select('*')
+    .eq('username', username)
+    .is('deleted_at', null)
+    .single();
+
+  if (error) {
+    console.error('Error fetching student by username:', error);
+    return null;
+  }
+
+  return data;
+}
+
+export async function updateStudentCredentials(
+  id: string,
+  username: string,
+  passwordHash: string
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('students')
+    .update({ username, password_hash: passwordHash })
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error updating student credentials:', error);
+    throw new Error('Failed to update student credentials');
+  }
 }
 
 // ============================================
@@ -623,10 +693,11 @@ export async function getStudentsForTable(
         pool_id,
         level,
         adcoin_balance,
+        expires_at,
         course:courses(id, name),
         package:course_pricing(id, package_type, duration),
         pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
-        attendance(date, status)
+        attendance(date, status, created_at)
       ),
       parent_students(
         relationship,
@@ -640,7 +711,7 @@ export async function getStudentsForTable(
           city
         )
       ),
-      payments(amount, status, course_id, package_id, pool_id)
+      payments(amount, status, course_id, package_id, pool_id, paid_at)
     `)
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
@@ -678,10 +749,14 @@ export async function getStudentsForTable(
 
   // Pre-fetch pool payment data and join dates so ALL siblings in a pool share the total
   const poolPaymentCache = new Map<string, { totalPaid: number; totalSessions: number }>();
+  // Raw pool payments for latest package lookup (includes package_id and paid_at)
+  const poolPaymentCacheRaw = new Map<string, Array<{ amount: number; status: string; course_id: string | null; package_id: string | null; pool_id: string | null; paid_at: string | null }>>();
   // Map: poolId -> studentId -> joined_at date string
   const poolJoinDateCache = new Map<string, Map<string, string>>();
   // Map: poolId -> actual number of students in the pool
   const poolSiblingCountCache = new Map<string, number>();
+  // Map: poolId -> studentId -> student name (for pool siblings display)
+  const poolStudentNamesCache = new Map<string, Map<string, string>>();
   const allPoolIds = new Set<string>();
   for (const student of data ?? []) {
     for (const enrollment of (student as any).enrollments || []) {
@@ -690,19 +765,23 @@ export async function getStudentsForTable(
   }
   if (allPoolIds.size > 0) {
     for (const poolId of allPoolIds) {
-      // Get all students in this pool with join dates
+      // Get all students in this pool with join dates and names
       const { data: poolStudentLinks } = await supabaseAdmin
         .from('pool_students')
-        .select('student_id, joined_at')
+        .select('student_id, joined_at, student:students(name)')
         .eq('pool_id', poolId);
 
-      // Cache join dates per student and sibling count
+      // Cache join dates per student, sibling count, and student names
       const joinDates = new Map<string, string>();
+      const studentNames = new Map<string, string>();
       for (const ps of poolStudentLinks ?? []) {
         if (ps.joined_at) joinDates.set(ps.student_id, ps.joined_at);
+        const studentData = ps.student as unknown as { name: string } | null;
+        if (studentData?.name) studentNames.set(ps.student_id, studentData.name);
       }
       poolJoinDateCache.set(poolId, joinDates);
       poolSiblingCountCache.set(poolId, (poolStudentLinks ?? []).length);
+      poolStudentNamesCache.set(poolId, studentNames);
       // Get the pool's course_id
       const { data: poolData } = await supabaseAdmin
         .from('shared_session_pools')
@@ -714,7 +793,7 @@ export async function getStudentsForTable(
       // Sum only shared pool payments (with pool_id set) from ALL siblings
       const { data: poolPayments } = await supabaseAdmin
         .from('payments')
-        .select('amount, package_id')
+        .select('amount, package_id, paid_at, course_id')
         .in('student_id', studentIds)
         .eq('course_id', poolData.course_id)
         .eq('pool_id', poolId)
@@ -724,6 +803,15 @@ export async function getStudentsForTable(
         return sum + getSessionsForPayment(p.package_id);
       }, 0);
       poolPaymentCache.set(poolId, { totalPaid, totalSessions });
+      // Store raw payment data for latest package lookup
+      poolPaymentCacheRaw.set(poolId, (poolPayments ?? []).map(p => ({
+        amount: Number(p.amount),
+        status: 'paid',
+        course_id: p.course_id,
+        package_id: p.package_id,
+        pool_id: poolId,
+        paid_at: p.paid_at,
+      })));
     }
   }
 
@@ -769,11 +857,56 @@ export async function getStudentsForTable(
     let sessionsRemaining: number | null = null;
     let periodStart: string | null = null;
     let periodEnd: string | null = null;
-    const packageDuration: number | null = enrollment?.package?.duration || null;
-    const packageType = enrollment?.package?.package_type || null;
 
-    // Check if enrollment is part of a shared sibling pool
-    const isPooled = enrollment?.pool_id && enrollment?.pool;
+    // Determine package from latest paid payment (not enrollment's original package)
+    let packageDuration: number | null = enrollment?.package?.duration || null;
+    let packageType = enrollment?.package?.package_type || null;
+    let latestPackageId: string | null = enrollment?.package_id || null;
+
+    if (enrollment?.course?.id) {
+      // Check this student's own payments first
+      const coursePayments = ((student.payments || []) as Array<{
+        amount: number; status: string; course_id: string | null;
+        package_id: string | null; pool_id: string | null; paid_at: string | null;
+      }>).filter(
+        (p) => p.status === 'paid' && p.course_id === enrollment.course.id && p.package_id
+      );
+
+      // For pooled students, also check pool payment cache (payment may belong to a sibling)
+      if (enrollment.pool_id && poolPaymentCacheRaw.has(enrollment.pool_id)) {
+        const poolPmts = poolPaymentCacheRaw.get(enrollment.pool_id) ?? [];
+        for (const pp of poolPmts) {
+          // Avoid duplicates (if this student's own payment is also a pool payment)
+          if (!coursePayments.some(cp => cp.amount === pp.amount && cp.paid_at === pp.paid_at && cp.package_id === pp.package_id)) {
+            coursePayments.push(pp);
+          }
+        }
+      }
+
+      // Sort by paid_at descending to get the latest
+      coursePayments.sort((a, b) => {
+        if (!a.paid_at) return 1;
+        if (!b.paid_at) return -1;
+        return new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime();
+      });
+      const latestPayment = coursePayments[0];
+      if (latestPayment?.package_id) {
+        const latestPkg = pricingMap.get(latestPayment.package_id);
+        if (latestPkg) {
+          packageDuration = latestPkg.duration;
+          packageType = latestPkg.package_type;
+          latestPackageId = latestPayment.package_id;
+        }
+      }
+    }
+
+    // Check if enrollment is part of an ACTIVE shared sibling pool
+    // Must have pool_id AND be actively in pool_students (count > 0)
+    // AND this student must actually be in pool_students (not just have pool_id breadcrumb)
+    // A student can have pool_id as a breadcrumb for restoration but not be actively pooled
+    const isPooled = enrollment?.pool_id && enrollment?.pool
+      && (poolSiblingCountCache.get(enrollment.pool_id) ?? 0) > 0
+      && poolStudentNamesCache.get(enrollment.pool_id)?.has(student.id);
     const poolInfo = isPooled ? enrollment.pool as unknown as {
       id: string;
       sessions_remaining: number;
@@ -781,21 +914,49 @@ export async function getStudentsForTable(
       name: string | null;
     } : null;
 
+    // Calculate session count for THIS enrollment only
+    let sessionCount = 0;
+    const attendanceRecords = enrollment
+      ? (enrollment.attendance || []) as Array<{ date: string; status: string; created_at: string }>
+      : [];
+    sessionCount = attendanceRecords.filter(
+      (a) => a.status === 'present' || a.status === 'late'
+    ).length;
+
     if (enrollment) {
-      if (isPooled && poolInfo) {
-        // Per-student tracking: allocation minus only THIS student's attendance
+      // Cancelled/completed/expired pooled students show 0 — their sessions were redistributed to siblings
+      // Individual students keep their sessions so they can rejoin later
+      const inactiveStatus = ['cancelled', 'expired', 'completed'].includes(enrollment.status);
+      if (inactiveStatus && enrollment.pool_id) {
+        sessionsRemaining = 0;
+      } else if (isPooled && poolInfo) {
         const siblingCount = poolSiblingCountCache.get(enrollment.pool_id) || 2;
-        const allocation = Math.floor(poolInfo.total_sessions / siblingCount);
-        const attendanceRecords = (enrollment.attendance || []) as Array<{ date: string; status: string }>;
+        const poolRemaining = poolInfo.sessions_remaining;
+
+        // Determine this student's position (earliest joined = 0) for odd remainder
         const joinDates = poolJoinDateCache.get(enrollment.pool_id);
-        const joinedAt = joinDates?.get(student.id);
-        const thisStudentAttendance = attendanceRecords.filter((a) => {
-          if (a.status !== 'present' && a.status !== 'late') return false;
-          if (!joinedAt) return true;
-          return new Date(a.date) >= new Date(joinedAt);
-        }).length;
-        const bonus = enrollment.sessions_remaining ?? 0;
-        sessionsRemaining = allocation + bonus - thisStudentAttendance;
+        const sortedStudentIds = joinDates
+          ? [...joinDates.entries()]
+              .sort((a, b) => new Date(a[1]).getTime() - new Date(b[1]).getTime())
+              .map(([id]) => id)
+          : [];
+        const position = sortedStudentIds.indexOf(student.id);
+
+        // Unified equal split formula for both positive and negative pool values.
+        // All sessions (including debt) are absorbed into pool, so enrollment is 0.
+        // First-joined sibling gets "more" — more sessions (positive) or more debt (negative).
+        const perStudent = Math.floor(poolRemaining / siblingCount);
+        // Use proper remainder (not JS %) to handle negatives correctly
+        const remainder = poolRemaining - perStudent * siblingCount;
+        let positionBonus: number;
+        if (poolRemaining >= 0) {
+          // Positive: first-joined gets the extra session
+          positionBonus = position >= 0 && position < remainder ? 1 : 0;
+        } else {
+          // Negative: last-joined gets the +1 adjustment (less debt), first keeps more debt
+          positionBonus = position >= 0 && position >= (siblingCount - remainder) ? 1 : 0;
+        }
+        sessionsRemaining = perStudent + positionBonus;
       } else {
         const enrollmentSessions = enrollment.sessions_remaining ?? 0;
 
@@ -814,15 +975,6 @@ export async function getStudentsForTable(
           sessionsRemaining = enrollmentSessions;
         }
       }
-    }
-
-    // Calculate session count for THIS enrollment only
-    let sessionCount = 0;
-    if (enrollment) {
-      const attendanceRecords = (enrollment.attendance || []) as Array<{ date: string; status: string }>;
-      sessionCount = attendanceRecords.filter(
-        (a) => a.status === 'present' || a.status === 'late'
-      ).length;
     }
 
     // Calculate payment count - for this enrollment's course
@@ -888,12 +1040,12 @@ export async function getStudentsForTable(
       programName: enrollment?.course?.name || null,
       courseId: enrollment?.course?.id || null,
       instructorId: enrollment?.instructor_id || null,
-      packageId: enrollment?.package_id || null,
-      packageType: enrollment?.package?.package_type || null,
+      packageId: latestPackageId,
+      packageType: packageType || null,
       scheduleDays,
       scheduleTime,
       enrollDate: student.created_at,
-      expiredDate: null,
+      expiredDate: enrollment?.expires_at || null,
       enrollmentStatus: enrollment?.status || null,
       level: enrollment?.level ?? student.level ?? 1,
       adcoinBalance: enrollment?.adcoin_balance ?? student.adcoin_balance ?? 0,
@@ -904,7 +1056,11 @@ export async function getStudentsForTable(
       isPooled: !!isPooled,
       poolId: enrollment?.pool_id || null,
       poolName: poolInfo?.name || null,
-      poolSiblings: null,
+      poolSiblings: isPooled && enrollment?.pool_id
+        ? Array.from(poolStudentNamesCache.get(enrollment.pool_id)?.entries() ?? [])
+            .filter(([id]) => id !== student.id)
+            .map(([, name]) => name)
+        : null,
       sessionCount,
       paymentCount: {
         totalPaid,
@@ -978,7 +1134,7 @@ export async function updateOrCreateEnrollment(
   // First, check if student has any enrollment for this course (any status)
   const { data: existingEnrollments, error: fetchError } = await supabaseAdmin
     .from('enrollments')
-    .select('id, course_id, sessions_remaining, status')
+    .select('id, course_id, sessions_remaining, status, pool_id')
     .eq('student_id', studentId)
     .is('deleted_at', null)
     .order('enrolled_at', { ascending: false });
@@ -995,14 +1151,16 @@ export async function updateOrCreateEnrollment(
 
   if (sameCourseEnrollment) {
     // Update existing enrollment for the same course
-    // Keep existing sessions_remaining if it has any value (positive from payment, or negative from attendance)
-    // Only reset if it's exactly 0 (brand new enrollment with no activity)
-    const keepSessions = sameCourseEnrollment.sessions_remaining !== 0;
+    // Sessions are preserved for individual students even when cancelled/completed (so they can rejoin)
+    // But pooled students get sessions zeroed because their share is redistributed to siblings
+    const isGoingInactive = enrollmentData.status && ['cancelled', 'expired', 'completed'].includes(enrollmentData.status);
+    const zeroSessions = isGoingInactive && !!sameCourseEnrollment.pool_id;
     console.log('[updateOrCreateEnrollment] Updating enrollment:', {
       enrollmentId: sameCourseEnrollment.id,
       existingSessions: sameCourseEnrollment.sessions_remaining,
-      keepSessions,
-      scheduleOnly: true, // This is a schedule-only update
+      isGoingInactive,
+      isPooled: !!sameCourseEnrollment.pool_id,
+      zeroSessions,
     });
     const { error: updateError } = await supabaseAdmin
       .from('enrollments')
@@ -1012,8 +1170,7 @@ export async function updateOrCreateEnrollment(
         day_of_week: days.length > 0 ? JSON.stringify(days) : null,
         start_time: firstEntry?.time || null,
         schedule: JSON.stringify(enrollmentData.schedule),
-        // Only update sessions if existing is exactly 0 (no payment or attendance yet)
-        ...(keepSessions ? {} : { sessions_remaining: 0 }),
+        ...(zeroSessions ? { sessions_remaining: 0 } : {}),
         ...(enrollmentData.status ? { status: enrollmentData.status } : {}),
         ...(enrollmentData.level !== undefined ? { level: enrollmentData.level } : {}),
         ...(enrollmentData.adcoin_balance !== undefined ? { adcoin_balance: enrollmentData.adcoin_balance } : {}),

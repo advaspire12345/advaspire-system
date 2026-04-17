@@ -319,6 +319,10 @@ export interface CreateProgramPayload {
     duration: number;
     description: string | null;
     is_default: boolean;
+    expiry_months: number | null;
+    completion_months: number | null;
+    voucher_amount: number | null;
+    voucher_deadline_months: number | null;
   }[];
 
   // Slots
@@ -477,6 +481,10 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
       duration: p.duration,
       description: p.description,
       is_default: p.is_default,
+      expiry_months: p.expiry_months,
+      completion_months: p.completion_months,
+      voucher_amount: p.voucher_amount,
+      voucher_deadline_months: p.voucher_deadline_months,
     }));
     await supabaseAdmin.from("course_pricing").insert(pricingInserts);
   }
@@ -675,6 +683,10 @@ export async function updateProgram(
         duration: p.duration,
         description: p.description,
         is_default: p.is_default,
+        expiry_months: p.expiry_months,
+        completion_months: p.completion_months,
+        voucher_amount: p.voucher_amount,
+        voucher_deadline_months: p.voucher_deadline_months,
       }))
     );
   }

@@ -53,6 +53,10 @@ interface PricingItem {
   duration: number;
   description: string;
   is_default: boolean;
+  expiry_months: number | null;
+  completion_months: number | null;
+  voucher_amount: number | null;
+  voucher_deadline_months: number | null;
 }
 
 interface SlotItem {
@@ -120,39 +124,69 @@ function PricingFieldList({ items, onAdd, onUpdate, onRemove }: PricingFieldList
 
       <div className="space-y-4">
         {items.map((plan, index) => (
-          <div key={plan.id} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full bg-muted/30 rounded-xl p-3 sm:p-0 sm:bg-transparent border border-border sm:border-0">
-            <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <FloatingSelect
-                label="Package Type"
-                value={plan.package_type}
-                onChange={(val) => onUpdate(plan.id, { package_type: val as PricingPackageType })}
-                options={[
-                  { value: "monthly", label: "Monthly" },
-                  { value: "session", label: "Per Session" },
-                ]}
-              />
+          <div key={plan.id} className="flex items-start gap-2 w-full bg-muted/30 rounded-xl p-3 sm:p-0 sm:bg-transparent border border-border sm:border-0">
+            <div className="flex-1 space-y-3">
+              {/* Row 1: Package Type, Price, Duration */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <FloatingSelect
+                  label="Package Type"
+                  value={plan.package_type}
+                  onChange={(val) => onUpdate(plan.id, {
+                    package_type: val as PricingPackageType,
+                    ...(val === "monthly" ? { expiry_months: null, completion_months: null, voucher_amount: null, voucher_deadline_months: null } : {}),
+                  })}
+                  options={[
+                    { value: "monthly", label: "Monthly" },
+                    { value: "session", label: "Per Session" },
+                  ]}
+                />
 
-              <FloatingInput
-                label="Price"
-                type="number"
-                value={plan.price.toString()}
-                onChange={(e) => onUpdate(plan.id, { price: parseFloat(e.target.value) || 0 })}
-              />
+                <FloatingInput
+                  label="Price"
+                  type="number"
+                  value={plan.price.toString()}
+                  onChange={(e) => onUpdate(plan.id, { price: parseFloat(e.target.value) || 0 })}
+                />
 
-              <FloatingInput
-                label={
-                  plan.package_type === "monthly"
-                    ? "Duration (months)"
-                    : "Number of Sessions"
-                }
-                type="number"
-                value={plan.duration.toString()}
-                onChange={(e) => onUpdate(plan.id, { duration: parseInt(e.target.value) || 0 })}
-              />
+                <FloatingInput
+                  label={
+                    plan.package_type === "monthly"
+                      ? "Duration (months)"
+                      : "Session Count"
+                  }
+                  type="number"
+                  value={plan.duration.toString()}
+                  onChange={(e) => onUpdate(plan.id, { duration: parseInt(e.target.value) || 0 })}
+                />
+              </div>
+
+              {/* Row 2: Expiry, Completion, Voucher Value — session packages only */}
+              {plan.package_type === "session" && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <FloatingInput
+                    label="Expiry (months)"
+                    type="number"
+                    value={plan.expiry_months?.toString() ?? ""}
+                    onChange={(e) => onUpdate(plan.id, { expiry_months: e.target.value ? parseInt(e.target.value) : null })}
+                  />
+                  <FloatingInput
+                    label="Completion (months)"
+                    type="number"
+                    value={plan.completion_months?.toString() ?? ""}
+                    onChange={(e) => onUpdate(plan.id, { completion_months: e.target.value ? parseInt(e.target.value) : null })}
+                  />
+                  <FloatingInput
+                    label="Voucher Value (RM)"
+                    type="number"
+                    value={plan.voucher_amount?.toString() ?? ""}
+                    onChange={(e) => onUpdate(plan.id, { voucher_amount: e.target.value ? parseFloat(e.target.value) : null })}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Add/Remove button */}
-            <div className="flex justify-end sm:justify-start">
+            <div className="flex justify-end sm:justify-start pt-4">
               {index === 0 ? (
                 <button
                   type="button"
@@ -345,9 +379,12 @@ export function ProgramModal({
     package_type: "monthly",
     price: 0,
     duration: 1,
-
     description: "",
     is_default: true,
+    expiry_months: null,
+    completion_months: null,
+    voucher_amount: null,
+    voucher_deadline_months: null,
   }]);
 
   // Slot tab state
@@ -497,13 +534,17 @@ export function ProgramModal({
     // Pricing tab
     if (data.pricing && data.pricing.length > 0) {
       setPricing(
-        data.pricing.map((p) => ({
+        data.pricing.map((p: any) => ({
           id: p.id,
           package_type: p.package_type,
           price: p.price,
           duration: p.duration,
           description: p.description || "",
           is_default: p.is_default,
+          expiry_months: p.expiry_months ?? null,
+          completion_months: p.completion_months ?? null,
+          voucher_amount: p.voucher_amount ?? null,
+          voucher_deadline_months: p.voucher_deadline_months ?? null,
         }))
       );
     } else {
@@ -512,9 +553,12 @@ export function ProgramModal({
         package_type: "monthly",
         price: 0,
         duration: 1,
-    
         description: "",
         is_default: true,
+        expiry_months: null,
+        completion_months: null,
+        voucher_amount: null,
+        voucher_deadline_months: null,
       }]);
     }
 
@@ -576,9 +620,12 @@ export function ProgramModal({
       package_type: "monthly",
       price: 0,
       duration: 1,
-  
       description: "",
       is_default: true,
+      expiry_months: null,
+      completion_months: null,
+      voucher_amount: null,
+      voucher_deadline_months: null,
     }]);
     setSlots([]);
     setYoutubeUrl("");
@@ -592,9 +639,12 @@ export function ProgramModal({
       package_type: "monthly",
       price: 0,
       duration: 1,
-  
       description: "",
       is_default: pricing.length === 0,
+      expiry_months: null,
+      completion_months: null,
+      voucher_amount: null,
+      voucher_deadline_months: null,
     };
     setPricing([...pricing, newPricing]);
   };
@@ -620,9 +670,12 @@ export function ProgramModal({
         package_type: "monthly",
         price: 0,
         duration: 1,
-    
         description: "",
         is_default: true,
+        expiry_months: null,
+        completion_months: null,
+        voucher_amount: null,
+        voucher_deadline_months: null,
       }]);
     }
   };
@@ -719,6 +772,10 @@ export function ProgramModal({
         duration: p.duration,
         description: p.description || null,
         is_default: p.is_default,
+        expiry_months: p.expiry_months,
+        completion_months: p.completion_months,
+        voucher_amount: p.voucher_amount,
+        voucher_deadline_months: p.voucher_deadline_months,
       })),
       slots: slots.map((s) => ({
         branch_id: s.branch_id,

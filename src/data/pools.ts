@@ -226,7 +226,8 @@ export async function updatePool(
 }
 
 /**
- * Add a student to a pool
+ * Add a student to a pool.
+ * If the student has leftover sessions_remaining > 0, absorb them into the pool.
  */
 export async function addStudentToPool(
   poolId: string,
@@ -246,6 +247,36 @@ export async function addStudentToPool(
     return existing as PoolStudent;
   }
 
+  // Read student's current sessions_remaining
+  const { data: enrollment } = await supabaseAdmin
+    .from('enrollments')
+    .select('sessions_remaining')
+    .eq('id', enrollmentId)
+    .single();
+
+  const leftover = enrollment?.sessions_remaining ?? 0;
+
+  // Absorb ALL sessions (positive and negative) into pool for equal sharing.
+  // Display formula: floor(pool.sessions_remaining / siblingCount) + positionBonus
+  // Debt is shared equally among siblings (family pool model).
+  if (leftover !== 0) {
+    const pool = await getPoolById(poolId);
+    if (pool) {
+      await supabaseAdmin
+        .from('shared_session_pools')
+        .update({
+          sessions_remaining: pool.sessions_remaining + leftover,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', poolId);
+    }
+  }
+  // Reset enrollment to 0 — all sessions now tracked in pool
+  await supabaseAdmin
+    .from('enrollments')
+    .update({ sessions_remaining: 0 })
+    .eq('id', enrollmentId);
+
   const insertData: PoolStudentInsert = {
     pool_id: poolId,
     student_id: studentId,
@@ -263,10 +294,10 @@ export async function addStudentToPool(
     return null;
   }
 
-  // Also update the enrollment to reference the pool, reset bonus to 0
+  // Update the enrollment to reference the pool
   await supabaseAdmin
     .from('enrollments')
-    .update({ pool_id: poolId, sessions_remaining: 0 })
+    .update({ pool_id: poolId })
     .eq('id', enrollmentId);
 
   return data;
@@ -589,12 +620,8 @@ export async function getPoolInfoById(poolId: string): Promise<SiblingPoolInfo |
  *
  * Key design: enrollment.pool_id is KEPT so the student can be restored later.
  * Only pool_students row is removed (so siblingCount drops).
- *
- * 1. Count the inactive student's consumed sessions (attendance).
- * 2. Remove from pool_students only (keep enrollment.pool_id as breadcrumb).
- * 3. Reduce pool.total_sessions by consumed amount so unspent sessions redistribute.
- * 4. If 0 members remain → soft delete pool.
- * 5. Otherwise recalculate odd remainder bonuses.
+ * The display formula (pool.sessions_remaining / siblingCount) automatically
+ * gives remaining siblings more sessions when siblingCount drops.
  */
 export async function redistributePoolOnInactive(
   enrollmentId: string,
@@ -614,66 +641,63 @@ export async function redistributePoolOnInactive(
   const pool = await getPoolById(poolId);
   if (!pool) return;
 
-  // 2. Count inactive student's consumed sessions (present/late attendance)
-  const { count: consumedCount } = await supabaseAdmin
-    .from('attendance')
-    .select('id', { count: 'exact', head: true })
-    .eq('enrollment_id', enrollmentId)
-    .in('status', ['present', 'late']);
-
-  const consumed = consumedCount ?? 0;
-
-  // 3. Remove from pool_students only — keep enrollment.pool_id for restoration
+  // 2. Remove from pool_students only — keep enrollment.pool_id for restoration
   await supabaseAdmin
     .from('pool_students')
     .delete()
     .eq('pool_id', poolId)
     .eq('student_id', studentId);
 
-  // 4. Update pool total_sessions (subtract only consumed so unspent redistributes)
-  const newTotal = pool.total_sessions - consumed;
-  await supabaseAdmin
-    .from('shared_session_pools')
-    .update({
-      total_sessions: newTotal,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', poolId);
-
-  // 5. Get remaining active pool members sorted by joined_at (earliest first)
+  // 3. Check remaining members
   const { data: remainingMembers } = await supabaseAdmin
     .from('pool_students')
-    .select('student_id, enrollment_id, joined_at')
-    .eq('pool_id', poolId)
-    .order('joined_at', { ascending: true });
+    .select('student_id, enrollment_id')
+    .eq('pool_id', poolId);
 
-  const activeMembers = remainingMembers ?? [];
-
-  if (activeMembers.length === 0) {
+  if ((remainingMembers ?? []).length === 0) {
     // No members left → soft delete pool
     await softDeletePool(poolId);
-    return;
-  }
+  } else if ((remainingMembers ?? []).length === 1) {
+    // Only 1 sibling left → auto-convert to individual
+    // Give ALL pool.sessions_remaining to remaining student (both positive and negative debt)
+    // Debt is a family obligation — when one sibling leaves, remaining inherits the full pool state
+    const lastMember = remainingMembers![0];
 
-  // Recalculate odd remainder bonuses for remaining members
-  const activeCount = activeMembers.length;
-  const remainder = newTotal % activeCount;
+    // enrollment.sessions_remaining should be 0 (absorbed into pool), but include for safety
+    const { data: lastEnrollData } = await supabaseAdmin
+      .from('enrollments')
+      .select('sessions_remaining')
+      .eq('id', lastMember.enrollment_id)
+      .single();
+    const enrollmentOffset = lastEnrollData?.sessions_remaining ?? 0;
 
-  for (let i = 0; i < activeMembers.length; i++) {
-    const bonus = i < remainder ? 1 : 0;
     await supabaseAdmin
       .from('enrollments')
-      .update({ sessions_remaining: bonus })
-      .eq('id', activeMembers[i].enrollment_id);
+      .update({
+        sessions_remaining: enrollmentOffset + pool.sessions_remaining,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', lastMember.enrollment_id);
+
+    // Remove from pool_students (display logic checks pool_students membership, not pool_id)
+    await supabaseAdmin
+      .from('pool_students')
+      .delete()
+      .eq('pool_id', poolId)
+      .eq('student_id', lastMember.student_id);
+
+    // Soft delete the pool
+    await softDeletePool(poolId);
   }
+  // If 2+ members remain, pool continues — sessions auto-redistribute via display formula
 }
 
 /**
  * Restore a student back into their pool when their enrollment becomes active again.
  *
  * Uses enrollment.pool_id (preserved during redistribution) as the breadcrumb.
- * Reverses the redistribution: adds consumed sessions back to pool.total_sessions,
- * re-adds to pool_students, and recalculates bonuses.
+ * Re-adds to pool_students so they share sessions again.
+ * The display formula automatically splits pool.sessions_remaining among all members.
  */
 export async function restoreStudentToPool(
   enrollmentId: string,
@@ -700,7 +724,7 @@ export async function restoreStudentToPool(
 
   if (existing) return; // Already active in pool
 
-  // 3. Get pool — might be soft-deleted if all members went inactive
+  // 3. Get pool — might be soft-deleted if auto-converted to individual (2→1 case)
   const { data: pool } = await supabaseAdmin
     .from('shared_session_pools')
     .select('*')
@@ -717,26 +741,7 @@ export async function restoreStudentToPool(
       .eq('id', poolId);
   }
 
-  // 4. Count this student's consumed sessions
-  const { count: consumedCount } = await supabaseAdmin
-    .from('attendance')
-    .select('id', { count: 'exact', head: true })
-    .eq('enrollment_id', enrollmentId)
-    .in('status', ['present', 'late']);
-
-  const consumed = consumedCount ?? 0;
-
-  // 5. Add consumed back to pool.total_sessions (reverses the subtraction)
-  const newTotal = pool.total_sessions + consumed;
-  await supabaseAdmin
-    .from('shared_session_pools')
-    .update({
-      total_sessions: newTotal,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', poolId);
-
-  // 6. Re-add to pool_students
+  // 4. Re-add restored student to pool_students
   await supabaseAdmin
     .from('pool_students')
     .insert({
@@ -745,28 +750,82 @@ export async function restoreStudentToPool(
       enrollment_id: enrollmentId,
     });
 
-  // 7. Reset this student's bonus to 0
+  // 5. Absorb restored student's ALL enrollment sessions into pool (positive and negative)
+  const { data: enrollmentSessions } = await supabaseAdmin
+    .from('enrollments')
+    .select('sessions_remaining')
+    .eq('id', enrollmentId)
+    .single();
+
+  const leftover = enrollmentSessions?.sessions_remaining ?? 0;
+
+  let currentPool = await getPoolById(poolId);
+  if (currentPool && leftover !== 0) {
+    await supabaseAdmin
+      .from('shared_session_pools')
+      .update({
+        sessions_remaining: currentPool.sessions_remaining + leftover,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', poolId);
+  }
+  // Reset enrollment to 0 — all sessions tracked in pool
   await supabaseAdmin
     .from('enrollments')
     .update({ sessions_remaining: 0 })
     .eq('id', enrollmentId);
 
-  // 8. Recalculate bonuses for ALL members (including restored student)
-  const { data: allMembers } = await supabaseAdmin
-    .from('pool_students')
-    .select('student_id, enrollment_id, joined_at')
+  // 6. Check if there are other students with this pool_id breadcrumb who are NOT in pool_students
+  //    This handles the 2→1 auto-convert case: when the cancelled sibling is restored,
+  //    the other sibling (who was converted to individual) must also rejoin the pool.
+  const { data: breadcrumbEnrollments } = await supabaseAdmin
+    .from('enrollments')
+    .select('id, student_id, sessions_remaining, status')
     .eq('pool_id', poolId)
-    .order('joined_at', { ascending: true });
+    .neq('student_id', studentId)
+    .is('deleted_at', null);
 
-  const members = allMembers ?? [];
-  const memberCount = members.length;
-  const remainder = newTotal % memberCount;
+  for (const otherEnroll of breadcrumbEnrollments ?? []) {
+    // Skip inactive enrollments (they were separately cancelled/expired)
+    if (['cancelled', 'completed', 'expired'].includes(otherEnroll.status)) continue;
 
-  for (let i = 0; i < members.length; i++) {
-    const bonus = i < remainder ? 1 : 0;
+    // Check if already in pool_students
+    const { data: alreadyInPool } = await supabaseAdmin
+      .from('pool_students')
+      .select('id')
+      .eq('pool_id', poolId)
+      .eq('student_id', otherEnroll.student_id)
+      .maybeSingle();
+
+    if (alreadyInPool) continue; // Already active in pool
+
+    // Re-add this sibling to pool_students
+    await supabaseAdmin
+      .from('pool_students')
+      .insert({
+        pool_id: poolId,
+        student_id: otherEnroll.student_id,
+        enrollment_id: otherEnroll.id,
+      });
+
+    // Absorb ALL sessions back into pool (positive and negative)
+    const siblingLeftover = otherEnroll.sessions_remaining ?? 0;
+    if (siblingLeftover !== 0) {
+      currentPool = await getPoolById(poolId);
+      if (currentPool) {
+        await supabaseAdmin
+          .from('shared_session_pools')
+          .update({
+            sessions_remaining: currentPool.sessions_remaining + siblingLeftover,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', poolId);
+      }
+    }
+    // Reset enrollment to 0 — all sessions tracked in pool
     await supabaseAdmin
       .from('enrollments')
-      .update({ sessions_remaining: bonus })
-      .eq('id', members[i].enrollment_id);
+      .update({ sessions_remaining: 0 })
+      .eq('id', otherEnroll.id);
   }
 }
