@@ -6,6 +6,7 @@ import type {
   PaymentStatus,
   PaymentMethod,
   PaymentWithStudent,
+  InvoiceSnapshot,
 } from "@/db/schema";
 
 // ============================================
@@ -405,6 +406,9 @@ export interface PendingPaymentRow {
   isSharedPackage: boolean;
   poolId: string | null;
   sharedStudentNames: string[] | null; // All sibling names for shared packages
+  // Voucher info
+  hasVoucher: boolean;
+  voucherAmount: number | null;
 }
 
 export async function getPendingPaymentsForTable(
@@ -544,6 +548,35 @@ export async function getPendingPaymentsForTable(
     }
   }
 
+  // Check voucher availability for each student+course combo
+  const voucherMap = new Map<string, number>(); // key: studentId-courseId -> amount
+  const studentCourseKeys = new Set<string>();
+  for (const payment of data ?? []) {
+    const student = payment.student as unknown as { id: string };
+    const courseId = (payment as unknown as { course_id: string | null }).course_id;
+    if (courseId) {
+      studentCourseKeys.add(`${student.id}|${courseId}`);
+    }
+  }
+  if (studentCourseKeys.size > 0) {
+    // Batch fetch available vouchers
+    const { data: availableVouchers } = await supabaseAdmin
+      .from('vouchers')
+      .select('student_id, course_id, amount')
+      .eq('status', 'available');
+
+    for (const v of availableVouchers ?? []) {
+      const key = `${v.student_id}|${v.course_id}`;
+      if (studentCourseKeys.has(key)) {
+        // Keep the highest voucher amount
+        const existing = voucherMap.get(key) ?? 0;
+        if (v.amount > existing) {
+          voucherMap.set(key, v.amount);
+        }
+      }
+    }
+  }
+
   return (data ?? []).map((payment) => {
     // Handle nested relations
     const student = payment.student as unknown as {
@@ -579,6 +612,10 @@ export async function getPendingPaymentsForTable(
     // Get shared student names from pool
     const sharedStudentNames = poolId ? (poolSiblingsMap.get(poolId) ?? null) : null;
 
+    // Check voucher availability
+    const voucherKey = courseId ? `${student.id}|${courseId}` : '';
+    const voucherAmount = voucherKey ? (voucherMap.get(voucherKey) ?? null) : null;
+
     return {
       id: payment.id,
       parentName: parentInfo?.name ?? null,
@@ -602,8 +639,158 @@ export async function getPendingPaymentsForTable(
       isSharedPackage: isSharedPackage || !!poolId,
       poolId,
       sharedStudentNames,
+      // Voucher info
+      hasVoucher: voucherAmount !== null && voucherAmount > 0,
+      voucherAmount,
     };
   });
+}
+
+/**
+ * Creates a frozen invoice snapshot for a payment.
+ * Captures all display data (company info, student names, items) at the moment of payment.
+ * This snapshot is immutable after 1 week — even if company name, student names, etc. change later.
+ */
+export async function createInvoiceSnapshot(paymentId: string): Promise<InvoiceSnapshot | null> {
+  // Fetch all data needed for the invoice in one go
+  const { data: payment } = await supabaseAdmin
+    .from('payments')
+    .select(`
+      id, amount, course_id, package_id, pool_id, is_shared_package,
+      student:students!inner(
+        id, name, branch_id,
+        branch:branches!inner(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
+        parent_students(parent:parents(id, name, address, postcode, city))
+      ),
+      course:courses(name, code)
+    `)
+    .eq('id', paymentId)
+    .single();
+
+  if (!payment) return null;
+
+  const student = payment.student as unknown as {
+    id: string; name: string; branch_id: string;
+    branch: { id: string; name: string; city: string | null; parent_id: string | null; address: string | null; phone: string | null; email: string | null; bank_name: string | null; bank_account: string | null };
+    parent_students: Array<{ parent: { id: string; name: string; address: string | null; postcode: string | null; city: string | null } | null }>;
+  };
+  const course = payment.course as unknown as { name: string; code: string | null } | null;
+  const parentInfo = student.parent_students?.[0]?.parent;
+  const poolId = (payment as unknown as { pool_id: string | null }).pool_id;
+  const isSharedPackage = (payment as unknown as { is_shared_package: boolean }).is_shared_package ?? false;
+
+  // Get branch company name
+  let branchCompanyName: string | null = null;
+  if (student.branch.parent_id) {
+    const { data: company } = await supabaseAdmin
+      .from('branches').select('name').eq('id', student.branch.parent_id).eq('type', 'company').maybeSingle();
+    branchCompanyName = company?.name ?? null;
+  }
+
+  // Get package info
+  let packageName: string | null = null;
+  let packageDuration: number | null = null;
+  let packageType: "monthly" | "session" | null = null;
+  const courseId = (payment as unknown as { course_id: string | null }).course_id;
+  if (courseId) {
+    const { data: pricing } = await supabaseAdmin
+      .from('course_pricing')
+      .select('package_type, duration, price')
+      .eq('course_id', courseId)
+      .eq('price', payment.amount)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (pricing) {
+      const typeLabel = pricing.package_type === 'monthly' ? 'Month' : 'Session';
+      const plural = pricing.duration > 1 ? 's' : '';
+      packageName = `${pricing.duration} ${typeLabel}${plural}`;
+      packageDuration = pricing.duration;
+      packageType = pricing.package_type as "monthly" | "session";
+    }
+  }
+
+  // Get shared student names from pool
+  let sharedStudentNames: string[] | null = null;
+  if (poolId) {
+    const { data: poolStudents } = await supabaseAdmin
+      .from('pool_students')
+      .select('student:students(name)')
+      .eq('pool_id', poolId);
+    sharedStudentNames = (poolStudents ?? []).map((ps) => (ps.student as unknown as { name: string }).name);
+  }
+
+  // Build bill-to address
+  const parentAddress = parentInfo?.address ?? null;
+  const parentPostcode = parentInfo?.postcode ?? null;
+  const parentCity = parentInfo?.city ?? null;
+  const addressParts: string[] = [];
+  if (parentAddress) addressParts.push(parentAddress);
+  const postcodeCity = [parentPostcode, parentCity].filter(Boolean).join(' ');
+  if (postcodeCity) addressParts.push(postcodeCity);
+  const billToAddress = addressParts.length > 0 ? addressParts.join('\n') : null;
+
+  // Build invoice items
+  const items: Array<{ code: string; product: string; qty: number; rate: number }> = [];
+  const packageCode = course?.code ?? 'PKG';
+  const duration = packageDuration ?? 1;
+  const isSession = packageType === 'session' || packageName?.toLowerCase().includes('session');
+  const unitLabel = isSession ? 'Session' : 'Month';
+
+  if ((isSharedPackage || !!poolId) && sharedStudentNames && sharedStudentNames.length > 1) {
+    // Shared package: equal split per sibling
+    const siblingCount = sharedStudentNames.length;
+    const splitSessions = Math.floor(duration / siblingCount);
+    const splitPrice = payment.amount / siblingCount;
+
+    for (const name of sharedStudentNames) {
+      items.push({
+        code: packageCode,
+        product: `${course?.name ?? 'Course'} - ${splitSessions} ${unitLabel}${splitSessions > 1 ? 's' : ''}\n(${name})`,
+        qty: 1,
+        rate: splitPrice,
+      });
+    }
+  } else {
+    // Solo: single item
+    items.push({
+      code: packageCode,
+      product: `${course?.name ?? 'Course'} - ${duration} ${unitLabel}${duration > 1 ? 's' : ''}\n(${student.name})`,
+      qty: 1,
+      rate: payment.amount,
+    });
+  }
+
+  const snapshot: InvoiceSnapshot = {
+    billToName: parentInfo?.name ?? student.name,
+    billToAddress,
+    billToContact: null,
+    studentName: student.name,
+    sharedStudentNames,
+    isSharedPackage: isSharedPackage || !!poolId,
+    courseName: course?.name ?? null,
+    courseCode: course?.code ?? null,
+    packageName,
+    packageDuration,
+    packageType,
+    price: payment.amount,
+    branchName: student.branch.name,
+    branchCompanyName,
+    branchAddress: student.branch.address,
+    branchPhone: student.branch.phone,
+    branchEmail: student.branch.email,
+    branchBankName: student.branch.bank_name,
+    branchBankAccount: student.branch.bank_account,
+    items,
+    total: payment.amount,
+  };
+
+  // Save snapshot to the payment record
+  await supabaseAdmin
+    .from('payments')
+    .update({ invoice_snapshot: snapshot as unknown as Record<string, unknown> })
+    .eq('id', paymentId);
+
+  return snapshot;
 }
 
 export async function approvePayment(paymentId: string): Promise<Payment | null> {
@@ -614,17 +801,42 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
     return null;
   }
 
+  // Auto-detect and apply voucher
+  let appliedVoucherId: string | null = null;
+  let discountAmount: number | null = null;
+
+  if (payment.course_id) {
+    const { getAvailableVouchersForStudent, redeemVoucher } = await import("./vouchers");
+    const vouchers = await getAvailableVouchersForStudent(payment.student_id, payment.course_id);
+    if (vouchers.length > 0) {
+      const bestVoucher = vouchers[0]; // Already sorted by amount desc
+      appliedVoucherId = bestVoucher.id;
+      discountAmount = bestVoucher.amount;
+      console.log(`[Payment Approval] Auto-applying voucher ${bestVoucher.id} for RM${bestVoucher.amount} discount`);
+    }
+  }
+
   // IMPORTANT: Update payment status to 'paid' FIRST before any session tracking
   // This prevents createEnrollmentRenewalPayment from finding this payment as "existing pending"
   const updatedPayment = await updatePayment(paymentId, {
     status: 'paid',
     paid_at: new Date().toISOString(),
+    ...(appliedVoucherId ? { voucher_id: appliedVoucherId, discount_amount: discountAmount } : {}),
   });
 
   if (!updatedPayment) {
     console.error('Failed to update payment status');
     return null;
   }
+
+  // Redeem the voucher if one was applied
+  if (appliedVoucherId) {
+    const { redeemVoucher } = await import("./vouchers");
+    await redeemVoucher(appliedVoucherId, paymentId);
+  }
+
+  // Create frozen invoice snapshot (immutable after 1 week)
+  await createInvoiceSnapshot(paymentId);
 
   // Check if this is a pool payment (shared sibling package)
   if (payment.pool_id) {
@@ -645,6 +857,14 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
         const sessionsToAdd = pricingData.duration;
         const newRemaining = await addPoolSessions(payment.pool_id, sessionsToAdd);
         console.log(`[Pool Payment] Added ${sessionsToAdd} sessions to pool ${payment.pool_id}. New remaining: ${newRemaining}`);
+
+        // Set package_id on the payment if not already set
+        if (!payment.package_id) {
+          await supabaseAdmin
+            .from('payments')
+            .update({ package_id: pricingData.id })
+            .eq('id', paymentId);
+        }
 
         // Update pool's package_id if not set
         const pool = await getPoolById(payment.pool_id);
@@ -766,6 +986,14 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
             updated_at: new Date().toISOString(),
           })
           .eq('id', enrollment.id);
+
+        // Set package_id on the payment if not already set
+        if (!payment.package_id) {
+          await supabaseAdmin
+            .from('payments')
+            .update({ package_id: pricingData.id })
+            .eq('id', paymentId);
+        }
 
         console.log(`[Payment Approval] Sessions updated: ${currentSessions} + ${sessionsToAdd} = ${newSessions}`);
       } else {
@@ -1028,6 +1256,8 @@ export interface PaymentRecordRow {
   isSharedPackage: boolean;
   poolId: string | null;
   sharedStudentNames: string[] | null;
+  // Frozen invoice snapshot (immutable after 1 week)
+  invoiceSnapshot: InvoiceSnapshot | null;
 }
 
 export async function getPaymentRecordsForTable(
@@ -1075,6 +1305,7 @@ export async function getPaymentRecordsForTable(
       paid_at,
       receipt_photo,
       invoice_number,
+      invoice_snapshot,
       course_id,
       package_id,
       pool_id,
@@ -1257,6 +1488,7 @@ export async function getPaymentRecordsForTable(
       isSharedPackage: isSharedPackage || !!poolId,
       poolId,
       sharedStudentNames,
+      invoiceSnapshot: (payment as unknown as { invoice_snapshot: InvoiceSnapshot | null }).invoice_snapshot ?? null,
     };
   });
 }
@@ -1278,16 +1510,43 @@ export async function createPoolRenewalPayment(poolId: string): Promise<Payment 
   }
 
   // Check if there's already a pending payment for this pool
-  const { data: existingPayment } = await supabaseAdmin
+  const { data: existingPoolPayments } = await supabaseAdmin
     .from('payments')
     .select('id')
     .eq('pool_id', poolId)
     .eq('status', 'pending')
-    .maybeSingle();
+    .limit(1);
 
-  if (existingPayment) {
-    console.log('Pending pool payment already exists:', existingPayment.id);
+  if (existingPoolPayments && existingPoolPayments.length > 0) {
+    console.log('Pending pool payment already exists:', existingPoolPayments[0].id);
     return null;
+  }
+
+  // Also check if any pool member already has an individual pending payment for this course
+  // (to prevent duplicates when switching between pool and individual states)
+  const studentIds_check = pool.students.map(s => s.id);
+  if (studentIds_check.length > 0 && pool.course_id) {
+    const { data: existingIndividualPayments } = await supabaseAdmin
+      .from('payments')
+      .select('id')
+      .eq('course_id', pool.course_id)
+      .eq('status', 'pending')
+      .in('student_id', studentIds_check)
+      .limit(1);
+
+    if (existingIndividualPayments && existingIndividualPayments.length > 0) {
+      // Convert existing individual payment to pool payment instead of creating new
+      console.log('Converting existing individual payment to pool payment:', existingIndividualPayments[0].id);
+      await supabaseAdmin
+        .from('payments')
+        .update({
+          pool_id: poolId,
+          is_shared_package: true,
+          shared_with: studentIds_check,
+        })
+        .eq('id', existingIndividualPayments[0].id);
+      return null;
+    }
   }
 
   // Get the package price
@@ -1315,12 +1574,10 @@ export async function createPoolRenewalPayment(poolId: string): Promise<Payment 
   // Get all student IDs for shared_with
   const studentIds = pool.students.map(s => s.id);
 
-  // Note: DO NOT set package_id here — payments.package_id references the legacy
-  // 'packages' table, but pool.package_id references 'course_pricing'. Setting it
-  // would cause a FK violation and silently fail.
   const paymentData: PaymentInsert = {
     student_id: firstStudent.id,
     course_id: pool.course_id,
+    package_id: pool.package_id,
     pool_id: poolId,
     amount: price,
     payment_type: 'package',
@@ -1377,15 +1634,14 @@ export async function createEnrollmentRenewalPayment(enrollmentId: string): Prom
     package_id: enrollment.package_id,
   });
 
-  // Check if there's already a pending payment for this student
-  // Use limit(1) instead of maybeSingle() to avoid errors when multiple exist
+  // Check if there's already a pending payment for this student+course (any pool state)
+  // Use limit instead of maybeSingle() to avoid errors when multiple exist
   const { data: existingPayments, error: existingError } = await supabaseAdmin
     .from('payments')
-    .select('id, amount, created_at, course_id, status')
+    .select('id, amount, created_at, course_id, pool_id, status')
     .eq('student_id', enrollment.student_id)
     .eq('status', 'pending')
-    .is('pool_id', null)
-    .limit(10); // Get up to 10 to see what exists
+    .limit(10);
 
   console.log('[Renewal Payment] Existing pending payments query result:', {
     error: existingError,
@@ -1398,7 +1654,7 @@ export async function createEnrollmentRenewalPayment(enrollmentId: string): Prom
     // Continue anyway - we'll try to create a payment
   }
 
-  // Check if any existing payment matches this course
+  // Check if any existing payment matches this course (regardless of pool_id)
   const matchingPayment = existingPayments?.find(p =>
     !enrollment.course_id || p.course_id === enrollment.course_id
   );
@@ -1443,11 +1699,10 @@ export async function createEnrollmentRenewalPayment(enrollmentId: string): Prom
   const studentName = studentData?.name || 'Student';
   const courseName = courseData?.name || 'Course';
 
-  // Note: Don't set package_id - it references legacy 'packages' table, not 'course_pricing'
-  // Package is looked up by course_id + amount in getPendingPaymentsForTable
   const paymentData: PaymentInsert = {
     student_id: enrollment.student_id,
     course_id: enrollment.course_id,
+    package_id: enrollment.package_id,
     amount: price,
     payment_type: 'package',
     status: 'pending',

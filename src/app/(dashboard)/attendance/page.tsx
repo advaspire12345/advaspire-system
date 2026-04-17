@@ -39,6 +39,10 @@ export default async function AttendancePage() {
     return getAllInstructorsForAttendance();
   };
 
+  // Run on-demand expiry check before fetching data
+  const { checkAndExpireEnrollments } = await import("@/data/enrollments");
+  await checkAndExpireEnrollments();
+
   // Fetch data in parallel
   const [enrollments, allStudentsForManual, instructors] = await Promise.all([
     getEnrollmentsForAttendance(user.email),

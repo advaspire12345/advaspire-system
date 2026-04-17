@@ -458,15 +458,31 @@ export function PendingPaymentModal({
 
                 {/* Student Name (readonly) */}
                 <div className="relative">
-                  <input
-                    type="text"
-                    readOnly
-                    value={record?.studentName ?? "-"}
-                    className={cn(
-                      "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
-                      readonlyFieldClass
-                    )}
-                  />
+                  {record?.isSharedPackage && record?.sharedStudentNames && record.sharedStudentNames.length > 1 ? (
+                    <div
+                      className={cn(
+                        "peer w-full min-h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                        readonlyFieldClass
+                      )}
+                    >
+                      {record.sharedStudentNames.map((name, i) => (
+                        <span key={name}>
+                          {i > 0 && <span className="text-red-500 mx-1">&amp;</span>}
+                          <span className="text-foreground">{name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      readOnly
+                      value={record?.studentName ?? "-"}
+                      className={cn(
+                        "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                        readonlyFieldClass
+                      )}
+                    />
+                  )}
                   <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
                     Student Name
                   </label>
@@ -549,37 +565,73 @@ export function PendingPaymentModal({
                   )}
 
                   <div className="relative">
-                    <div
-                      className={cn(
-                        "flex h-[58px] items-center justify-center rounded-[10px] border border-[#ADAFCA] text-2xl font-bold text-[#23d2e2]",
-                        readonlyFieldClass
-                      )}
-                    >
-                      RM{(isReadonly ? (record?.price ?? 0) : price).toLocaleString()}
-                    </div>
-                    <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                      Price
-                    </label>
+                    {(() => {
+                      const hasVoucherDiscount = (mode === "approve" || mode === "edit") && record?.hasVoucher && record?.voucherAmount;
+                      const displayPrice = isReadonly ? (record?.price ?? 0) : price;
+                      const discountedPrice = hasVoucherDiscount ? displayPrice - record.voucherAmount! : displayPrice;
+                      return (
+                        <>
+                          <div
+                            className={cn(
+                              "flex h-[58px] items-center justify-center rounded-[10px] border border-[#ADAFCA] text-2xl font-bold",
+                              hasVoucherDiscount ? "text-green-600" : "text-[#23d2e2]",
+                              readonlyFieldClass
+                            )}
+                          >
+                            {hasVoucherDiscount ? (
+                              <>
+                                <span className="text-base text-muted-foreground line-through mr-2">RM{displayPrice.toLocaleString()}</span>
+                                <span>RM{discountedPrice.toLocaleString()}</span>
+                              </>
+                            ) : (
+                              <>RM{displayPrice.toLocaleString()}</>
+                            )}
+                          </div>
+                          <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                            {hasVoucherDiscount ? "Price with Voucher" : "Price"}
+                          </label>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </>
             )}
 
-            {/* Payment Method */}
+            {/* Payment Method + Voucher */}
             {isReadonly ? (
-              <div className="relative">
-                <input
-                  type="text"
-                  readOnly
-                  value={paymentMethod ? PAYMENT_METHODS.find(m => m.value === paymentMethod)?.label ?? paymentMethod : "-"}
-                  className={cn(
-                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
-                    readonlyFieldClass
-                  )}
-                />
-                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                  Payment Method
-                </label>
+              <div className={mode === "approve" ? "grid grid-cols-2 gap-4" : ""}>
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    value={paymentMethod ? PAYMENT_METHODS.find(m => m.value === paymentMethod)?.label ?? paymentMethod : "-"}
+                    className={cn(
+                      "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
+                      readonlyFieldClass
+                    )}
+                  />
+                  <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                    Payment Method
+                  </label>
+                </div>
+                {mode === "approve" && record && (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      readOnly
+                      value={record.hasVoucher && record.voucherAmount ? `RM${record.voucherAmount} discount applied` : "No voucher"}
+                      className={cn(
+                        "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold flex items-center",
+                        readonlyFieldClass,
+                        record.hasVoucher ? "text-green-600" : "text-muted-foreground"
+                      )}
+                    />
+                    <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                      Voucher
+                    </label>
+                  </div>
+                )}
               </div>
             ) : (
               <FloatingSelect

@@ -33,6 +33,10 @@ export default async function DashboardPage() {
   const perms = permData?.permissions.dashboard;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
+  // Run on-demand expiry check
+  const { checkAndExpireEnrollments } = await import("@/data/enrollments");
+  await checkAndExpireEnrollments();
+
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">
       <div className="space-y-6">

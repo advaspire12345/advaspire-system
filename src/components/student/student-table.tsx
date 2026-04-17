@@ -143,6 +143,8 @@ export function StudentTable({
     schoolName: formData.schoolName,
     coverPhotoUrl: formData.coverPhotoUrl,
     studentId: formData.studentId,
+    username: formData.username,
+    portalPassword: formData.portalPassword,
     level: formData.level,
     adcoinBalance: formData.adcoinBalance,
     parentId: formData.parentId,
@@ -198,18 +200,37 @@ export function StudentTable({
     router.refresh();
   };
 
-  // Filter data based on search
+  // Filter data based on search — when a student matches, include siblings (same parent) too
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return initialData;
 
     const query = searchQuery.toLowerCase();
-    return initialData.filter(
+    const directMatches = initialData.filter(
       (row) =>
         row.name.toLowerCase().includes(query) ||
         row.email?.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query) ||
         row.programName?.toLowerCase().includes(query),
     );
+
+    // Collect parentIds from direct matches to find siblings
+    const matchedParentIds = new Set<string>();
+    for (const row of directMatches) {
+      if (row.parentId) matchedParentIds.add(row.parentId);
+    }
+
+    // Include siblings that share a parentId with any direct match
+    if (matchedParentIds.size === 0) return directMatches;
+
+    const matchedIds = new Set(directMatches.map((r) => r.id));
+    const siblings = initialData.filter(
+      (row) =>
+        !matchedIds.has(row.id) &&
+        row.parentId !== null &&
+        matchedParentIds.has(row.parentId),
+    );
+
+    return [...directMatches, ...siblings];
   }, [initialData, searchQuery]);
 
   // Pagination
@@ -510,16 +531,32 @@ export function StudentTable({
                         className="px-3 py-2 text-sm"
                         style={{ width: columns[9].width }}
                       >
-                        {row.packageType && row.packageDuration ? (
-                          <span className="font-medium">
-                            {row.packageDuration} {row.packageType === "session" ? "session" : "month"}
-                            {row.packageDuration !== 1 ? "s" : ""}
-                          </span>
+                        {row.isPooled ? (
+                          <div>
+                            <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                              Pool
+                            </span>
+                            {row.poolSiblings && row.poolSiblings.length > 0 && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                ({row.poolSiblings.join(", ")})
+                              </span>
+                            )}
+                          </div>
                         ) : row.packageType ? (
-                          <span className="capitalize">{row.packageType}</span>
+                          <div>
+                            <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                              Individual
+                            </span>
+                          </div>
                         ) : (
                           "-"
                         )}
+                        {row.packageType && row.packageDuration ? (
+                          <span className="text-xs text-muted-foreground">
+                            {row.packageDuration} {row.packageType === "session" ? "session" : "month"}
+                            {row.packageDuration !== 1 ? "s" : ""}
+                          </span>
+                        ) : null}
                       </td>
 
                       {/* Period Active */}
@@ -584,11 +621,15 @@ export function StudentTable({
                       >
                         {(() => {
                           const sessions = row.sessionsRemaining ?? 0;
-                          // For session packages: override status based on session count
+                          const actualStatus = row.enrollmentStatus;
+                          // If status is explicitly cancelled/expired/completed, always show that
+                          // Only auto-derive for session packages when status is active or pending
                           const autoStatus =
-                            row.packageType === "session"
-                              ? sessions > 0 ? "active" : "pending"
-                              : row.enrollmentStatus;
+                            actualStatus && ['cancelled', 'expired', 'completed'].includes(actualStatus)
+                              ? actualStatus
+                              : row.packageType === "session"
+                                ? sessions > 0 ? "active" : "pending"
+                                : actualStatus;
                           return (
                             <span
                               className={cn(

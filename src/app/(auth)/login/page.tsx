@@ -58,7 +58,20 @@ function LoginContent() {
       return;
     }
 
-    router.push("/dashboard");
+    // Check role to decide redirect destination
+    try {
+      const res = await fetch("/api/auth/role");
+      const { role } = await res.json();
+
+      if (role === "parent") {
+        router.push("/parent");
+      } else {
+        router.push("/dashboard");
+      }
+    } catch {
+      router.push("/dashboard");
+    }
+
     router.refresh();
   };
 

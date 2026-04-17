@@ -176,24 +176,12 @@ export function TopMenuBar() {
 
       {/* End: Progress bar, notifications, settings, user */}
       <div className="flex items-center gap-2">
-        {/* Adcoins progress */}
-        <div className="hidden flex-col items-start md:flex px-5">
-          <div className="flex items-center justify-between w-full gap-8">
-            <span className="text-white text-sm font-bold">Adcoins:</span>
-            <span className="text-white text-sm font-bold">
-              {adcoinStats?.totalAdcoinBalance?.toLocaleString() ?? "—"}
-            </span>
-          </div>
-          <div className="w-full h-1.5 rounded-lg bg-[#4E4AC8]">
-            <div
-              className="h-full rounded-lg bg-white transition-all duration-300"
-              style={{
-                width: adcoinStats
-                  ? `${Math.min(100, Math.max(10, (adcoinStats.adcoinChange + 100) / 2))}%`
-                  : "50%",
-              }}
-            />
-          </div>
+        {/* Adcoins */}
+        <div className="flex items-center gap-2 px-3 md:px-5">
+          <Coins className="h-5 w-5 text-yellow-300 shrink-0" />
+          <span className="text-white text-sm font-bold whitespace-nowrap">
+            {adcoinStats?.totalAdcoinBalance?.toLocaleString() ?? "—"}
+          </span>
         </div>
         <Separator
           orientation="vertical"

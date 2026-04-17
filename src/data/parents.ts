@@ -166,6 +166,120 @@ export async function createParent(parentData: ParentInsert): Promise<Parent | n
   return data;
 }
 
+/**
+ * Creates a parent record AND a Supabase Auth account, then links them.
+ * Uses the parent's email as login with a default password.
+ * Returns the created parent or null on failure.
+ */
+export async function createParentWithAuth(
+  parentData: ParentInsert,
+  defaultPassword: string = "Parent@123"
+): Promise<Parent | null> {
+  // 1. Create the Supabase Auth account
+  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    email: parentData.email,
+    password: defaultPassword,
+    email_confirm: true,
+    user_metadata: {
+      full_name: parentData.name,
+      role: 'parent',
+    },
+  });
+
+  if (authError) {
+    console.error('Error creating parent auth account:', authError);
+    // If auth account already exists, try to look it up
+    if (authError.message?.includes('already been registered')) {
+      const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+      const existingAuth = existingUsers?.users?.find(
+        (u) => u.email === parentData.email
+      );
+      if (existingAuth) {
+        // Create parent record linked to existing auth
+        const parent = await createParent({
+          ...parentData,
+          auth_id: existingAuth.id,
+        } as any);
+        return parent;
+      }
+    }
+    // Fall back to creating parent without auth
+    return createParent(parentData);
+  }
+
+  // 2. Create the parent record with auth_id linked
+  const parent = await createParent({
+    ...parentData,
+    auth_id: authData.user.id,
+  } as any);
+
+  // 3. Also create a users table entry for role-based access
+  if (parent && authData.user) {
+    await supabaseAdmin.from('users').insert({
+      auth_id: authData.user.id,
+      email: parentData.email,
+      name: parentData.name,
+      role: 'parent',
+      status: 'active',
+    });
+  }
+
+  return parent;
+}
+
+/**
+ * Ensures an existing parent has a Supabase Auth account.
+ * If no auth_id is set, creates one and links it.
+ */
+export async function ensureParentAuth(
+  parentId: string,
+  defaultPassword: string = "Parent@123"
+): Promise<boolean> {
+  const parent = await getParentById(parentId);
+  if (!parent) return false;
+  if (parent.auth_id) return true; // Already linked
+
+  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    email: parent.email,
+    password: defaultPassword,
+    email_confirm: true,
+    user_metadata: {
+      full_name: parent.name,
+      role: 'parent',
+    },
+  });
+
+  if (authError) {
+    console.error('Error creating auth for existing parent:', authError);
+    // Try to find existing auth by email
+    if (authError.message?.includes('already been registered')) {
+      const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+      const existingAuth = existingUsers?.users?.find(
+        (u) => u.email === parent.email
+      );
+      if (existingAuth) {
+        await linkParentToAuth(parentId, existingAuth.id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Link auth to parent
+  await linkParentToAuth(parentId, authData.user.id);
+
+  // Create users table entry
+  await supabaseAdmin.from('users').insert({
+    auth_id: authData.user.id,
+    email: parent.email,
+    name: parent.name,
+    role: 'parent',
+    status: 'active',
+  });
+
+  return true;
+}
+
 export async function updateParent(parentId: string, parentData: ParentUpdate): Promise<Parent | null> {
   const { data, error } = await supabaseAdmin
     .from('parents')

@@ -558,33 +558,45 @@ export function PaymentRecordTable({
 
                       {/* Actions */}
                       <td className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")} style={{ width: columns[10].width }}>
-                        <div className="flex items-center justify-center gap-2">
-                          {/* Edit Button */}
-                          {canEdit && (
-                            <button
-                              type="button"
-                              onClick={() => openModal("edit", row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                              aria-label="Edit payment"
-                              title="Edit"
-                            >
-                              <Pencil className="h-5 w-5" />
-                            </button>
-                          )}
-
-                          {/* Delete Button */}
-                          {canDelete && (
-                            <button
-                              type="button"
-                              onClick={() => openModal("delete", row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                              aria-label="Delete payment"
-                              title="Delete"
-                            >
-                              <Trash2 className="h-5 w-5" />
-                            </button>
-                          )}
-                        </div>
+                        {(() => {
+                          const isLocked = row.paidAt && (Date.now() - new Date(row.paidAt).getTime() > 7 * 24 * 60 * 60 * 1000);
+                          if (isLocked) {
+                            return (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center justify-center text-xs text-muted-foreground/50 font-medium">Locked</div>
+                                </TooltipTrigger>
+                                <TooltipContent><p>Cannot edit after 1 week</p></TooltipContent>
+                              </Tooltip>
+                            );
+                          }
+                          return (
+                            <div className="flex items-center justify-center gap-2">
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => openModal("edit", row)}
+                                  className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                                  aria-label="Edit payment"
+                                  title="Edit"
+                                >
+                                  <Pencil className="h-5 w-5" />
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  type="button"
+                                  onClick={() => openModal("delete", row)}
+                                  className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                                  aria-label="Delete payment"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-5 w-5" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))
@@ -617,77 +629,98 @@ export function PaymentRecordTable({
       />
 
       {/* Receipt Preview Modal (Invoice) */}
-      {receiptRecord && (
-        <ReceiptPreviewModal
-          open={receiptModalOpen}
-          onOpenChange={setReceiptModalOpen}
-          billToName={receiptRecord.parentName ?? receiptRecord.studentName}
-          billToAddress={(() => {
-            const parts: string[] = [];
-            if (receiptRecord.parentAddress) {
-              parts.push(receiptRecord.parentAddress);
-            }
-            const postcodeCity = [receiptRecord.parentPostcode, receiptRecord.parentCity]
-              .filter(Boolean)
-              .join(" ");
-            if (postcodeCity) {
-              parts.push(postcodeCity);
-            }
-            return parts.length > 0 ? parts.join("\n") : undefined;
-          })()}
-          billToContact={undefined}
-          date={receiptRecord.paidAt ? new Date(receiptRecord.paidAt) : new Date()}
-          receiptNo={receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
-          invoiceNo={receiptRecord.invoiceNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
-          items={(() => {
-            const items: { code: string; product: string; qty: number; rate: number }[] = [];
-            const packageCode = receiptRecord.courseCode ?? receiptRecord.packageId?.slice(0, 8).toUpperCase() ?? "PKG";
-            const duration = receiptRecord.packageDuration ?? 1;
-            // Check packageName or packageType for "session" (case-insensitive)
-            const isSession =
-              receiptRecord.packageName?.toLowerCase().includes("session") ||
-              receiptRecord.packageType?.toLowerCase() === "session";
-            const unitLabel = isSession ? "Session" : "Month";
+      {receiptRecord && (() => {
+        // Use frozen snapshot ONLY after 1 week; within 1 week use live data so edits are reflected
+        const snap = receiptRecord.invoiceSnapshot;
+        const isLocked = receiptRecord.paidAt && (Date.now() - new Date(receiptRecord.paidAt).getTime() > 7 * 24 * 60 * 60 * 1000);
+        const useSnapshot = !!snap && isLocked;
 
-            // Check if this is a shared package with multiple students
-            if (receiptRecord.isSharedPackage && receiptRecord.sharedStudentNames && receiptRecord.sharedStudentNames.length > 1) {
-              const siblingCount = receiptRecord.sharedStudentNames.length;
-              const splitSessions = Math.floor(duration / siblingCount);
-              const splitPrice = receiptRecord.price / siblingCount;
+        if (useSnapshot && snap) {
+          return (
+            <ReceiptPreviewModal
+              open={receiptModalOpen}
+              onOpenChange={setReceiptModalOpen}
+              billToName={snap.billToName}
+              billToAddress={snap.billToAddress ?? undefined}
+              billToContact={snap.billToContact ?? undefined}
+              date={receiptRecord.paidAt ? new Date(receiptRecord.paidAt) : new Date()}
+              receiptNo={receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+              invoiceNo={receiptRecord.invoiceNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+              items={snap.items}
+              total={snap.total}
+              branch={{
+                name: snap.branchName,
+                companyName: snap.branchCompanyName,
+                address: snap.branchAddress,
+                phone: snap.branchPhone,
+                email: snap.branchEmail,
+                bankName: snap.branchBankName,
+                bankAccount: snap.branchBankAccount,
+              }}
+            />
+          );
+        }
 
-              // Add a full item row for each student with their split session allocation
-              receiptRecord.sharedStudentNames.forEach((name) => {
+        // Live data: within 1 week (editable) or legacy payments without snapshot
+        return (
+          <ReceiptPreviewModal
+            open={receiptModalOpen}
+            onOpenChange={setReceiptModalOpen}
+            billToName={receiptRecord.parentName ?? receiptRecord.studentName}
+            billToAddress={(() => {
+              const parts: string[] = [];
+              if (receiptRecord.parentAddress) parts.push(receiptRecord.parentAddress);
+              const postcodeCity = [receiptRecord.parentPostcode, receiptRecord.parentCity].filter(Boolean).join(" ");
+              if (postcodeCity) parts.push(postcodeCity);
+              return parts.length > 0 ? parts.join("\n") : undefined;
+            })()}
+            billToContact={undefined}
+            date={receiptRecord.paidAt ? new Date(receiptRecord.paidAt) : new Date()}
+            receiptNo={receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+            invoiceNo={receiptRecord.invoiceNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+            items={(() => {
+              const items: { code: string; product: string; qty: number; rate: number }[] = [];
+              const packageCode = receiptRecord.courseCode ?? receiptRecord.packageId?.slice(0, 8).toUpperCase() ?? "PKG";
+              const duration = receiptRecord.packageDuration ?? 1;
+              const isSession = receiptRecord.packageName?.toLowerCase().includes("session") || receiptRecord.packageType?.toLowerCase() === "session";
+              const unitLabel = isSession ? "Session" : "Month";
+
+              if (receiptRecord.isSharedPackage && receiptRecord.sharedStudentNames && receiptRecord.sharedStudentNames.length > 1) {
+                const siblingCount = receiptRecord.sharedStudentNames.length;
+                const splitSessions = Math.floor(duration / siblingCount);
+                const splitPrice = receiptRecord.price / siblingCount;
+
+                receiptRecord.sharedStudentNames.forEach((name) => {
+                  items.push({
+                    code: packageCode,
+                    product: `${receiptRecord.courseName ?? "Course"} - ${splitSessions} ${unitLabel}${splitSessions > 1 ? "s" : ""}\n(${name})`,
+                    qty: 1,
+                    rate: splitPrice,
+                  });
+                });
+              } else {
                 items.push({
                   code: packageCode,
-                  product: `${receiptRecord.courseName ?? "Course"} - ${splitSessions} ${unitLabel}${splitSessions > 1 ? "s" : ""}\n(${name})`,
+                  product: `${receiptRecord.courseName ?? "Course"} - ${duration} ${unitLabel}${duration > 1 ? "s" : ""}\n(${receiptRecord.studentName})`,
                   qty: 1,
-                  rate: splitPrice,
+                  rate: receiptRecord.price,
                 });
-              });
-            } else {
-              // Single student - course, sessions, and student name in brackets on new line
-              items.push({
-                code: packageCode,
-                product: `${receiptRecord.courseName ?? "Course"} - ${duration} ${unitLabel}${duration > 1 ? "s" : ""}\n(${receiptRecord.studentName})`,
-                qty: 1,
-                rate: receiptRecord.price,
-              });
-            }
-
-            return items;
-          })()}
-          total={receiptRecord.price}
-          branch={{
-            name: receiptRecord.branchName,
-            companyName: receiptRecord.branchCompanyName,
-            address: receiptRecord.branchAddress,
-            phone: receiptRecord.branchPhone,
-            email: receiptRecord.branchEmail,
-            bankName: receiptRecord.branchBankName,
-            bankAccount: receiptRecord.branchBankAccount,
-          }}
-        />
-      )}
+              }
+              return items;
+            })()}
+            total={receiptRecord.price}
+            branch={{
+              name: receiptRecord.branchName,
+              companyName: receiptRecord.branchCompanyName,
+              address: receiptRecord.branchAddress,
+              phone: receiptRecord.branchPhone,
+              email: receiptRecord.branchEmail,
+              bankName: receiptRecord.branchBankName,
+              bankAccount: receiptRecord.branchBankAccount,
+            }}
+          />
+        );
+      })()}
 
       {/* Image Preview Modal (Receipt Photo) */}
       <ImagePreviewModal

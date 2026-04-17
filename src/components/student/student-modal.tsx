@@ -210,6 +210,7 @@ export interface StudentFormData {
   // Student Account
   studentId: string | null;
   studentPassword: string | null;
+  portalPassword: string | null;
   level: number | null;
   adcoinBalance: number;
 
@@ -366,6 +367,7 @@ export function StudentModal({
     schoolName: "",
     studentId: "",
     studentPassword: "",
+    portalPassword: "",
     level: 1,
     adcoinBalance: 0,
     parentId: null,
@@ -479,95 +481,96 @@ export function StudentModal({
     }));
   }, [selectedCourse]);
 
-  // Check for sibling pools when parent and course are selected (add mode only)
+  // Check for sibling pools when parent and course are selected
+  const isPooled = record?.isPooled ?? false;
+  const recordId = record?.id ?? null;
+
   useEffect(() => {
-    console.log("[SiblingCheck] useEffect triggered - mode:", mode, "parentId:", formData.parentId, "courseId:", formData.courseId);
+    // Must include `open` in deps so re-opening the modal for the same student re-triggers the check
+    if (!open) return;
+
+    const controller = new AbortController();
 
     const checkSiblingPool = async () => {
-      // Only check in add mode when both parent (not "new") and course are selected
+      // Skip if already pooled in edit mode (button shows via record.isPooled)
+      // Skip if missing parent or course
       if (
-        mode !== "add" ||
+        (mode === "edit" && isPooled) ||
         !formData.parentId ||
         formData.parentId === "new" ||
         !formData.courseId
       ) {
-        console.log("[SiblingCheck] Skipping - conditions not met");
         setSiblingPoolCheck(null);
         return;
       }
 
-      console.log("[SiblingCheck] Checking for parentId:", formData.parentId, "courseId:", formData.courseId);
       setIsCheckingPool(true);
       try {
+        const excludeParam = mode === "edit" && recordId ? `&excludeStudentId=${recordId}` : "";
         const response = await fetch(
-          `/api/pools/check-sibling?parentId=${formData.parentId}&courseId=${formData.courseId}`
+          `/api/pools/check-sibling?parentId=${formData.parentId}&courseId=${formData.courseId}${excludeParam}`,
+          { signal: controller.signal }
         );
         const data = await response.json();
-        console.log("[SiblingCheck] API Response:", data);
+
+        if (controller.signal.aborted) return;
 
         if (response.ok) {
+          // Core check: does this parent have enough children for sharing?
+          // Edit mode: current student is counted, so need > 1 (has siblings)
+          // Add mode: new student not in DB yet, so need >= 1 (existing child to share with)
+          const parentChildCount = data.parentChildCount ?? 0;
+          const minChildren = mode === "edit" ? 2 : 1;
+          if (parentChildCount < minChildren) {
+            setSiblingPoolCheck(null);
+            setSiblingPackage(null);
+            return;
+          }
+
           setSiblingPoolCheck(data);
 
-          // If there's an existing pool or sibling in course, auto-set shared and package
-          if (data.hasPool && data.poolInfo) {
-            // Use pool's package info
-            const pkgType = data.poolInfo.packageType || "session";
-            const pkgDuration = data.poolInfo.packageDuration || null;
-            const pkgId = data.poolInfo.packageId || null;
+          // Store sibling package info for the shared button
+          const pkgInfo = data.hasPool ? data.poolInfo : data.hasSiblingInCourse ? data.siblingPackageInfo : null;
+          if (pkgInfo) {
+            const pkgType = pkgInfo.packageType || "session";
+            const pkgDuration = pkgInfo.packageDuration || null;
+            const pkgId = pkgInfo.packageId || null;
 
-            // Store sibling's package for restoring later
             setSiblingPackage({
               packageId: pkgId,
               packageType: pkgType as "monthly" | "session",
               packageDuration: pkgDuration,
             });
 
-            setFormData((prev) => ({
-              ...prev,
-              shareWithSibling: true,
-              existingPoolId: data.poolInfo.poolId,
-              packageType: pkgType,
-              packageId: pkgId,
-              numberOfMonths: pkgType === "monthly" ? pkgDuration : null,
-              numberOfSessions: pkgType === "session" ? pkgDuration : null,
-            }));
-          } else if (data.hasSiblingInCourse && data.siblingPackageInfo) {
-            // Use sibling's package info (no pool yet)
-            const pkgType = data.siblingPackageInfo.packageType || "session";
-            const pkgDuration = data.siblingPackageInfo.packageDuration || null;
-            const pkgId = data.siblingPackageInfo.packageId || null;
-
-            // Store sibling's package for restoring later
-            setSiblingPackage({
-              packageId: pkgId,
-              packageType: pkgType as "monthly" | "session",
-              packageDuration: pkgDuration,
-            });
-
-            setFormData((prev) => ({
-              ...prev,
-              shareWithSibling: true,
-              existingPoolId: null,
-              packageType: pkgType as "monthly" | "session",
-              packageId: pkgId,
-              numberOfMonths: pkgType === "monthly" ? pkgDuration : null,
-              numberOfSessions: pkgType === "session" ? pkgDuration : null,
-            }));
+            // Only auto-set shareWithSibling in ADD mode (not edit — user may have deliberately unshared)
+            if (mode === "add") {
+              setFormData((prev) => ({
+                ...prev,
+                shareWithSibling: true,
+                existingPoolId: data.hasPool ? data.poolInfo.poolId : null,
+                packageType: pkgType,
+                packageId: pkgId,
+                numberOfMonths: pkgType === "monthly" ? pkgDuration : null,
+                numberOfSessions: pkgType === "session" ? pkgDuration : null,
+              }));
+            }
           }
         } else {
-          console.error("[SiblingCheck] API Error:", data.error);
           setSiblingPoolCheck(null);
         }
-      } catch (error) {
-        console.error("[SiblingCheck] Fetch error:", error);
+      } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
         setSiblingPoolCheck(null);
       } finally {
-        setIsCheckingPool(false);
+        if (!controller.signal.aborted) {
+          setIsCheckingPool(false);
+        }
       }
     };
 
     checkSiblingPool();
-  }, [mode, formData.parentId, formData.courseId]);
+    return () => controller.abort();
+  }, [open, mode, formData.parentId, formData.courseId, isPooled, recordId]);
 
   // Auto-generate student ID when add modal opens or "Add New Student" is selected
   useEffect(() => {
@@ -633,9 +636,9 @@ export function StudentModal({
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open) {
-      // Reset sibling pool check state
+      // Reset sibling pool check state — the sibling check useEffect will re-run and populate
       setSiblingPoolCheck(null);
-      setIsCheckingPool(false);
+      setIsCheckingPool(true);
       setPoolSiblings([]);
       setSiblingPackage(null);
 
@@ -658,6 +661,7 @@ export function StudentModal({
           schoolName: "",
           studentId: "",
           studentPassword: "",
+          portalPassword: "",
           level: 1,
           adcoinBalance: 0,
           parentId: null,
@@ -697,6 +701,7 @@ export function StudentModal({
           schoolName: record.schoolName || "",
           studentId: record.studentId || "",
           studentPassword: "",
+          portalPassword: "",
           level: record.level ?? 1,
           adcoinBalance: record.adcoinBalance ?? 0,
           // Load existing parent info if available
@@ -1173,23 +1178,13 @@ export function StudentModal({
                         </>
                       )}
                       <FloatingInput
-                        label="Username"
+                        label="Username (for student portal login)"
                         value={formData.username || ""}
-                        onChange={(e) => {
-                          const username = e.target.value;
+                        onChange={(e) =>
                           setFormData({
                             ...formData,
-                            username,
-                            email: username ? `${username}@example.com` : "",
-                          });
-                        }}
-                      />
-                      <FloatingInput
-                        label="Email Address"
-                        type="email"
-                        value={formData.email || ""}
-                        onChange={(e) =>
-                          setFormData({ ...formData, email: e.target.value })
+                            username: e.target.value,
+                          })
                         }
                       />
 
@@ -1261,18 +1256,18 @@ export function StudentModal({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div className="md:col-span-2">
                           <FloatingInput
-                            label="Password (First-time Login)"
+                            label={mode === "edit" ? "Portal Password (leave blank to keep)" : "Portal Password"}
                             type="password"
-                            value={formData.studentPassword || ""}
+                            value={formData.portalPassword || ""}
                             onChange={(e) =>
                               setFormData({
                                 ...formData,
-                                studentPassword: e.target.value,
+                                portalPassword: e.target.value,
                               })
                             }
                           />
                           <p className="text-xs text-muted-foreground mt-2">
-                            Set a temporary password for the student&apos;s first login. They can change it later.
+                            Password for the student game portal login. Username is set above in Basic Info.
                           </p>
                         </div>
                       </div>
@@ -1566,17 +1561,23 @@ export function StudentModal({
                             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                           )}
                         </div>
-                        {/* Show 3 columns if siblings detected (add mode) or student is pooled (edit mode) */}
+                        {/* Show 3 columns if siblings detected or student is pooled */}
                         <div className={cn(
                           "grid gap-4",
-                          (mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse))
+                          (siblingPoolCheck && (
+                            (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
+                            || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
+                          ))
                             || (mode === "edit" && record?.isPooled)
                             ? "grid-cols-3"
                             : "grid-cols-2"
                         )}>
                           {hasMonthlyPricing && (() => {
                             // Disable Monthly when sibling sharing is available (session-based siblings detected)
-                            const siblingCanShare = mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse);
+                            const siblingCanShare = siblingPoolCheck && (
+                              (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
+                              || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
+                            );
                             return (
                             <button
                               type="button"
@@ -1652,11 +1653,13 @@ export function StudentModal({
                               </span>
                             </button>
                           )}
-                          {/* Shared button - show in add mode when siblings detected, or edit mode when student is pooled */}
-                          {/* Only for session packages — monthly packages cannot be shared */}
-                          {((mode === "add" && siblingPoolCheck && (siblingPoolCheck.hasPool || siblingPoolCheck.hasSiblingInCourse)
-                            && siblingPoolCheck.siblingPackageInfo?.packageType !== 'monthly')
-                            || (mode === "edit" && record?.isPooled)) && (
+                          {/* Shared button - show when siblings exist in same course, or student is already pooled */}
+                          {((siblingPoolCheck && (
+                            (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
+                            || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
+                          ))
+                            || (mode === "edit" && record?.isPooled)) && (() => {
+                            return (
                             <button
                               type="button"
                               onClick={() => {
@@ -1718,7 +1721,8 @@ export function StudentModal({
                                     : siblingPoolCheck?.siblings?.map(s => s.studentName).join(", ") || ""})
                               </span>
                             </button>
-                          )}
+                            );
+                          })()}
                         </div>
                       </div>
                     ) : formData.courseId ? (

@@ -341,3 +341,70 @@ export async function restoreEnrollment(enrollmentId: string): Promise<boolean> 
 
   return true;
 }
+
+// ============================================
+// ON-DEMAND EXPIRY CHECK
+// ============================================
+
+/**
+ * Check and expire enrollments where expires_at has passed.
+ * Called on-demand from page loads (student, attendance, dashboard).
+ */
+export async function checkAndExpireEnrollments(): Promise<number> {
+  const now = new Date().toISOString();
+
+  // Find active enrollments that have expired
+  const { data: expired, error } = await supabaseAdmin
+    .from('enrollments')
+    .select('id, student_id, pool_id, sessions_remaining')
+    .eq('status', 'active')
+    .is('deleted_at', null)
+    .not('expires_at', 'is', null)
+    .lt('expires_at', now);
+
+  if (error) {
+    console.error('[Expiry Check] Error finding expired enrollments:', error);
+    return 0;
+  }
+
+  if (!expired || expired.length === 0) {
+    return 0;
+  }
+
+  console.log(`[Expiry Check] Found ${expired.length} expired enrollment(s)`);
+
+  let expiredCount = 0;
+
+  for (const enrollment of expired) {
+    // Set enrollment to expired and forfeit remaining sessions
+    const { error: updateError } = await supabaseAdmin
+      .from('enrollments')
+      .update({
+        status: 'expired',
+        sessions_remaining: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', enrollment.id);
+
+    if (updateError) {
+      console.error(`[Expiry Check] Error expiring enrollment ${enrollment.id}:`, updateError);
+      continue;
+    }
+
+    expiredCount++;
+    console.log(`[Expiry Check] Expired enrollment ${enrollment.id} for student ${enrollment.student_id}`);
+
+    // If pooled, remove student from pool and redistribute
+    if (enrollment.pool_id) {
+      try {
+        const { removeStudentFromPool } = await import("./pools");
+        await removeStudentFromPool(enrollment.pool_id, enrollment.student_id);
+        console.log(`[Expiry Check] Removed student ${enrollment.student_id} from pool ${enrollment.pool_id}`);
+      } catch (poolError) {
+        console.error(`[Expiry Check] Error removing from pool:`, poolError);
+      }
+    }
+  }
+
+  return expiredCount;
+}

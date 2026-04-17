@@ -428,13 +428,13 @@ export async function markAttendance(
     }
   }
 
-  // Step 3: Fallback — match by enrollment + date (for old records without slot info)
+  // Step 3: Fallback — match by enrollment + date + actual_start_time (for old records without slot info)
   // IMPORTANT: Only match records that have NO slot info (truly old records) or matching slot info.
-  // Never steal a record that belongs to a different slot.
+  // Never steal a record that belongs to a different slot or different time.
   if (!existing) {
     const { data: dateRecords, error: dateError } = await supabaseAdmin
       .from('attendance')
-      .select('id, status, slot_day, slot_time')
+      .select('id, status, slot_day, slot_time, actual_start_time')
       .eq('enrollment_id', enrollmentId)
       .eq('date', date);
 
@@ -457,9 +457,20 @@ export async function markAttendance(
                normalizeT(r.slot_time) === normalizeT(slotTime);
       });
 
-      if (candidates.length === 1) {
+      // For any number of candidates, try to match by actual_start_time first
+      if (candidates.length > 0 && data?.actualStartTime) {
+        const timeMatch = candidates.find(r =>
+          normalizeT(r.actual_start_time) === normalizeT(data.actualStartTime!)
+        );
+        if (timeMatch) {
+          existing = timeMatch as ExistingRecord;
+          console.log('markAttendance: Matched by enrollment+date+time:', existing.id);
+        }
+        // No time match → existing stays null → new record will be created (different time slot)
+      } else if (candidates.length === 1 && !data?.actualStartTime) {
+        // Only auto-match single candidate when no time info provided at all (legacy)
         existing = candidates[0] as ExistingRecord;
-        console.log('markAttendance: Matched by enrollment+date (single candidate):', existing.id);
+        console.log('markAttendance: Matched by enrollment+date (single candidate, no time):', existing.id);
       }
     }
   }
@@ -574,48 +585,64 @@ async function reverseSessionDeduction(enrollmentId: string): Promise<void> {
     return;
   }
 
-  // Check if this enrollment uses a shared session pool
+  // Check if this enrollment is ACTIVELY in a shared session pool
+  // Must verify pool_students membership — pool_id alone may be a stale breadcrumb
+  let isActivelyPooled = false;
   if (enrollment.pool_id) {
-    // Add session back to the shared pool
-    const { data: pool } = await supabaseAdmin
-      .from('shared_session_pools')
-      .select('sessions_remaining')
-      .eq('id', enrollment.pool_id)
-      .single();
+    const { data: poolMembership } = await supabaseAdmin
+      .from('pool_students')
+      .select('id')
+      .eq('pool_id', enrollment.pool_id)
+      .eq('student_id', enrollment.student_id)
+      .maybeSingle();
 
-    if (pool) {
-      const newPoolSessions = (pool.sessions_remaining ?? 0) + 1;
-
-      await supabaseAdmin
+    if (poolMembership) {
+      // Student is actively in pool — add session back to the shared pool
+      const { data: pool } = await supabaseAdmin
         .from('shared_session_pools')
-        .update({
-          sessions_remaining: newPoolSessions,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', enrollment.pool_id);
+        .select('sessions_remaining')
+        .eq('id', enrollment.pool_id)
+        .is('deleted_at', null)
+        .single();
 
-      // If pool sessions become positive, delete PENDING payment for this pool
-      // NOTE: Only delete payments with status='pending', never delete approved/paid payments
-      if (newPoolSessions > 0) {
-        const { data: pendingPoolPayment } = await supabaseAdmin
-          .from('payments')
-          .select('id, status')
-          .eq('pool_id', enrollment.pool_id)
-          .eq('status', 'pending')
-          .maybeSingle();
+      if (pool) {
+        isActivelyPooled = true;
+        const newPoolSessions = (pool.sessions_remaining ?? 0) + 1;
 
-        if (pendingPoolPayment) {
-          console.log(`[Session Reversal] Found pending pool payment to delete:`, pendingPoolPayment);
-          await supabaseAdmin
+        await supabaseAdmin
+          .from('shared_session_pools')
+          .update({
+            sessions_remaining: newPoolSessions,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', enrollment.pool_id);
+
+        console.log(`[Session Reversal] Pool ${enrollment.pool_id} sessions: ${pool.sessions_remaining} → ${newPoolSessions}`);
+
+        // If pool sessions become positive, delete PENDING payment for this pool
+        if (newPoolSessions > 0) {
+          const { data: pendingPoolPayment } = await supabaseAdmin
             .from('payments')
-            .delete()
-            .eq('id', pendingPoolPayment.id)
-            .eq('status', 'pending'); // Double-check status to be safe
+            .select('id, status')
+            .eq('pool_id', enrollment.pool_id)
+            .eq('status', 'pending')
+            .maybeSingle();
+
+          if (pendingPoolPayment) {
+            console.log(`[Session Reversal] Found pending pool payment to delete:`, pendingPoolPayment);
+            await supabaseAdmin
+              .from('payments')
+              .delete()
+              .eq('id', pendingPoolPayment.id)
+              .eq('status', 'pending');
+          }
         }
       }
     }
-    return;
   }
+
+  // If actively pooled, session was already restored to pool above
+  if (isActivelyPooled) return;
 
   // For regular enrollments, add 1 session back
   const currentSessions = enrollment.sessions_remaining ?? 0;
@@ -840,8 +867,9 @@ export async function getEnrollmentsForAttendance(
     }
   }
 
-  // Pre-fetch pool sibling counts for pooled enrollments
+  // Pre-fetch pool sibling counts and join order for pooled enrollments
   const poolSiblingCountMap = new Map<string, number>();
+  const poolMemberOrderMap = new Map<string, string[]>();
   const poolIdsForAttendance = new Set<string>();
   for (const enrollment of filteredData) {
     if ((enrollment as any).pool_id) poolIdsForAttendance.add((enrollment as any).pool_id);
@@ -850,9 +878,11 @@ export async function getEnrollmentsForAttendance(
     for (const poolId of poolIdsForAttendance) {
       const { data: poolMembers } = await supabaseAdmin
         .from('pool_students')
-        .select('student_id')
-        .eq('pool_id', poolId);
+        .select('student_id, joined_at')
+        .eq('pool_id', poolId)
+        .order('joined_at', { ascending: true });
       poolSiblingCountMap.set(poolId, (poolMembers ?? []).length);
+      poolMemberOrderMap.set(poolId, (poolMembers ?? []).map(m => m.student_id));
     }
   }
 
@@ -897,14 +927,13 @@ export async function getEnrollmentsForAttendance(
     const poolData = (enrollment as any).pool as { id: string; sessions_remaining: number; total_sessions: number } | null;
     if (poolId && poolData) {
       const siblingCount = poolSiblingCountMap.get(poolId) || 2;
-      const allocation = Math.floor(poolData.total_sessions / siblingCount);
-      const bonus = enrollment.sessions_remaining ?? 0;
-      // Count only THIS student's present/late attendance
-      const allAttendance = (enrollment.attendance || []) as Array<{ status: string }>;
-      const thisStudentAttendance = allAttendance.filter(
-        (a) => a.status === 'present' || a.status === 'late'
-      ).length;
-      computedSessionsRemaining = allocation + bonus - thisStudentAttendance;
+      const poolRemaining = poolData.sessions_remaining;
+      const perStudent = Math.floor(poolRemaining / siblingCount);
+      const memberOrder = poolMemberOrderMap.get(poolId) ?? [];
+      const position = memberOrder.indexOf(studentData.id);
+      const remainder = poolRemaining >= 0 ? poolRemaining % siblingCount : 0;
+      const positionBonus = position >= 0 && position < remainder ? 1 : 0;
+      computedSessionsRemaining = perStudent + positionBonus;
     }
 
     // Full attendance record type
@@ -1425,8 +1454,9 @@ export async function getAllStudentsForManualAttendance(
     return true;
   });
 
-  // Pre-fetch pool sibling counts for manual attendance
+  // Pre-fetch pool sibling counts and join order for manual attendance
   const manualPoolCountMap = new Map<string, number>();
+  const manualPoolOrderMap = new Map<string, string[]>();
   const manualPoolIds = new Set<string>();
   for (const e of filteredData) {
     if ((e as any).pool_id) manualPoolIds.add((e as any).pool_id);
@@ -1434,9 +1464,11 @@ export async function getAllStudentsForManualAttendance(
   for (const pId of manualPoolIds) {
     const { data: members } = await supabaseAdmin
       .from('pool_students')
-      .select('student_id')
-      .eq('pool_id', pId);
+      .select('student_id, joined_at')
+      .eq('pool_id', pId)
+      .order('joined_at', { ascending: true });
     manualPoolCountMap.set(pId, (members ?? []).length);
+    manualPoolOrderMap.set(pId, (members ?? []).map(m => m.student_id));
   }
 
   const result: AttendanceTableRow[] = [];
@@ -1469,15 +1501,13 @@ export async function getAllStudentsForManualAttendance(
     const mPool = (enrollment as any).pool as { id: string; sessions_remaining: number; total_sessions: number } | null;
     if (mPoolId && mPool) {
       const count = manualPoolCountMap.get(mPoolId) || 2;
-      const allocation = Math.floor(mPool.total_sessions / count);
-      const bonus = enrollment.sessions_remaining ?? 0;
-      // Count this student's present/late attendance for this enrollment
-      const { count: attCount } = await supabaseAdmin
-        .from('attendance')
-        .select('id', { count: 'exact', head: true })
-        .eq('enrollment_id', enrollment.id)
-        .in('status', ['present', 'late']);
-      manualSessionsRemaining = allocation + bonus - (attCount ?? 0);
+      const poolRemaining = mPool.sessions_remaining;
+      const perStudent = Math.floor(poolRemaining / count);
+      const memberOrder = manualPoolOrderMap.get(mPoolId) ?? [];
+      const position = memberOrder.indexOf(studentData.id);
+      const remainder = poolRemaining >= 0 ? poolRemaining % count : 0;
+      const positionBonus = position >= 0 && position < remainder ? 1 : 0;
+      manualSessionsRemaining = perStudent + positionBonus;
     }
 
     // Get start time from schedule or default
@@ -1570,8 +1600,9 @@ export async function getStudentActiveEnrollments(
     return [];
   }
 
-  // Pre-fetch pool sibling counts
+  // Pre-fetch pool sibling counts and join order
   const poolCountMap = new Map<string, number>();
+  const poolOrderMap = new Map<string, string[]>();
   const enrollmentPoolIds = new Set<string>();
   for (const e of data ?? []) {
     if ((e as any).pool_id) enrollmentPoolIds.add((e as any).pool_id);
@@ -1579,9 +1610,11 @@ export async function getStudentActiveEnrollments(
   for (const pId of enrollmentPoolIds) {
     const { data: members } = await supabaseAdmin
       .from('pool_students')
-      .select('student_id')
-      .eq('pool_id', pId);
+      .select('student_id, joined_at')
+      .eq('pool_id', pId)
+      .order('joined_at', { ascending: true });
     poolCountMap.set(pId, (members ?? []).length);
+    poolOrderMap.set(pId, (members ?? []).map(m => m.student_id));
   }
 
   const results: StudentEnrollmentForAttendance[] = [];
@@ -1595,15 +1628,13 @@ export async function getStudentActiveEnrollments(
     const ePool = (enrollment as any).pool as { id: string; sessions_remaining: number; total_sessions: number } | null;
     if (ePoolId && ePool) {
       const count = poolCountMap.get(ePoolId) || 2;
-      const allocation = Math.floor(ePool.total_sessions / count);
-      const bonus = enrollment.sessions_remaining ?? 0;
-      // Count this student's present/late attendance for this enrollment
-      const { count: attCount } = await supabaseAdmin
-        .from('attendance')
-        .select('id', { count: 'exact', head: true })
-        .eq('enrollment_id', enrollment.id)
-        .in('status', ['present', 'late']);
-      sessionsRemaining = allocation + bonus - (attCount ?? 0);
+      const poolRemaining = ePool.sessions_remaining;
+      const perStudent = Math.floor(poolRemaining / count);
+      const memberOrder = poolOrderMap.get(ePoolId) ?? [];
+      const position = memberOrder.indexOf(studentId);
+      const remainder = poolRemaining >= 0 ? poolRemaining % count : 0;
+      const positionBonus = position >= 0 && position < remainder ? 1 : 0;
+      sessionsRemaining = perStudent + positionBonus;
     }
 
     results.push({
@@ -1806,7 +1837,8 @@ export async function updateSessionTracking(
       sessions_remaining,
       period_start,
       pool_id,
-      package:course_pricing(id, package_type, duration, price)
+      expires_at,
+      package:course_pricing(id, package_type, duration, price, expiry_months)
     `)
     .eq('id', enrollmentId)
     .single();
@@ -1821,6 +1853,7 @@ export async function updateSessionTracking(
     package_type: 'session' | 'monthly';
     duration: number;
     price: number;
+    expiry_months: number | null;
   } | null;
 
   console.log('[Session Tracking] Enrollment data:', {
@@ -1832,8 +1865,54 @@ export async function updateSessionTracking(
     package: packageData,
   });
 
+  // Set expires_at on first attendance if not already set and pricing has expiry_months
+  if (packageData?.expiry_months && !(enrollment as any).expires_at) {
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + packageData.expiry_months);
+    await supabaseAdmin
+      .from('enrollments')
+      .update({ expires_at: expiresAt.toISOString() })
+      .eq('id', enrollmentId);
+    console.log('[Session Tracking] Set expires_at to', expiresAt.toISOString());
+  }
+
   // If no package assigned, still track sessions and create pending payment if needed
   if (!packageData) {
+    // Even without a package, pooled students deduct from the pool
+    // Verify pool_students membership (pool_id may be a stale breadcrumb after 2→1 conversion)
+    if (enrollment.pool_id) {
+      const { data: poolMembership } = await supabaseAdmin
+        .from('pool_students')
+        .select('id')
+        .eq('pool_id', enrollment.pool_id)
+        .eq('student_id', enrollment.student_id)
+        .maybeSingle();
+
+      if (poolMembership) {
+        console.log('[Session Tracking] No package but pooled — deducting from pool');
+        const { deductPoolSession, getPoolById } = await import("./pools");
+        const { createPoolRenewalPayment } = await import("./payments");
+
+        const newRemaining = await deductPoolSession(enrollment.pool_id);
+        if (newRemaining === null) {
+          return { success: false, message: 'Failed to deduct from shared pool' };
+        }
+
+        if (newRemaining <= 0) {
+          const pool = await getPoolById(enrollment.pool_id);
+          if (pool) {
+            await createPoolRenewalPayment(enrollment.pool_id);
+          }
+        }
+
+        return {
+          success: true,
+          message: `Shared pool session deducted (no package). ${newRemaining} remaining in pool.`
+        };
+      }
+      // Not in pool_students — stale breadcrumb, fall through to individual deduction
+    }
+
     console.log('[Session Tracking] No package assigned, treating as session-based');
     // Deduct session and create pending payment if depleted
     const currentSessions = enrollment.sessions_remaining ?? 0;
@@ -1868,13 +1947,13 @@ export async function updateSessionTracking(
       } else {
         console.log('[Session Tracking] *** PENDING PAYMENT NOT CREATED - TRYING FORCE CREATE ***');
 
-        // Force create as safety check
+        // Force create as safety check — check ALL pending payments (including pool)
         const { data: existingPending } = await supabaseAdmin
           .from('payments')
           .select('id')
           .eq('student_id', enrollment.student_id)
+          .eq('course_id', enrollment.course_id)
           .eq('status', 'pending')
-          .is('pool_id', null)
           .limit(1);
 
         if (!existingPending || existingPending.length === 0) {
@@ -1901,8 +1980,6 @@ export async function updateSessionTracking(
             price = coursePricing?.price || 0;
           }
 
-          // Note: Don't set package_id - it references legacy 'packages' table, not 'course_pricing'
-          // Package is looked up by course_id + amount in getPendingPaymentsForTable
           const { data: forcePayment, error: forceError } = await supabaseAdmin
             .from('payments')
             .insert({
@@ -1935,29 +2012,40 @@ export async function updateSessionTracking(
   const packageType = packageData.package_type;
 
   // Check if this enrollment uses a shared session pool
+  // Verify pool_students membership (pool_id may be a stale breadcrumb after 2→1 conversion)
   if (enrollment.pool_id) {
-    // Deduct from the shared pool - each sibling's attendance deducts 1 session
-    const { deductPoolSession, getPoolById } = await import("./pools");
-    const { createPoolRenewalPayment } = await import("./payments");
+    const { data: poolMembershipCheck } = await supabaseAdmin
+      .from('pool_students')
+      .select('id')
+      .eq('pool_id', enrollment.pool_id)
+      .eq('student_id', enrollment.student_id)
+      .maybeSingle();
 
-    const newRemaining = await deductPoolSession(enrollment.pool_id);
+    if (poolMembershipCheck) {
+      // Deduct from the shared pool - each sibling's attendance deducts 1 session
+      const { deductPoolSession, getPoolById } = await import("./pools");
+      const { createPoolRenewalPayment } = await import("./payments");
 
-    if (newRemaining === null) {
-      return { success: false, message: 'Failed to deduct from shared pool' };
-    }
+      const newRemaining = await deductPoolSession(enrollment.pool_id);
 
-    // If pool is depleted (0 or negative), create a renewal payment
-    if (newRemaining <= 0) {
-      const pool = await getPoolById(enrollment.pool_id);
-      if (pool) {
-        await createPoolRenewalPayment(enrollment.pool_id);
+      if (newRemaining === null) {
+        return { success: false, message: 'Failed to deduct from shared pool' };
       }
-    }
 
-    return {
-      success: true,
-      message: `Shared pool session deducted. ${newRemaining} remaining in pool.`
-    };
+      // If pool is depleted (0 or negative), create a renewal payment
+      if (newRemaining <= 0) {
+        const pool = await getPoolById(enrollment.pool_id);
+        if (pool) {
+          await createPoolRenewalPayment(enrollment.pool_id);
+        }
+      }
+
+      return {
+        success: true,
+        message: `Shared pool session deducted. ${newRemaining} remaining in pool.`
+      };
+    }
+    // Not in pool_students — stale breadcrumb, fall through to individual deduction
   }
 
   // Get current sessions (can be negative if used before payment)
@@ -1998,13 +2086,13 @@ export async function updateSessionTracking(
       } else {
         console.log('[Session Tracking] *** PENDING PAYMENT NOT CREATED - TRYING FORCE CREATE ***');
 
-        // Force create as safety check
+        // Force create as safety check — check ALL pending payments (including pool)
         const { data: existingPending } = await supabaseAdmin
           .from('payments')
           .select('id')
           .eq('student_id', enrollment.student_id)
+          .eq('course_id', enrollment.course_id)
           .eq('status', 'pending')
-          .is('pool_id', null)
           .limit(1);
 
         if (!existingPending || existingPending.length === 0) {
@@ -2031,8 +2119,6 @@ export async function updateSessionTracking(
             price = coursePricing?.price || 0;
           }
 
-          // Note: Don't set package_id - it references legacy 'packages' table, not 'course_pricing'
-          // Package is looked up by course_id + amount in getPendingPaymentsForTable
           const { data: forcePayment, error: forceError } = await supabaseAdmin
             .from('payments')
             .insert({
@@ -2057,6 +2143,16 @@ export async function updateSessionTracking(
       }
     } else {
       console.log('[Session Tracking] Sessions still positive, no pending payment needed');
+    }
+
+    // Check voucher eligibility when sessions deplete
+    if (newSessionsRemaining <= 0) {
+      try {
+        const { checkAndCreateVoucher } = await import("./vouchers");
+        await checkAndCreateVoucher(enrollmentId);
+      } catch (voucherError) {
+        console.warn('[Session Tracking] Voucher check failed:', voucherError);
+      }
     }
 
     return { success: true, message: `Session deducted. ${newSessionsRemaining} remaining.` };
@@ -2300,8 +2396,9 @@ export async function getAttendanceLog(
     console.error('Error fetching trial attendance log:', trialError);
   }
 
-  // Pre-fetch pool sibling counts for attendance log
+  // Pre-fetch pool sibling counts and join order for attendance log
   const logPoolCountMap = new Map<string, number>();
+  const logPoolOrderMap = new Map<string, string[]>();
   const logPoolIds = new Set<string>();
   for (const record of enrollmentData ?? []) {
     const enr = record.enrollment as any;
@@ -2310,27 +2407,11 @@ export async function getAttendanceLog(
   for (const pId of logPoolIds) {
     const { data: members } = await supabaseAdmin
       .from('pool_students')
-      .select('student_id')
-      .eq('pool_id', pId);
+      .select('student_id, joined_at')
+      .eq('pool_id', pId)
+      .order('joined_at', { ascending: true });
     logPoolCountMap.set(pId, (members ?? []).length);
-  }
-
-  // Pre-fetch per-enrollment attendance counts for pooled enrollments in the log
-  const logEnrollmentAttCountMap = new Map<string, number>();
-  const pooledLogEnrollmentIds = new Set<string>();
-  for (const record of enrollmentData ?? []) {
-    const enr = record.enrollment as any;
-    if (enr?.pool_id) pooledLogEnrollmentIds.add(enr.id);
-  }
-  if (pooledLogEnrollmentIds.size > 0) {
-    for (const eId of pooledLogEnrollmentIds) {
-      const { count: attCount } = await supabaseAdmin
-        .from('attendance')
-        .select('id', { count: 'exact', head: true })
-        .eq('enrollment_id', eId)
-        .in('status', ['present', 'late']);
-      logEnrollmentAttCountMap.set(eId, attCount ?? 0);
-    }
+    logPoolOrderMap.set(pId, (members ?? []).map(m => m.student_id));
   }
 
   // Process enrollment attendance records
@@ -2365,10 +2446,13 @@ export async function getAttendanceLog(
     let logSessionsRemaining = enrollment.sessions_remaining;
     if (enrollment.pool_id && enrollment.pool) {
       const count = logPoolCountMap.get(enrollment.pool_id) || 2;
-      const allocation = Math.floor(enrollment.pool.total_sessions / count);
-      const bonus = enrollment.sessions_remaining ?? 0;
-      const thisAttCount = logEnrollmentAttCountMap.get(enrollment.id) ?? 0;
-      logSessionsRemaining = allocation + bonus - thisAttCount;
+      const poolRemaining = enrollment.pool.sessions_remaining;
+      const perStudent = Math.floor(poolRemaining / count);
+      const memberOrder = logPoolOrderMap.get(enrollment.pool_id) ?? [];
+      const position = memberOrder.indexOf(enrollment.student.id);
+      const remainder = poolRemaining >= 0 ? poolRemaining % count : 0;
+      const positionBonus = position >= 0 && position < remainder ? 1 : 0;
+      logSessionsRemaining = perStudent + positionBonus;
     }
 
     return {
