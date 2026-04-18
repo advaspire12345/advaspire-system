@@ -331,14 +331,15 @@ export function RankingTab({ currentStudentId, currentStudentName, adcoinBalance
         <img
           src="/portal/rank-handle.svg"
           alt=""
-          className="absolute z-[1] w-[20px] sm:w-[35px] h-[60px] sm:h-[100px] top-1/2 -translate-y-1/2 left-[-10px] sm:left-[-16px]"
+          className="absolute z-[1] w-[20px] sm:w-[35px] h-[60px] sm:h-[100px]"
+          style={{ left: 0, top: "50%", transform: "translateX(-50%) translateY(-50%)" }}
         />
         {/* Right handle (flipped) — behind the board, peeking out a bit */}
         <img
           src="/portal/rank-handle.svg"
           alt=""
-          className="absolute z-[1] w-[20px] sm:w-[35px] h-[60px] sm:h-[100px] top-1/2 right-[-10px] sm:right-[-16px]"
-          style={{ transform: "translateY(-50%) scaleX(-1)" }}
+          className="absolute z-[1] w-[20px] sm:w-[35px] h-[60px] sm:h-[100px]"
+          style={{ right: 0, top: "50%", transform: "translateX(50%) translateY(-50%) scaleX(-1)" }}
         />
 
         {/* Board — IN FRONT */}
@@ -432,8 +433,9 @@ export function RankingTab({ currentStudentId, currentStudentName, adcoinBalance
                         <div className="text-amber-400/80 text-[7px] sm:text-[8px]" style={{ fontFamily: "monospace" }}>ID: {result.studentId ?? "-"}</div>
                       </div>
                       <div className="relative z-10 flex-shrink-0 flex items-center">
-                        <svg viewBox="0 0 32 32" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0 relative z-10">
-                          <circle cx="16" cy="16" r="14" fill="#e5a835" stroke="#b8871a" strokeWidth="2" />
+                        <svg viewBox="-2 -2 36 36" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0 relative z-10">
+                          <circle cx="16" cy="16" r="15.5" fill="none" stroke="black" strokeWidth="1.5" />
+                          <circle cx="16" cy="16" r="14" fill="#e5a835" stroke="white" strokeWidth="2" />
                           <circle cx="16" cy="16" r="10" fill="none" stroke="#b8871a" strokeWidth="1" opacity="0.5" />
                           <text x="16" y="17" textAnchor="middle" dominantBaseline="middle" fill="#7a4a00" fontFamily="monospace" fontWeight="900" fontSize="9">AC</text>
                         </svg>
@@ -539,8 +541,9 @@ export function RankingTab({ currentStudentId, currentStudentName, adcoinBalance
 
                     {/* Coin counter */}
                     <div className="relative z-10 flex-shrink-0 flex items-center">
-                      <svg viewBox="0 0 32 32" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0 relative z-10">
-                        <circle cx="16" cy="16" r="14" fill="#e5a835" stroke="#b8871a" strokeWidth="2" />
+                      <svg viewBox="-2 -2 36 36" className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0 relative z-10">
+                        <circle cx="16" cy="16" r="15.5" fill="none" stroke="black" strokeWidth="1.5" />
+                        <circle cx="16" cy="16" r="14" fill="#e5a835" stroke="white" strokeWidth="2" />
                         <circle cx="16" cy="16" r="10" fill="none" stroke="#b8871a" strokeWidth="1" opacity="0.5" />
                         <text x="16" y="17" textAnchor="middle" dominantBaseline="middle" fill="#7a4a00" fontFamily="monospace" fontWeight="900" fontSize="9">AC</text>
                       </svg>

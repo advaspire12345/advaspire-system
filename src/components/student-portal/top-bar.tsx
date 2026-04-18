@@ -8,11 +8,12 @@ interface TopBarProps {
   onLogout: () => void;
 }
 
-/* Coin icon — golden circle with "AC" */
+/* Coin icon — golden circle with "AC" + white/black border */
 function CoinIcon() {
   return (
-    <svg viewBox="0 0 32 32" className="w-full h-full">
-      <circle cx="16" cy="16" r="14" fill="#e5a835" stroke="#b8871a" strokeWidth="2" />
+    <svg viewBox="-2 -2 36 36" className="w-full h-full">
+      <circle cx="16" cy="16" r="15.5" fill="none" stroke="black" strokeWidth="1.5" />
+      <circle cx="16" cy="16" r="14" fill="#e5a835" stroke="white" strokeWidth="2" />
       <circle cx="16" cy="16" r="10" fill="none" stroke="#b8871a" strokeWidth="1" opacity="0.5" />
       <text
         x="16" y="17" textAnchor="middle" dominantBaseline="middle"
@@ -22,13 +23,17 @@ function CoinIcon() {
   );
 }
 
-/* Star icon — 5-point star */
+/* Star icon — 5-point star + white/black border */
 function StarIcon() {
   return (
-    <svg viewBox="0 0 32 32" className="w-full h-full">
+    <svg viewBox="-2 -2 36 36" className="w-full h-full">
       <polygon
         points="16,2 20.5,11.5 31,13 23.5,20.5 25,31 16,26 7,31 8.5,20.5 1,13 11.5,11.5"
-        fill="#e5a835" stroke="#b8871a" strokeWidth="1.5"
+        fill="none" stroke="black" strokeWidth="3.5" strokeLinejoin="round"
+      />
+      <polygon
+        points="16,2 20.5,11.5 31,13 23.5,20.5 25,31 16,26 7,31 8.5,20.5 1,13 11.5,11.5"
+        fill="#e5a835" stroke="white" strokeWidth="2" strokeLinejoin="round"
       />
     </svg>
   );
