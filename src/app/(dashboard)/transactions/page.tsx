@@ -2,7 +2,7 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { TransactionsTable } from "@/components/transactions/transactions-table";
-import { getTransactionsForDisplay } from "@/data/adcoins";
+import { getTransactionsForDisplayPaginated } from "@/data/adcoins";
 import { getTransferParticipants } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
@@ -17,8 +17,8 @@ export default async function TransactionsPage() {
   const perms = permData?.permissions.transactions;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
-  const [transactions, participants] = await Promise.all([
-    getTransactionsForDisplay(user.email),
+  const [transactionsResult, participants] = await Promise.all([
+    getTransactionsForDisplayPaginated(user.email, { offset: 0, limit: 10 }),
     getTransferParticipants(),
   ]);
 
@@ -32,7 +32,7 @@ export default async function TransactionsPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <TransactionsTable initialData={transactions} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} currentUserId={permData!.userId} />
+        <TransactionsTable initialData={transactionsResult.rows} totalCount={transactionsResult.totalCount} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} currentUserId={permData!.userId} />
       </div>
     </main>
   );

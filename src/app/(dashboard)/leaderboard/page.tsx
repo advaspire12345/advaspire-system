@@ -2,7 +2,7 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
-import { getLeaderboardData } from "@/data/leaderboard";
+import { getLeaderboardDataPaginated } from "@/data/leaderboard";
 import { getTransferParticipants } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
@@ -17,8 +17,8 @@ export default async function LeaderboardPage() {
   const perms = permData?.permissions.leaderboard;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
-  const [leaderboardData, participants] = await Promise.all([
-    getLeaderboardData(user.email),
+  const [leaderboardResult, participants] = await Promise.all([
+    getLeaderboardDataPaginated(user.email, { offset: 0, limit: 10 }),
     getTransferParticipants(),
   ]);
 
@@ -32,7 +32,7 @@ export default async function LeaderboardPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <LeaderboardTable initialData={leaderboardData} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} canTransfer={permData?.permissions.transactions?.can_create} currentUserId={permData!.userId} />
+        <LeaderboardTable initialData={leaderboardResult.rows} totalCount={leaderboardResult.totalCount} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} canTransfer={permData?.permissions.transactions?.can_create} currentUserId={permData!.userId} />
       </div>
     </main>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +19,7 @@ import type { StudentFormPayload } from "@/app/(dashboard)/student/actions";
 
 interface StudentTableProps {
   initialData: StudentTableRow[];
+  totalStudents: number;
   branches: BranchOption[];
   courses: CourseOption[];
   coursePricing: CoursePricingOption[];
@@ -74,8 +75,11 @@ const ENROLLMENT_STATUS_LABELS: Record<string, string> = {
   expired: "Expired",
 };
 
+const BATCH_SIZE = 10;
+
 export function StudentTable({
   initialData,
+  totalStudents,
   branches,
   courses,
   coursePricing,
@@ -90,10 +94,53 @@ export function StudentTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Build student select options from initialData (deduplicated by student id)
+  // Progressive loading: start with server-provided first batch, load rest in background
+  const [allData, setAllData] = useState<StudentTableRow[]>(initialData);
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalStudents);
+  const fetchedRef = useRef(false);
+
+  const fetchRemainingStudents = useCallback(async () => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    let offset = initialData.length;
+    // Deduplicate: track unique student IDs we already have from initialData
+    // (initialData is paginated by students, but one student can produce multiple rows)
+    const initialStudentIds = new Set(initialData.map((r) => r.id));
+
+    while (offset < totalStudents) {
+      try {
+        const res = await fetch(`/api/student/table?offset=${offset}&limit=${BATCH_SIZE}`);
+        if (!res.ok) break;
+        const data: { rows: StudentTableRow[] } = await res.json();
+        if (!data.rows || data.rows.length === 0) break;
+
+        // Filter out any rows for students we already have (overlap from enrollment expansion)
+        const newRows = data.rows.filter((r) => !initialStudentIds.has(r.id));
+        // Track the new student IDs
+        for (const r of data.rows) initialStudentIds.add(r.id);
+
+        if (newRows.length > 0) {
+          setAllData((prev) => [...prev, ...newRows]);
+        }
+        offset += BATCH_SIZE;
+      } catch {
+        break;
+      }
+    }
+    setIsLoadingMore(false);
+  }, [initialData, totalStudents]);
+
+  useEffect(() => {
+    if (initialData.length < totalStudents) {
+      fetchRemainingStudents();
+    }
+  }, [initialData.length, totalStudents, fetchRemainingStudents]);
+
+  // Build student select options from allData (deduplicated by student id)
   const studentSelectOptions: StudentSelectOption[] = useMemo(() => {
     const studentMap = new Map<string, StudentSelectOption>();
-    for (const row of initialData) {
+    for (const row of allData) {
       const existing = studentMap.get(row.id);
       if (existing) {
         if (row.courseId && !existing.enrolledCourseIds.includes(row.courseId)) {
@@ -121,7 +168,7 @@ export function StudentTable({
       }
     }
     return Array.from(studentMap.values());
-  }, [initialData]);
+  }, [allData]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -202,10 +249,10 @@ export function StudentTable({
 
   // Filter data based on search — when a student matches, include siblings (same parent) too
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return initialData;
+    if (!searchQuery.trim()) return allData;
 
     const query = searchQuery.toLowerCase();
-    const directMatches = initialData.filter(
+    const directMatches = allData.filter(
       (row) =>
         row.name.toLowerCase().includes(query) ||
         row.email?.toLowerCase().includes(query) ||
@@ -223,7 +270,7 @@ export function StudentTable({
     if (matchedParentIds.size === 0) return directMatches;
 
     const matchedIds = new Set(directMatches.map((r) => r.id));
-    const siblings = initialData.filter(
+    const siblings = allData.filter(
       (row) =>
         !matchedIds.has(row.id) &&
         row.parentId !== null &&
@@ -231,7 +278,7 @@ export function StudentTable({
     );
 
     return [...directMatches, ...siblings];
-  }, [initialData, searchQuery]);
+  }, [allData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -427,7 +474,14 @@ export function StudentTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No students found.
+                      {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading students...
+                        </div>
+                      ) : (
+                        "No students found."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -684,7 +738,15 @@ export function StudentTable({
             </table>
           </div>
 
-          {/* Pagination - EXACT MATCH */}
+          {/* Loading indicator for background data — only show when table already has data */}
+          {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more students...
+            </div>
+          )}
+
+          {/* Pagination */}
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}

@@ -2,11 +2,15 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { AttendanceLogTable } from "@/components/attendance/attendance-log-table";
-import { getAttendanceLog } from "@/data/attendance";
+import { getAttendanceLogPaginated } from "@/data/attendance";
 import { getAllInstructors } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
-export default async function AttendanceLogPage() {
+export default async function AttendanceLogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ startDate?: string; endDate?: string }>;
+}) {
   const user = await getUser();
 
   if (!user?.email) {
@@ -17,9 +21,13 @@ export default async function AttendanceLogPage() {
   const perms = permData?.permissions.attendance_log;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
+  const params = await searchParams;
+  const startDate = params.startDate || undefined;
+  const endDate = params.endDate || undefined;
+
   // Fetch data in parallel
-  const [attendanceLog, instructors] = await Promise.all([
-    getAttendanceLog(user.email),
+  const [attendanceLogResult, instructors] = await Promise.all([
+    getAttendanceLogPaginated(user.email, { offset: 0, limit: 10, startDate, endDate }),
     getAllInstructors(),
   ]);
 
@@ -33,7 +41,16 @@ export default async function AttendanceLogPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <AttendanceLogTable initialData={attendanceLog} instructors={instructors} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} canEdit={perms?.can_edit} canDelete={perms?.can_delete} />
+        <AttendanceLogTable
+          initialData={attendanceLogResult.rows}
+          totalCount={attendanceLogResult.totalCount}
+          instructors={instructors}
+          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          canEdit={perms?.can_edit}
+          canDelete={perms?.can_delete}
+          initialStartDate={startDate}
+          initialEndDate={endDate}
+        />
       </div>
     </main>
   );

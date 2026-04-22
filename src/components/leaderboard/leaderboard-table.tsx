@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeftRight, Plus, Star } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +19,7 @@ import type { TransferParticipant } from "@/data/users";
 
 interface LeaderboardTableProps {
   initialData: LeaderboardEntry[];
+  totalCount: number;
   participants: TransferParticipant[];
   hideBranch?: boolean;
   canTransfer?: boolean;
@@ -47,6 +48,7 @@ const columns = [
 
 export function LeaderboardTable({
   initialData,
+  totalCount,
   participants,
   hideBranch,
   canTransfer = true,
@@ -56,6 +58,45 @@ export function LeaderboardTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
+  // Progressive loading: start with server-provided first batch, load rest in background
+  const [allData, setAllData] = useState<LeaderboardEntry[]>(initialData);
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
+  const fetchedRef = useRef(false);
+
+  const fetchRemainingData = useCallback(async () => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    let offset = initialData.length;
+    const existingIds = new Set(initialData.map((r) => r.studentId));
+
+    while (offset < totalCount) {
+      try {
+        const res = await fetch(`/api/leaderboard/table?offset=${offset}&limit=10`);
+        if (!res.ok) break;
+        const result: { rows: LeaderboardEntry[] } = await res.json();
+        if (!result.rows || result.rows.length === 0) break;
+
+        const newRows = result.rows.filter((r) => !existingIds.has(r.studentId));
+        for (const r of result.rows) existingIds.add(r.studentId);
+
+        if (newRows.length > 0) {
+          setAllData((prev) => [...prev, ...newRows]);
+        }
+        offset += 10;
+      } catch {
+        break;
+      }
+    }
+    setIsLoadingMore(false);
+  }, [initialData, totalCount]);
+
+  useEffect(() => {
+    if (initialData.length < totalCount) {
+      fetchRemainingData();
+    }
+  }, [initialData.length, totalCount, fetchRemainingData]);
+
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedRecipientId, setSelectedRecipientId] = useState<string | null>(
@@ -64,16 +105,16 @@ export function LeaderboardTable({
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return initialData;
+    if (!searchQuery.trim()) return allData;
 
     const query = searchQuery.toLowerCase();
-    return initialData.filter(
+    return allData.filter(
       (row) =>
         row.studentName.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query) ||
         (row.program?.toLowerCase().includes(query) ?? false),
     );
-  }, [initialData, searchQuery]);
+  }, [allData, searchQuery]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -202,7 +243,14 @@ export function LeaderboardTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No students found.
+                      {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading students...
+                        </div>
+                      ) : (
+                        "No students found."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -360,6 +408,13 @@ export function LeaderboardTable({
               </tbody>
             </table>
           </div>
+
+          {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more leaderboard data...
+            </div>
+          )}
 
           {/* Pagination */}
           <Pagination

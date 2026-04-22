@@ -179,6 +179,156 @@ export async function getExaminationsForTable(
 }
 
 /**
+ * Paginated version of getExaminationsForTable.
+ * Returns rows for a slice of examinations + total count, for progressive loading.
+ */
+export async function getExaminationsForTablePaginated(
+  userEmail: string,
+  options: { offset: number; limit: number }
+): Promise<{ rows: ExaminationTableRow[]; totalCount: number }> {
+  const { branchIds, useCityName } = await resolveExamBranchIds(userEmail);
+
+  // Count query
+  let countQuery = supabaseAdmin
+    .from("examinations")
+    .select("id", { count: "exact", head: true })
+    .is("deleted_at", null);
+
+  if (branchIds) {
+    // To filter by branch we need to join through students
+    countQuery = supabaseAdmin
+      .from("examinations")
+      .select("id, student:students!inner(branch_id)", { count: "exact", head: true })
+      .is("deleted_at", null)
+      .in("student.branch_id", branchIds);
+  }
+
+  const { count: totalCount } = await countQuery;
+
+  // Main paginated query
+  let query = supabaseAdmin
+    .from("examinations")
+    .select(`
+      id,
+      student_id,
+      enrollment_id,
+      exam_name,
+      exam_level,
+      reattempt_count,
+      mark,
+      notes,
+      examiner_id,
+      exam_date,
+      certificate_url,
+      certificate_number,
+      status,
+      student:students!inner(
+        id,
+        name,
+        photo,
+        date_of_birth,
+        branch_id,
+        branch:branches!inner(id, name, city)
+      ),
+      enrollment:enrollments(
+        id,
+        level,
+        course:courses(id, name)
+      ),
+      examiner:users(
+        id,
+        name,
+        photo
+      )
+    `)
+    .is("deleted_at", null)
+    .order("exam_date", { ascending: false });
+
+  // Apply branch filter if user is not super admin
+  if (branchIds) {
+    query = query.in("student.branch_id", branchIds);
+  }
+
+  // Apply pagination
+  query = query.range(options.offset, options.offset + options.limit - 1);
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching paginated examinations:", error);
+    return { rows: [], totalCount: 0 };
+  }
+
+  // Also fetch attendance counts for each enrollment
+  const enrollmentIds = (data ?? [])
+    .map((e: any) => e.enrollment_id)
+    .filter(Boolean);
+
+  const attendanceCounts: Record<string, number> = {};
+  if (enrollmentIds.length > 0) {
+    const { data: attendanceData } = await supabaseAdmin
+      .from("attendance")
+      .select("enrollment_id, status")
+      .in("enrollment_id", enrollmentIds)
+      .in("status", ["present", "late"]);
+
+    for (const a of attendanceData ?? []) {
+      if (a.enrollment_id) {
+        attendanceCounts[a.enrollment_id] =
+          (attendanceCounts[a.enrollment_id] || 0) + 1;
+      }
+    }
+  }
+
+  const rows: ExaminationTableRow[] = (data ?? []).map((exam: any) => {
+    const student = exam.student;
+    const branch = student?.branch;
+    const enrollment = exam.enrollment;
+    const course = enrollment?.course;
+    const examiner = exam.examiner;
+
+    // Calculate age
+    let studentAge: number | null = null;
+    if (student?.date_of_birth) {
+      try {
+        const birthDate = parseISO(student.date_of_birth);
+        studentAge = differenceInYears(new Date(), birthDate);
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    return {
+      id: exam.id,
+      studentId: exam.student_id,
+      studentName: student?.name || "Unknown",
+      studentPhoto: student?.photo || null,
+      studentAge,
+      branchId: student?.branch_id || "",
+      branchName: useCityName ? (branch?.city || branch?.name || "N/A") : (branch?.name || "N/A"),
+      courseId: course?.id || "",
+      courseName: course?.name || "N/A",
+      sessionAttend: attendanceCounts[exam.enrollment_id] || 0,
+      currentLevel: enrollment?.level || 1,
+      examName: exam.exam_name,
+      examLevel: exam.exam_level,
+      reattemptCount: exam.reattempt_count,
+      mark: exam.mark,
+      notes: exam.notes,
+      examinerId: exam.examiner_id,
+      examinerName: examiner?.name || null,
+      examinerPhoto: examiner?.photo || null,
+      examDate: exam.exam_date,
+      certificateUrl: exam.certificate_url,
+      certificateNumber: exam.certificate_number,
+      status: exam.status,
+    };
+  });
+
+  return { rows, totalCount: totalCount ?? 0 };
+}
+
+/**
  * Get students eligible for examination
  * Eligibility: accumulated attendance >= sessions_to_level_up for their current level
  */

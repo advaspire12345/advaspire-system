@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { Plus } from "lucide-react";
@@ -20,6 +20,7 @@ import type { TransferParticipant } from "@/data/users";
 
 interface TransactionsTableProps {
   initialData: TransactionDisplayRow[];
+  totalCount: number;
   participants: TransferParticipant[];
   hideBranch?: boolean;
   currentUserId?: string;
@@ -76,16 +77,55 @@ function getAmountDisplay(amount: number) {
   return <span className="font-bold">{Math.abs(amount).toLocaleString()}</span>;
 }
 
-export function TransactionsTable({ initialData, participants, hideBranch, currentUserId }: TransactionsTableProps) {
+export function TransactionsTable({ initialData, totalCount, participants, hideBranch, currentUserId }: TransactionsTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Progressive loading: start with server-provided first batch, load rest in background
+  const [allData, setAllData] = useState<TransactionDisplayRow[]>(initialData);
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
+  const fetchedRef = useRef(false);
+
+  const fetchRemainingData = useCallback(async () => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    let offset = initialData.length;
+    const existingIds = new Set(initialData.map((r) => r.id));
+
+    while (offset < totalCount) {
+      try {
+        const res = await fetch(`/api/transactions/table?offset=${offset}&limit=10`);
+        if (!res.ok) break;
+        const result: { rows: TransactionDisplayRow[] } = await res.json();
+        if (!result.rows || result.rows.length === 0) break;
+
+        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
+        for (const r of result.rows) existingIds.add(r.id);
+
+        if (newRows.length > 0) {
+          setAllData((prev) => [...prev, ...newRows]);
+        }
+        offset += 10;
+      } catch {
+        break;
+      }
+    }
+    setIsLoadingMore(false);
+  }, [initialData, totalCount]);
+
+  useEffect(() => {
+    if (initialData.length < totalCount) {
+      fetchRemainingData();
+    }
+  }, [initialData.length, totalCount, fetchRemainingData]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
 
   const filteredData = useMemo(() => {
-    let result = initialData;
+    let result = allData;
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -100,7 +140,7 @@ export function TransactionsTable({ initialData, participants, hideBranch, curre
     }
 
     return result;
-  }, [initialData, searchQuery]);
+  }, [allData, searchQuery]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -198,7 +238,14 @@ export function TransactionsTable({ initialData, participants, hideBranch, curre
                     colSpan={hideBranch ? columns.length - 1 : columns.length}
                     className="h-24 text-center text-muted-foreground rounded-lg"
                   >
-                    No transactions found.
+                    {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading transactions...
+                        </div>
+                      ) : (
+                        "No transactions found."
+                      )}
                   </td>
                 </tr>
               ) : (
@@ -315,6 +362,13 @@ export function TransactionsTable({ initialData, participants, hideBranch, curre
             </tbody>
           </table>
         </div>
+
+        {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more transactions...
+            </div>
+          )}
 
         {/* Pagination */}
         <Pagination

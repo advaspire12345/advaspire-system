@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/supabase/server";
-import { getPendingPaymentsForTable } from "@/data/payments";
+import { getPendingPaymentsForTablePaginated } from "@/data/payments";
 import { getStudentsForPayment } from "@/data/students";
 import { getCoursesAndPackages } from "@/data/courses";
 import { PendingPaymentTable } from "@/components/payments/pending-payment-table";
@@ -23,8 +23,8 @@ export default async function PendingPaymentsPage() {
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   // Fetch data in parallel
-  const [payments, students, { courses, packages }] = await Promise.all([
-    getPendingPaymentsForTable(user.email ?? ""),
+  const [paymentsResult, students, { courses, packages }] = await Promise.all([
+    getPendingPaymentsForTablePaginated(user.email ?? "", { offset: 0, limit: 10 }),
     getStudentsForPayment(user.email ?? ""),
     getCoursesAndPackages(),
   ]);
@@ -40,7 +40,8 @@ export default async function PendingPaymentsPage() {
         />
 
         <PendingPaymentTable
-          initialData={payments}
+          initialData={paymentsResult.rows}
+          totalCount={paymentsResult.totalCount}
           students={students}
           hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
           courses={courses}
