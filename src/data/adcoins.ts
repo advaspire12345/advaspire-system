@@ -873,3 +873,193 @@ export async function getTransactionsForDisplay(userEmail: string): Promise<Tran
 
   return rows;
 }
+
+/**
+ * Paginated version of getTransactionsForDisplay.
+ * Returns rows for a slice of transactions + total count, for progressive loading.
+ * NOTE: Branch filtering is applied in code after the query, so paginated results
+ * might have fewer than `limit` items for non-super-admin users.
+ */
+export async function getTransactionsForDisplayPaginated(
+  userEmail: string,
+  options: { offset: number; limit: number }
+): Promise<{ rows: TransactionDisplayRow[]; totalCount: number }> {
+  // Get user's branch access — resolve company IDs to child HQ/branch IDs
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  // Count query on adcoin_transactions (no initial filter)
+  const { count: totalCount } = await supabaseAdmin
+    .from("adcoin_transactions")
+    .select("id", { count: "exact", head: true });
+
+  // Fetch paginated transactions
+  const { data: transactions, error: txError } = await supabaseAdmin
+    .from('adcoin_transactions')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .range(options.offset, options.offset + options.limit - 1);
+
+  if (txError) {
+    console.error('Error fetching paginated transactions:', txError);
+    return { rows: [], totalCount: 0 };
+  }
+
+  if (!transactions || transactions.length === 0) {
+    return { rows: [], totalCount: totalCount ?? 0 };
+  }
+
+  // Collect all unique participant IDs
+  const participantIds = new Set<string>();
+  for (const t of transactions) {
+    if (t.sender_id) participantIds.add(t.sender_id);
+    if (t.receiver_id) participantIds.add(t.receiver_id);
+  }
+
+  const idsArray = Array.from(participantIds);
+
+  // Fetch all relevant students with their branches
+  const { data: students, error: studentError } = await supabaseAdmin
+    .from('students')
+    .select(`
+      id,
+      name,
+      photo,
+      branch_id,
+      adcoin_balance,
+      branch:branches(id, name, city)
+    `)
+    .in('id', idsArray);
+
+  if (studentError) {
+    console.error('Error fetching students:', studentError);
+  }
+
+  // Fetch all relevant users (for pool account like advaspire)
+  const { data: users, error: userError } = await supabaseAdmin
+    .from('users')
+    .select(`
+      id,
+      name,
+      photo,
+      branch_id,
+      adcoin_balance,
+      branch:branches!users_branch_id_branches_id_fk(id, name, city)
+    `)
+    .in('id', idsArray);
+
+  if (userError) {
+    console.error('Error fetching users:', userError);
+  }
+
+  // Create a lookup map for participants (students and users combined)
+  const participantMap = new Map<string, {
+    id: string;
+    name: string;
+    photo: string | null;
+    branch_id: string;
+    branchName: string;
+    level: number;
+  }>();
+
+  // Add students to map
+  for (const student of students ?? []) {
+    const branchData = student.branch as unknown as { id: string; name: string; city: string | null } | null;
+    // Calculate level: every 500 adcoin = 1 level, starting at 1
+    const adcoinBalance = student.adcoin_balance ?? 0;
+    const level = Math.floor(adcoinBalance / 500) + 1;
+    participantMap.set(student.id, {
+      id: student.id,
+      name: student.name,
+      photo: student.photo,
+      branch_id: student.branch_id,
+      branchName: useCityName
+        ? (branchData?.city || branchData?.name || 'Unknown')
+        : (branchData?.name ?? 'Unknown'),
+      level,
+    });
+  }
+
+  // Add users to map (if not already present from students)
+  for (const user of users ?? []) {
+    if (!participantMap.has(user.id)) {
+      const branchData = user.branch as unknown as { id: string; name: string; city: string | null } | null;
+      // For users, calculate level based on their adcoin_balance too
+      const adcoinBalance = user.adcoin_balance ?? 0;
+      const level = Math.floor(adcoinBalance / 500) + 1;
+      participantMap.set(user.id, {
+        id: user.id,
+        name: user.name,
+        photo: user.photo,
+        branch_id: user.branch_id ?? '',
+        branchName: useCityName
+          ? (branchData?.city || branchData?.name || 'Pool')
+          : (branchData?.name ?? 'Pool'),
+        level,
+      });
+    }
+  }
+
+  const rows: TransactionDisplayRow[] = [];
+
+  for (const t of transactions) {
+    const sender = t.sender_id ? participantMap.get(t.sender_id) : null;
+    const receiver = t.receiver_id ? participantMap.get(t.receiver_id) : null;
+
+    // Determine branch from receiver or sender
+    const branchParticipant = receiver ?? sender;
+
+    // Filter by branch if user has limited access
+    if (branchIds) {
+      const participantBranchId = branchParticipant?.branch_id;
+      if (!participantBranchId || !branchIds.includes(participantBranchId)) continue;
+    }
+
+    rows.push({
+      id: t.id,
+      createdAt: t.created_at,
+      type: t.type as AdcoinTransactionType,
+      amount: Math.abs(t.amount),
+      description: t.description,
+      senderId: sender?.id ?? null,
+      senderName: sender?.name ?? null,
+      senderPhoto: sender?.photo ?? null,
+      senderLevel: sender?.level ?? 1,
+      receiverId: receiver?.id ?? null,
+      receiverName: receiver?.name ?? null,
+      receiverPhoto: receiver?.photo ?? null,
+      receiverLevel: receiver?.level ?? 1,
+      branchId: branchParticipant?.branch_id ?? '',
+      branchName: branchParticipant?.branchName ?? 'Unknown',
+    });
+  }
+
+  return { rows, totalCount: totalCount ?? 0 };
+}

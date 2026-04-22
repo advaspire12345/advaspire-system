@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   Search,
   Pencil,
   Trash2,
-  Download,
+  CalendarIcon,
+  X,
+  Filter,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
 import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
@@ -19,13 +20,18 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import {
   AttendanceLogModal,
   type LogModalMode,
   type AttendanceLogFormData,
 } from "@/components/attendance/attendance-log-modal";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { exportToCSV } from "@/lib/utils/export-csv";
 import type { AttendanceLogRow } from "@/data/attendance";
 import type { AttendanceStatus } from "@/db/schema";
 import {
@@ -40,10 +46,13 @@ interface InstructorOption {
 
 interface AttendanceLogTableProps {
   initialData: AttendanceLogRow[];
+  totalCount: number;
   instructors?: InstructorOption[];
   hideBranch?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  initialStartDate?: string;
+  initialEndDate?: string;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -79,35 +88,93 @@ const columns = [
   },
 ];
 
-const csvColumns = [
-  { key: "studentName", label: "Student Name" },
-  { key: "branchName", label: "Branch" },
-  { key: "courseName", label: "Program" },
-  { key: "classType", label: "Type" },
-  { key: "date", label: "Date" },
-  { key: "dayOfWeek", label: "Day" },
-  { key: "actualStartTime", label: "Time" },
-  { key: "status", label: "Attendance" },
-  { key: "lesson", label: "Lesson" },
-  { key: "mission", label: "Mission" },
-  { key: "lastActivity", label: "Activity" },
-  { key: "adcoin", label: "Adcoin" },
-  { key: "instructorName", label: "Instructor" },
-  { key: "markedBy", label: "Marked By" },
-  { key: "notes", label: "Notes" },
-];
-
 export function AttendanceLogTable({
   initialData,
+  totalCount,
   instructors = [],
   hideBranch,
   canEdit = true,
   canDelete = true,
+  initialStartDate,
+  initialEndDate,
 }: AttendanceLogTableProps) {
   const [data, setData] = useState<AttendanceLogRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
+
+  // Date filter state
+  const [startDate, setStartDate] = useState<Date | undefined>(
+    initialStartDate ? new Date(initialStartDate) : undefined
+  );
+  const [endDate, setEndDate] = useState<Date | undefined>(
+    initialEndDate ? new Date(initialEndDate) : undefined
+  );
+  // Track the active (applied) date filter for progressive loading
+  const [activeStartDate, setActiveStartDate] = useState<string | undefined>(initialStartDate);
+  const [activeEndDate, setActiveEndDate] = useState<string | undefined>(initialEndDate);
+
+  // Progressive loading: load remaining data in background
+  const [loadTotal, setLoadTotal] = useState(totalCount);
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
+  const fetchedRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchAllData = useCallback(async (
+    startOffset: number,
+    existingRows: AttendanceLogRow[],
+    total: number,
+    filterStartDate?: string,
+    filterEndDate?: string,
+  ) => {
+    let offset = startOffset;
+    const existingIds = new Set(existingRows.map((r) => r.id));
+
+    const params = new URLSearchParams();
+    if (filterStartDate) params.set("startDate", filterStartDate);
+    if (filterEndDate) params.set("endDate", filterEndDate);
+
+    // Create abort controller for this fetch sequence
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    while (offset < total) {
+      if (controller.signal.aborted) return;
+      try {
+        const dateParams = params.toString();
+        const res = await fetch(
+          `/api/attendance-log/table?offset=${offset}&limit=10${dateParams ? `&${dateParams}` : ""}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) break;
+        const result: { rows: AttendanceLogRow[] } = await res.json();
+        if (!result.rows || result.rows.length === 0) break;
+
+        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
+        for (const r of result.rows) existingIds.add(r.id);
+
+        if (newRows.length > 0) {
+          setData((prev) => [...prev, ...newRows]);
+        }
+        offset += 10;
+      } catch {
+        break;
+      }
+    }
+    if (!controller.signal.aborted) {
+      setIsLoadingMore(false);
+    }
+  }, []);
+
+  // Initial progressive load on mount
+  useEffect(() => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+    if (initialData.length < totalCount) {
+      fetchAllData(initialData.length, initialData, totalCount, initialStartDate, initialEndDate);
+    }
+  }, [initialData, totalCount, initialStartDate, initialEndDate, fetchAllData]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -160,6 +227,56 @@ export function AttendanceLogTable({
     setStatusFilter(filter);
     setCurrentPage(1);
   };
+
+  // Re-fetch data from API with given date filters (no page refresh)
+  const refetchWithDates = useCallback(async (filterStart?: string, filterEnd?: string) => {
+    // Abort any in-progress fetch
+    abortRef.current?.abort();
+    setData([]);
+    setCurrentPage(1);
+    setIsLoadingMore(true);
+    setActiveStartDate(filterStart);
+    setActiveEndDate(filterEnd);
+
+    const params = new URLSearchParams();
+    if (filterStart) params.set("startDate", filterStart);
+    if (filterEnd) params.set("endDate", filterEnd);
+    const dateParams = params.toString();
+
+    try {
+      const res = await fetch(`/api/attendance-log/table?offset=0&limit=10${dateParams ? `&${dateParams}` : ""}`);
+      if (!res.ok) { setIsLoadingMore(false); return; }
+      const result: { rows: AttendanceLogRow[]; totalCount: number } = await res.json();
+      const rows = result.rows ?? [];
+      const newTotal = result.totalCount ?? 0;
+      setData(rows);
+      setLoadTotal(newTotal);
+      if (rows.length < newTotal) {
+        fetchAllData(rows.length, rows, newTotal, filterStart, filterEnd);
+      } else {
+        setIsLoadingMore(false);
+      }
+    } catch {
+      setIsLoadingMore(false);
+    }
+  }, [fetchAllData]);
+
+  // Apply date filter
+  const applyDateFilter = useCallback(() => {
+    const s = startDate ? format(startDate, "yyyy-MM-dd") : undefined;
+    const e = endDate ? format(endDate, "yyyy-MM-dd") : undefined;
+    refetchWithDates(s, e);
+  }, [startDate, endDate, refetchWithDates]);
+
+  // Clear date filter
+  const clearDateFilter = useCallback(() => {
+    setStartDate(undefined);
+    setEndDate(undefined);
+    // Only re-fetch if a date filter was active
+    if (activeStartDate || activeEndDate) {
+      refetchWithDates(undefined, undefined);
+    }
+  }, [activeStartDate, activeEndDate, refetchWithDates]);
 
   // Open modal with specific mode
   const openModal = (mode: LogModalMode, record: AttendanceLogRow) => {
@@ -231,21 +348,6 @@ export function AttendanceLogTable({
       throw new Error(result.error);
     }
   }, [selectedRecord]);
-
-  // Export to CSV
-  const handleExport = () => {
-    const exportData = filteredData.map((row) => ({
-      ...row,
-      date: formatDate(row.date, row.dayOfWeek),
-      status: row.status.charAt(0).toUpperCase() + row.status.slice(1),
-      adcoin: row.adcoin ?? 0,
-    }));
-    exportToCSV(
-      exportData,
-      `attendance-log-${format(new Date(), "yyyy-MM-dd")}`,
-      csvColumns,
-    );
-  };
 
   // Compute the actual calendar date from actual_day relative to the slot date's week
   const getActualDate = (slotDate: string, actualDay: string | null): Date => {
@@ -352,7 +454,7 @@ export function AttendanceLogTable({
     <>
       <Card className="bg-transparent border-none shadow-none">
         <CardContent className="space-y-4 p-0">
-          {/* Search, Filter and Export Row */}
+          {/* Search, Filter and Date Range Row */}
           <div className="flex flex-col gap-4 rounded-lg p-6 sm:flex-row sm:items-center sm:justify-between bg-white">
             {/* Search Input */}
             <div className="relative w-full max-w-md">
@@ -402,15 +504,98 @@ export function AttendanceLogTable({
               ))}
             </div>
 
-            {/* Export Button */}
-            <Button
-              onClick={handleExport}
-              variant="outline"
-              className="font-bold h-[50px] px-6"
-            >
-              <Download className="h-4 w-4" />
-              Export CSV
-            </Button>
+            {/* Date Range Filter */}
+            <div className="flex items-center gap-2">
+              {/* Start Date */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button type="button" className="relative w-[130px]">
+                    <div
+                      className={cn(
+                        "peer w-full h-[50px] rounded-lg border border-muted-foreground/30 bg-transparent px-4 pr-10 flex items-center text-sm font-semibold text-foreground transition-colors cursor-pointer",
+                        "hover:border-[#23D2E2] focus:border-[#23D2E2] focus:outline-none",
+                        !startDate && "text-transparent"
+                      )}
+                    >
+                      {startDate ? format(startDate, "dd/MM/yyyy") : "dd/mm/yyyy"}
+                    </div>
+                    <label
+                      className={cn(
+                        "pointer-events-none absolute left-3 bg-white px-1 font-semibold text-muted-foreground transition-all",
+                        startDate
+                          ? "-top-2.5 text-xs"
+                          : "top-1/2 -translate-y-1/2 text-sm"
+                      )}
+                    >
+                      From
+                    </label>
+                    <CalendarIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={startDate}
+                    onSelect={setStartDate}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {/* End Date */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button type="button" className="relative w-[130px]">
+                    <div
+                      className={cn(
+                        "peer w-full h-[50px] rounded-lg border border-muted-foreground/30 bg-transparent px-4 pr-10 flex items-center text-sm font-semibold text-foreground transition-colors cursor-pointer",
+                        "hover:border-[#23D2E2] focus:border-[#23D2E2] focus:outline-none",
+                        !endDate && "text-transparent"
+                      )}
+                    >
+                      {endDate ? format(endDate, "dd/MM/yyyy") : "dd/mm/yyyy"}
+                    </div>
+                    <label
+                      className={cn(
+                        "pointer-events-none absolute left-3 bg-white px-1 font-semibold text-muted-foreground transition-all",
+                        endDate
+                          ? "-top-2.5 text-xs"
+                          : "top-1/2 -translate-y-1/2 text-sm"
+                      )}
+                    >
+                      To
+                    </label>
+                    <CalendarIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={endDate}
+                    onSelect={setEndDate}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {/* Apply Filter Button */}
+              <button
+                type="button"
+                onClick={applyDateFilter}
+                className="h-[50px] w-12 flex items-center justify-center bg-primary rounded-lg hover:bg-primary/90 transition"
+              >
+                <Filter className="h-5 w-5 text-primary-foreground" />
+              </button>
+
+              {/* Clear Filter Button */}
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={clearDateFilter}
+                  className="h-[50px] w-12 flex items-center justify-center rounded-lg border border-muted-foreground/30 hover:bg-muted transition"
+                >
+                  <X className="h-5 w-5 text-muted-foreground" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Table */}
@@ -452,7 +637,14 @@ export function AttendanceLogTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No attendance records found.
+                      {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading attendance records...
+                        </div>
+                      ) : (
+                        "No attendance records found."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -636,6 +828,13 @@ export function AttendanceLogTable({
               </tbody>
             </table>
           </div>
+
+          {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more attendance logs...
+            </div>
+          )}
 
           {/* Pagination */}
           <Pagination

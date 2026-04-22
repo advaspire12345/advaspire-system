@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search,
@@ -89,6 +89,7 @@ interface CurriculumLesson {
 
 interface AttendanceTableProps {
   initialData: AttendanceRow[];
+  totalCount: number;
   /** All active students for manual "Take Attendance" search (not filtered by slot completion) */
   allStudentsForManualAdd?: AttendanceRow[];
   instructors?: InstructorOption[];
@@ -125,6 +126,7 @@ const columns = [
 
 export function AttendanceTable({
   initialData,
+  totalCount,
   allStudentsForManualAdd,
   instructors = [],
   fetchCurriculumLessons,
@@ -136,6 +138,44 @@ export function AttendanceTable({
   const [data, setData] = useState<AttendanceRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Progressive loading: load remaining data in background
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
+  const fetchedRef = useRef(false);
+
+  const fetchRemainingData = useCallback(async () => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    let offset = initialData.length;
+    const existingIds = new Set(initialData.map((r) => r.id));
+
+    while (offset < totalCount) {
+      try {
+        const res = await fetch(`/api/attendance/table?offset=${offset}&limit=10`);
+        if (!res.ok) break;
+        const result: { rows: AttendanceRow[] } = await res.json();
+        if (!result.rows || result.rows.length === 0) break;
+
+        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
+        for (const r of result.rows) existingIds.add(r.id);
+
+        if (newRows.length > 0) {
+          setData((prev) => [...prev, ...newRows]);
+        }
+        offset += 10;
+      } catch {
+        break;
+      }
+    }
+    setIsLoadingMore(false);
+  }, [initialData, totalCount]);
+
+  useEffect(() => {
+    if (initialData.length < totalCount) {
+      fetchRemainingData();
+    }
+  }, [initialData.length, totalCount, fetchRemainingData]);
 
   // Sync data state when initialData changes (after page refresh)
   useEffect(() => {
@@ -411,7 +451,14 @@ export function AttendanceTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No students found.
+                      {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading students...
+                        </div>
+                      ) : (
+                        "No students found."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -625,6 +672,13 @@ export function AttendanceTable({
               </tbody>
             </table>
           </div>
+
+          {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more attendance data...
+            </div>
+          )}
 
           {/* Pagination */}
           <Pagination

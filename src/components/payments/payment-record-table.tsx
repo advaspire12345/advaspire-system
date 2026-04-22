@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -53,6 +53,7 @@ interface PaymentRecordTableProps {
   hideBranch?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  totalCount: number;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -88,6 +89,7 @@ export function PaymentRecordTable({
   hideBranch,
   canEdit = true,
   canDelete = true,
+  totalCount,
 }: PaymentRecordTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -103,6 +105,69 @@ export function PaymentRecordTable({
   const [endDate, setEndDate] = useState<Date | undefined>(
     initialEndDate ? new Date(initialEndDate) : undefined
   );
+  // Track the active (applied) date filter for progressive loading
+  const [activeStartDate, setActiveStartDate] = useState<string | undefined>(initialStartDate);
+  const [activeEndDate, setActiveEndDate] = useState<string | undefined>(initialEndDate);
+
+  // Progressive loading: load remaining data in background
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
+  const fetchedRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchAllData = useCallback(async (
+    startOffset: number,
+    existingRows: PaymentRecordRow[],
+    total: number,
+    filterStartDate?: string,
+    filterEndDate?: string,
+  ) => {
+    let offset = startOffset;
+    const existingIds = new Set(existingRows.map((r) => r.id));
+
+    const params = new URLSearchParams();
+    if (filterStartDate) params.set("startDate", filterStartDate);
+    if (filterEndDate) params.set("endDate", filterEndDate);
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    while (offset < total) {
+      if (controller.signal.aborted) return;
+      try {
+        const dateParams = params.toString();
+        const res = await fetch(
+          `/api/payment-record/table?offset=${offset}&limit=10${dateParams ? `&${dateParams}` : ""}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) break;
+        const result: { rows: PaymentRecordRow[] } = await res.json();
+        if (!result.rows || result.rows.length === 0) break;
+
+        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
+        for (const r of result.rows) existingIds.add(r.id);
+
+        if (newRows.length > 0) {
+          setData((prev) => [...prev, ...newRows]);
+        }
+        offset += 10;
+      } catch {
+        break;
+      }
+    }
+    if (!controller.signal.aborted) {
+      setIsLoadingMore(false);
+    }
+  }, []);
+
+  // Initial progressive load on mount
+  useEffect(() => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+    if (initialData.length < totalCount) {
+      fetchAllData(initialData.length, initialData, totalCount, initialStartDate, initialEndDate);
+    }
+  }, [initialData, totalCount, initialStartDate, initialEndDate, fetchAllData]);
 
   // Edit/Delete modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -150,28 +215,52 @@ export function PaymentRecordTable({
     setCurrentPage(1);
   };
 
+  // Re-fetch data from API with given date filters (no page refresh)
+  const refetchWithDates = useCallback(async (filterStart?: string, filterEnd?: string) => {
+    abortRef.current?.abort();
+    setData([]);
+    setCurrentPage(1);
+    setIsLoadingMore(true);
+    setActiveStartDate(filterStart);
+    setActiveEndDate(filterEnd);
+
+    const params = new URLSearchParams();
+    if (filterStart) params.set("startDate", filterStart);
+    if (filterEnd) params.set("endDate", filterEnd);
+    const dateParams = params.toString();
+
+    try {
+      const res = await fetch(`/api/payment-record/table?offset=0&limit=10${dateParams ? `&${dateParams}` : ""}`);
+      if (!res.ok) { setIsLoadingMore(false); return; }
+      const result: { rows: PaymentRecordRow[]; totalCount: number } = await res.json();
+      const rows = result.rows ?? [];
+      const newTotal = result.totalCount ?? 0;
+      setData(rows);
+      if (rows.length < newTotal) {
+        fetchAllData(rows.length, rows, newTotal, filterStart, filterEnd);
+      } else {
+        setIsLoadingMore(false);
+      }
+    } catch {
+      setIsLoadingMore(false);
+    }
+  }, [fetchAllData]);
+
   // Apply date filter
   const applyDateFilter = useCallback(() => {
-    const params = new URLSearchParams();
-
-    if (startDate) {
-      params.set("startDate", format(startDate, "yyyy-MM-dd"));
-    }
-
-    if (endDate) {
-      params.set("endDate", format(endDate, "yyyy-MM-dd"));
-    }
-
-    const queryString = params.toString();
-    window.location.href = `/payment-record${queryString ? `?${queryString}` : ""}`;
-  }, [startDate, endDate]);
+    const s = startDate ? format(startDate, "yyyy-MM-dd") : undefined;
+    const e = endDate ? format(endDate, "yyyy-MM-dd") : undefined;
+    refetchWithDates(s, e);
+  }, [startDate, endDate, refetchWithDates]);
 
   // Clear date filter
   const clearDateFilter = useCallback(() => {
     setStartDate(undefined);
     setEndDate(undefined);
-    window.location.href = "/payment-record";
-  }, []);
+    if (activeStartDate || activeEndDate) {
+      refetchWithDates(undefined, undefined);
+    }
+  }, [activeStartDate, activeEndDate, refetchWithDates]);
 
   // Open modal with specific mode
   const openModal = (mode: PaymentRecordModalMode, record: PaymentRecordRow) => {
@@ -445,7 +534,14 @@ export function PaymentRecordTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No payment records found.
+                      {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading payment records...
+                        </div>
+                      ) : (
+                        "No payment records found."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -604,6 +700,13 @@ export function PaymentRecordTable({
               </tbody>
             </table>
           </div>
+
+          {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more payment records...
+            </div>
+          )}
 
           {/* Pagination */}
           <Pagination

@@ -2,11 +2,11 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { StudentTable } from "@/components/student/student-table";
-import { getStudentsForTable } from "@/data/students";
+import { getStudentsForTablePaginated } from "@/data/students";
 import { getAllBranches } from "@/data/branches";
 import { getUserBranchIds } from "@/data/users";
 import { getAllCourses, getAllCoursePricing, getAllCourseSlots } from "@/data/courses";
-import { getAllParents } from "@/data/parents";
+import { getAllParents, getParentsByBranchIds } from "@/data/parents";
 import {
   createStudentAction,
   updateStudentAction,
@@ -33,39 +33,52 @@ export default async function StudentsPage() {
   const { checkAndExpireEnrollments } = await import("@/data/enrollments");
   await checkAndExpireEnrollments();
 
-  // Fetch real data from database
-  const [students, branchesData, coursesData, pricingData, slotsData, parentsData] = await Promise.all([
-    getStudentsForTable(user.email),
+  const useCityName = permData!.role !== "super_admin";
+
+  // Fetch branches and user branch IDs first to determine parent filtering
+  const [branchesData, rawBranchIds] = await Promise.all([
     getAllBranches(),
+    useCityName ? getUserBranchIds(user.email) : Promise.resolve(null),
+  ]);
+
+  // Expand branch IDs: for admin, include all child branches under their company
+  let expandedBranchIds = rawBranchIds;
+  if (rawBranchIds && rawBranchIds.length > 0 && permData!.role === "admin") {
+    const companyIds = new Set<string>();
+    for (const b of branchesData) {
+      if (rawBranchIds.includes(b.id)) {
+        if (b.type === "company") companyIds.add(b.id);
+        else if (b.parent_id) companyIds.add(b.parent_id);
+      }
+    }
+    if (companyIds.size > 0) {
+      expandedBranchIds = branchesData
+        .filter((b) => b.type !== "company" && b.parent_id && companyIds.has(b.parent_id))
+        .map((b) => b.id);
+    }
+  }
+
+  // Fetch remaining data in parallel — parents filtered by expanded branch IDs
+  const [studentsResult, coursesData, pricingData, slotsData, parentsData] = await Promise.all([
+    getStudentsForTablePaginated(user.email, { offset: 0, limit: 10 }),
     getAllCourses(),
     getAllCoursePricing(),
     getAllCourseSlots(),
-    getAllParents(),
+    expandedBranchIds && expandedBranchIds.length > 0
+      ? getParentsByBranchIds(expandedBranchIds)
+      : getAllParents(),
   ]);
 
-  const useCityName = permData!.role !== "super_admin";
-
-  // Filter branches based on role
+  // Filter branches for the dropdown based on role
   let filteredBranches = branchesData;
-  if (useCityName) {
-    const branchIds = await getUserBranchIds(user.email);
-    if (branchIds && branchIds.length > 0) {
-      if (permData!.role === "admin") {
-        // Admin: show all company's HQ and branches
-        const companyIds = new Set<string>();
-        for (const b of branchesData) {
-          if (branchIds.includes(b.id)) {
-            if (b.type === "company") companyIds.add(b.id);
-            else if (b.parent_id) companyIds.add(b.parent_id);
-          }
-        }
-        filteredBranches = branchesData.filter(
-          (b) => b.type !== "company" && b.parent_id && companyIds.has(b.parent_id)
-        );
-      } else {
-        // Branch admin/instructor: only their own branch
-        filteredBranches = branchesData.filter((b) => branchIds.includes(b.id));
-      }
+  if (useCityName && rawBranchIds && rawBranchIds.length > 0) {
+    if (permData!.role === "admin") {
+      filteredBranches = branchesData.filter(
+        (b) => b.type !== "company" && b.parent_id && expandedBranchIds!.includes(b.id)
+      );
+    } else {
+      // Branch admin/instructor: only their own branch
+      filteredBranches = branchesData.filter((b) => rawBranchIds.includes(b.id));
     }
   }
 
@@ -121,7 +134,8 @@ export default async function StudentsPage() {
         />
 
         <StudentTable
-          initialData={students}
+          initialData={studentsResult.rows}
+          totalStudents={studentsResult.totalStudents}
           branches={branches}
           hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
           courses={courses}

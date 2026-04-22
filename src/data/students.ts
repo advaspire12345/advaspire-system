@@ -1095,6 +1095,438 @@ export async function getStudentsForTable(
   return rows;
 }
 
+/**
+ * Paginated version of getStudentsForTable.
+ * Returns rows for a slice of students + total count, for progressive loading.
+ */
+export async function getStudentsForTablePaginated(
+  userEmail: string,
+  options: { offset: number; limit: number; branchId?: string }
+): Promise<{ rows: StudentTableRow[]; totalStudents: number }> {
+  // Get user's branch access — resolve company IDs to all child HQ/branch IDs
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const user = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || user?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && user?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  // Count query
+  let countQuery = supabaseAdmin
+    .from('students')
+    .select('id', { count: 'exact', head: true })
+    .is('deleted_at', null);
+
+  if (options.branchId) {
+    countQuery = countQuery.eq('branch_id', options.branchId);
+  } else if (branchIds) {
+    countQuery = countQuery.in('branch_id', branchIds);
+  }
+
+  const { count: totalStudents } = await countQuery;
+
+  // Main paginated query
+  let query = supabaseAdmin
+    .from('students')
+    .select(`
+      id,
+      student_id,
+      photo,
+      cover_photo,
+      name,
+      email,
+      phone,
+      date_of_birth,
+      gender,
+      school_name,
+      branch_id,
+      level,
+      adcoin_balance,
+      created_at,
+      branch:branches(name, city),
+      enrollments(
+        id,
+        status,
+        enrolled_at,
+        sessions_remaining,
+        period_start,
+        day_of_week,
+        start_time,
+        end_time,
+        schedule,
+        package_id,
+        instructor_id,
+        pool_id,
+        level,
+        adcoin_balance,
+        expires_at,
+        course:courses(id, name),
+        package:course_pricing(id, package_type, duration),
+        pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
+        attendance(date, status, created_at)
+      ),
+      parent_students(
+        relationship,
+        parent:parents(
+          id,
+          name,
+          phone,
+          email,
+          address,
+          postcode,
+          city
+        )
+      ),
+      payments(amount, status, course_id, package_id, pool_id, paid_at)
+    `)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false });
+
+  // Apply branch filter
+  if (options.branchId) {
+    query = query.eq('branch_id', options.branchId);
+  } else if (branchIds) {
+    query = query.in('branch_id', branchIds);
+  }
+
+  // Apply pagination
+  query = query.range(options.offset, options.offset + options.limit - 1);
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching paginated students for table:', error);
+    return { rows: [], totalStudents: 0 };
+  }
+
+  // Pre-fetch all course pricing so we can look up duration per payment's package_id
+  const { data: allPricing } = await supabaseAdmin
+    .from('course_pricing')
+    .select('id, duration, package_type');
+  const pricingMap = new Map<string, { duration: number; package_type: string }>();
+  for (const p of allPricing ?? []) {
+    pricingMap.set(p.id, { duration: p.duration, package_type: p.package_type });
+  }
+
+  const getSessionsForPayment = (packageId: string | null): number => {
+    if (!packageId) return 0;
+    const pkg = pricingMap.get(packageId);
+    if (!pkg) return 0;
+    return pkg.package_type === 'monthly' ? pkg.duration * 4 : pkg.duration;
+  };
+
+  // Pre-fetch pool payment data (same logic as getStudentsForTable)
+  const poolPaymentCache = new Map<string, { totalPaid: number; totalSessions: number }>();
+  const poolPaymentCacheRaw = new Map<string, Array<{ amount: number; status: string; course_id: string | null; package_id: string | null; pool_id: string | null; paid_at: string | null }>>();
+  const poolJoinDateCache = new Map<string, Map<string, string>>();
+  const poolSiblingCountCache = new Map<string, number>();
+  const poolStudentNamesCache = new Map<string, Map<string, string>>();
+  const allPoolIds = new Set<string>();
+  for (const student of data ?? []) {
+    for (const enrollment of (student as any).enrollments || []) {
+      if (enrollment.pool_id) allPoolIds.add(enrollment.pool_id);
+    }
+  }
+  if (allPoolIds.size > 0) {
+    for (const poolId of allPoolIds) {
+      const { data: poolStudentLinks } = await supabaseAdmin
+        .from('pool_students')
+        .select('student_id, joined_at, student:students(name)')
+        .eq('pool_id', poolId);
+
+      const joinDates = new Map<string, string>();
+      const studentNames = new Map<string, string>();
+      for (const ps of poolStudentLinks ?? []) {
+        if (ps.joined_at) joinDates.set(ps.student_id, ps.joined_at);
+        const studentData = ps.student as unknown as { name: string } | null;
+        if (studentData?.name) studentNames.set(ps.student_id, studentData.name);
+      }
+      poolJoinDateCache.set(poolId, joinDates);
+      poolSiblingCountCache.set(poolId, (poolStudentLinks ?? []).length);
+      poolStudentNamesCache.set(poolId, studentNames);
+      const { data: poolData } = await supabaseAdmin
+        .from('shared_session_pools')
+        .select('course_id')
+        .eq('id', poolId)
+        .single();
+      if (!poolStudentLinks?.length || !poolData) continue;
+      const studentIds = poolStudentLinks.map(ps => ps.student_id);
+      const { data: poolPayments } = await supabaseAdmin
+        .from('payments')
+        .select('amount, package_id, paid_at, course_id')
+        .in('student_id', studentIds)
+        .eq('course_id', poolData.course_id)
+        .eq('pool_id', poolId)
+        .eq('status', 'paid');
+      const totalPaid = (poolPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
+      const totalSessions = (poolPayments ?? []).reduce((sum, p) => {
+        return sum + getSessionsForPayment(p.package_id);
+      }, 0);
+      poolPaymentCache.set(poolId, { totalPaid, totalSessions });
+      poolPaymentCacheRaw.set(poolId, (poolPayments ?? []).map(p => ({
+        amount: Number(p.amount),
+        status: 'paid',
+        course_id: p.course_id,
+        package_id: p.package_id,
+        pool_id: poolId,
+        paid_at: p.paid_at,
+      })));
+    }
+  }
+
+  // Reuse the same buildRow logic as getStudentsForTable
+  const buildRow = (student: any, enrollment: any | null): StudentTableRow => {
+    let scheduleDays: string[] = [];
+    let scheduleTime: string | null = null;
+
+    if (enrollment?.schedule) {
+      try {
+        const scheduleEntries = JSON.parse(enrollment.schedule);
+        if (Array.isArray(scheduleEntries)) {
+          scheduleDays = scheduleEntries.map((e: { day: string }) => e.day).filter(Boolean);
+          const times = scheduleEntries
+            .map((e: { day: string; time: string }) => e.time)
+            .filter(Boolean);
+          scheduleTime = times.length > 0 ? times.join(', ') : null;
+        }
+      } catch { /* Fall back to legacy parsing */ }
+    }
+
+    if (scheduleDays.length === 0 && enrollment?.day_of_week) {
+      try {
+        const parsed = JSON.parse(enrollment.day_of_week);
+        scheduleDays = Array.isArray(parsed) ? parsed : [enrollment.day_of_week];
+      } catch {
+        scheduleDays = enrollment.day_of_week.split(',').map((d: string) => d.trim());
+      }
+    }
+
+    if (!scheduleTime && enrollment?.start_time) {
+      scheduleTime = enrollment.start_time;
+    }
+
+    const firstParentLink = student.parent_students?.[0];
+    const parent = firstParentLink?.parent || null;
+
+    let sessionsRemaining: number | null = null;
+    let periodStart: string | null = null;
+    let periodEnd: string | null = null;
+    let packageDuration: number | null = enrollment?.package?.duration || null;
+    let packageType = enrollment?.package?.package_type || null;
+    let latestPackageId: string | null = enrollment?.package_id || null;
+
+    if (enrollment?.course?.id) {
+      const coursePayments = ((student.payments || []) as Array<{
+        amount: number; status: string; course_id: string | null;
+        package_id: string | null; pool_id: string | null; paid_at: string | null;
+      }>).filter(
+        (p) => p.status === 'paid' && p.course_id === enrollment.course.id && p.package_id
+      );
+
+      if (enrollment.pool_id && poolPaymentCacheRaw.has(enrollment.pool_id)) {
+        const poolPmts = poolPaymentCacheRaw.get(enrollment.pool_id) ?? [];
+        for (const pp of poolPmts) {
+          if (!coursePayments.some(cp => cp.amount === pp.amount && cp.paid_at === pp.paid_at && cp.package_id === pp.package_id)) {
+            coursePayments.push(pp);
+          }
+        }
+      }
+
+      coursePayments.sort((a, b) => {
+        if (!a.paid_at) return 1;
+        if (!b.paid_at) return -1;
+        return new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime();
+      });
+      const latestPayment = coursePayments[0];
+      if (latestPayment?.package_id) {
+        const latestPkg = pricingMap.get(latestPayment.package_id);
+        if (latestPkg) {
+          packageDuration = latestPkg.duration;
+          packageType = latestPkg.package_type;
+          latestPackageId = latestPayment.package_id;
+        }
+      }
+    }
+
+    const isPooled = enrollment?.pool_id && enrollment?.pool
+      && (poolSiblingCountCache.get(enrollment.pool_id) ?? 0) > 0
+      && poolStudentNamesCache.get(enrollment.pool_id)?.has(student.id);
+    const poolInfo = isPooled ? enrollment.pool as unknown as {
+      id: string; sessions_remaining: number; total_sessions: number; name: string | null;
+    } : null;
+
+    let sessionCount = 0;
+    const attendanceRecords = enrollment
+      ? (enrollment.attendance || []) as Array<{ date: string; status: string; created_at: string }>
+      : [];
+    sessionCount = attendanceRecords.filter(
+      (a) => a.status === 'present' || a.status === 'late'
+    ).length;
+
+    if (enrollment) {
+      const inactiveStatus = ['cancelled', 'expired', 'completed'].includes(enrollment.status);
+      if (inactiveStatus && enrollment.pool_id) {
+        sessionsRemaining = 0;
+      } else if (isPooled && poolInfo) {
+        const siblingCount = poolSiblingCountCache.get(enrollment.pool_id) || 2;
+        const poolRemaining = poolInfo.sessions_remaining;
+        const joinDates = poolJoinDateCache.get(enrollment.pool_id);
+        const sortedStudentIds = joinDates
+          ? [...joinDates.entries()]
+              .sort((a, b) => new Date(a[1]).getTime() - new Date(b[1]).getTime())
+              .map(([id]) => id)
+          : [];
+        const position = sortedStudentIds.indexOf(student.id);
+        const perStudent = Math.floor(poolRemaining / siblingCount);
+        const remainder = poolRemaining - perStudent * siblingCount;
+        let positionBonus: number;
+        if (poolRemaining >= 0) {
+          positionBonus = position >= 0 && position < remainder ? 1 : 0;
+        } else {
+          positionBonus = position >= 0 && position >= (siblingCount - remainder) ? 1 : 0;
+        }
+        sessionsRemaining = perStudent + positionBonus;
+      } else {
+        const enrollmentSessions = enrollment.sessions_remaining ?? 0;
+        if (packageType === 'session') {
+          sessionsRemaining = enrollmentSessions;
+        } else if (packageType === 'monthly') {
+          const dbPeriodStart = enrollment.period_start;
+          sessionsRemaining = enrollmentSessions;
+          if (dbPeriodStart) {
+            periodStart = dbPeriodStart;
+            const endDate = new Date(dbPeriodStart);
+            endDate.setMonth(endDate.getMonth() + 1);
+            periodEnd = endDate.toISOString().split('T')[0];
+          }
+        } else {
+          sessionsRemaining = enrollmentSessions;
+        }
+      }
+    }
+
+    let totalPaid: number;
+    let totalSessionsBought: number;
+
+    if (isPooled && poolInfo && enrollment?.pool_id) {
+      const poolPaymentsData = poolPaymentCache.get(enrollment.pool_id);
+      const siblingCount = poolSiblingCountCache.get(enrollment.pool_id) || 2;
+      const poolSharePaid = (poolPaymentsData?.totalPaid ?? 0) / siblingCount;
+      const poolShareSessions = Math.floor((poolPaymentsData?.totalSessions ?? 0) / siblingCount);
+      const individualPayments = (student.payments || []) as Array<{
+        amount: number; status: string; course_id: string | null;
+        package_id: string | null; pool_id: string | null;
+      }>;
+      const individualPaid = individualPayments.filter(
+        (p) => p.status === 'paid' && p.course_id === enrollment.course?.id && !p.pool_id
+      );
+      const individualTotalPaid = individualPaid.reduce((sum, p) => sum + Number(p.amount), 0);
+      const individualSessions = individualPaid.reduce((sum, p) => sum + getSessionsForPayment(p.package_id), 0);
+      totalPaid = poolSharePaid + individualTotalPaid;
+      totalSessionsBought = poolShareSessions + individualSessions;
+    } else {
+      const payments = (student.payments || []) as Array<{
+        amount: number; status: string; course_id: string | null; package_id: string | null;
+      }>;
+      const coursePayments = enrollment?.course?.id
+        ? payments.filter((p) => p.course_id === enrollment.course.id)
+        : payments;
+      const paidPayments = coursePayments.filter((p) => p.status === 'paid');
+      totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      totalSessionsBought = paidPayments.reduce((sum, p) => {
+        return sum + getSessionsForPayment(p.package_id);
+      }, 0);
+    }
+
+    return {
+      id: student.id,
+      enrollmentId: enrollment?.id || null,
+      studentId: student.student_id || null,
+      photo: student.photo || null,
+      coverPhoto: student.cover_photo || null,
+      name: student.name,
+      email: student.email || null,
+      phone: student.phone || null,
+      dateOfBirth: student.date_of_birth || null,
+      gender: student.gender || null,
+      schoolName: student.school_name || null,
+      branchId: student.branch_id,
+      branchName: useCityName ? (student.branch?.city || student.branch?.name || 'N/A') : (student.branch?.name || 'N/A'),
+      programName: enrollment?.course?.name || null,
+      courseId: enrollment?.course?.id || null,
+      instructorId: enrollment?.instructor_id || null,
+      packageId: latestPackageId,
+      packageType: packageType || null,
+      scheduleDays,
+      scheduleTime,
+      enrollDate: student.created_at,
+      expiredDate: enrollment?.expires_at || null,
+      enrollmentStatus: enrollment?.status || null,
+      level: enrollment?.level ?? student.level ?? 1,
+      adcoinBalance: enrollment?.adcoin_balance ?? student.adcoin_balance ?? 0,
+      sessionsRemaining,
+      periodStart,
+      periodEnd,
+      packageDuration,
+      isPooled: !!isPooled,
+      poolId: enrollment?.pool_id || null,
+      poolName: poolInfo?.name || null,
+      poolSiblings: isPooled && enrollment?.pool_id
+        ? Array.from(poolStudentNamesCache.get(enrollment.pool_id)?.entries() ?? [])
+            .filter(([id]) => id !== student.id)
+            .map(([, name]) => name)
+        : null,
+      sessionCount,
+      paymentCount: { totalPaid, totalSessionsBought },
+      parentId: parent?.id || null,
+      parentName: parent?.name || null,
+      parentPhone: parent?.phone || null,
+      parentEmail: parent?.email || null,
+      parentAddress: parent?.address || null,
+      parentPostcode: parent?.postcode || null,
+      parentCity: parent?.city || null,
+      parentRelationship: firstParentLink?.relationship || null,
+    };
+  };
+
+  const rows: StudentTableRow[] = [];
+  for (const student of data ?? []) {
+    const enrollments = student.enrollments || [];
+    if (enrollments.length === 0) {
+      rows.push(buildRow(student, null));
+    } else {
+      for (const enrollment of enrollments) {
+        rows.push(buildRow(student, enrollment));
+      }
+    }
+  }
+
+  return { rows, totalStudents: totalStudents ?? 0 };
+}
+
 // ============================================
 // ENROLLMENT OPERATIONS
 // ============================================

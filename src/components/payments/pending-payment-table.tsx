@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
 import {
   Search,
@@ -47,6 +47,7 @@ interface PendingPaymentTableProps {
   canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  totalCount: number;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -90,10 +91,49 @@ export function PendingPaymentTable({
   canCreate = true,
   canEdit = true,
   canDelete = true,
+  totalCount,
 }: PendingPaymentTableProps) {
   const [data, setData] = useState<PendingPaymentRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Progressive loading: load remaining data in background
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
+  const fetchedRef = useRef(false);
+
+  const fetchRemainingData = useCallback(async () => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    let offset = initialData.length;
+    const existingIds = new Set(initialData.map((r) => r.id));
+
+    while (offset < totalCount) {
+      try {
+        const res = await fetch(`/api/pending-payments/table?offset=${offset}&limit=10`);
+        if (!res.ok) break;
+        const result: { rows: PendingPaymentRow[] } = await res.json();
+        if (!result.rows || result.rows.length === 0) break;
+
+        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
+        for (const r of result.rows) existingIds.add(r.id);
+
+        if (newRows.length > 0) {
+          setData((prev) => [...prev, ...newRows]);
+        }
+        offset += 10;
+      } catch {
+        break;
+      }
+    }
+    setIsLoadingMore(false);
+  }, [initialData, totalCount]);
+
+  useEffect(() => {
+    if (initialData.length < totalCount) {
+      fetchRemainingData();
+    }
+  }, [initialData.length, totalCount, fetchRemainingData]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -438,7 +478,14 @@ export function PendingPaymentTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No pending payments found.
+                      {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading pending payments...
+                        </div>
+                      ) : (
+                        "No pending payments found."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -652,6 +699,13 @@ export function PendingPaymentTable({
               </tbody>
             </table>
           </div>
+
+          {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more pending payments...
+            </div>
+          )}
 
           {/* Pagination */}
           <Pagination

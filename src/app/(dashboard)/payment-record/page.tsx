@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/supabase/server";
-import { getPaymentRecordsForTable } from "@/data/payments";
+import { getPaymentRecordsForTablePaginated } from "@/data/payments";
 import { getCoursesAndPackages } from "@/data/courses";
 import { PaymentRecordTable } from "@/components/payments/payment-record-table";
 import { Banner } from "@/components/ui/banner";
@@ -29,8 +29,8 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
   const endDate = params.endDate;
 
   // Fetch data in parallel
-  const [payments, { courses, packages }] = await Promise.all([
-    getPaymentRecordsForTable(user.email ?? "", startDate, endDate),
+  const [paymentsResult, { courses, packages }] = await Promise.all([
+    getPaymentRecordsForTablePaginated(user.email ?? "", startDate, endDate, { offset: 0, limit: 10 }),
     getCoursesAndPackages(),
   ]);
 
@@ -45,7 +45,8 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
         />
 
         <PaymentRecordTable
-          initialData={payments}
+          initialData={paymentsResult.rows}
+          totalCount={paymentsResult.totalCount}
           initialStartDate={startDate}
           hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
           initialEndDate={endDate}

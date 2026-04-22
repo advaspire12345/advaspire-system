@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { AttendanceTable } from "@/components/attendance/attendance-table";
 import {
-  getEnrollmentsForAttendance,
+  getEnrollmentsForAttendancePaginated,
   getAllStudentsForManualAttendance,
 } from "@/data/attendance";
 import { getAllInstructorsForAttendance, getInstructorsByBranchForAttendance, getUserByEmail } from "@/data/users";
@@ -44,8 +44,8 @@ export default async function AttendancePage() {
   await checkAndExpireEnrollments();
 
   // Fetch data in parallel
-  const [enrollments, allStudentsForManual, instructors] = await Promise.all([
-    getEnrollmentsForAttendance(user.email),
+  const [enrollmentsResult, allStudentsForManual, instructors] = await Promise.all([
+    getEnrollmentsForAttendancePaginated(user.email, { offset: 0, limit: 10 }),
     getAllStudentsForManualAttendance(user.email),
     getInstructors(),
   ]);
@@ -61,7 +61,8 @@ export default async function AttendancePage() {
         />
 
         <AttendanceTable
-          initialData={enrollments}
+          initialData={enrollmentsResult.rows}
+          totalCount={enrollmentsResult.totalCount}
           allStudentsForManualAdd={allStudentsForManual}
           instructors={instructors}
           hideBranch={role === "branch_admin" || role === "instructor"}

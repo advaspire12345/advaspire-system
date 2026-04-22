@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { ExaminationTable } from "@/components/examination/examination-table";
 import {
-  getExaminationsForTable,
+  getExaminationsForTablePaginated,
   getEligibleStudentsForExam,
   getAllStudentsForExam,
   getExaminers,
@@ -25,9 +25,9 @@ export default async function ExaminationPage() {
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   // Fetch data in parallel
-  const [examinations, eligibleStudents, allStudents, examiners, branches, courses] =
+  const [examinationsResult, eligibleStudents, allStudents, examiners, branches, courses] =
     await Promise.all([
-      getExaminationsForTable(user.email),
+      getExaminationsForTablePaginated(user.email, { offset: 0, limit: 10 }),
       getEligibleStudentsForExam(user.email),
       getAllStudentsForExam(user.email),
       getExaminers(user.email),
@@ -86,7 +86,8 @@ export default async function ExaminationPage() {
         />
 
         <ExaminationTable
-          initialData={examinations}
+          initialData={examinationsResult.rows}
+          totalCount={examinationsResult.totalCount}
           eligibleStudents={eligibleStudents}
           hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
           allStudents={allStudents}

@@ -646,6 +646,231 @@ export async function getPendingPaymentsForTable(
   });
 }
 
+export async function getPendingPaymentsForTablePaginated(
+  userEmail: string,
+  options: { offset: number; limit: number }
+): Promise<{ rows: PendingPaymentRow[]; totalCount: number }> {
+  console.log('[getPendingPaymentsForTablePaginated] Starting query for user:', userEmail);
+
+  // Import user helpers dynamically to avoid circular imports
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  // --- Count query (same table, same filters) ---
+  let resolvedCount = 0;
+  if (branchIds) {
+    const countJoinQuery = supabaseAdmin
+      .from('payments')
+      .select('id, student:students!inner(branch_id)', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .in('students.branch_id', branchIds);
+
+    const { count: totalCount } = await countJoinQuery;
+    resolvedCount = totalCount ?? 0;
+  } else {
+    const { count: totalCount } = await supabaseAdmin
+      .from('payments')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending');
+    resolvedCount = totalCount ?? 0;
+  }
+
+  // --- Main paginated query ---
+  let query = supabaseAdmin
+    .from('payments')
+    .select(`
+      id,
+      amount,
+      payment_method,
+      status,
+      receipt_photo,
+      created_at,
+      paid_at,
+      course_id,
+      package_id,
+      pool_id,
+      is_shared_package,
+      student:students!inner(
+        id,
+        name,
+        phone,
+        branch_id,
+        branch:branches!inner(id, name, city),
+        parent_students(
+          parent:parents(id, name, phone)
+        )
+      ),
+      course:courses(name, code)
+    `)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .range(options.offset, options.offset + options.limit - 1);
+
+  if (branchIds) {
+    query = query.in('students.branch_id', branchIds);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('[getPendingPaymentsForTablePaginated] Error fetching pending payments:', error);
+    return { rows: [], totalCount: 0 };
+  }
+
+  // Get all course_pricing to match packages by course_id and amount
+  const { data: allPricing } = await supabaseAdmin
+    .from('course_pricing')
+    .select('id, course_id, package_type, duration, price')
+    .is('deleted_at', null);
+
+  const pricingMap = new Map<string, { packageType: string; duration: number }>();
+  for (const p of allPricing ?? []) {
+    const key = `${p.course_id}-${p.price}`;
+    pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
+  }
+
+  // Get all pool IDs from payments that have pool_id
+  const poolIds = (data ?? [])
+    .map((p) => (p as unknown as { pool_id: string | null }).pool_id)
+    .filter((id): id is string => id !== null);
+
+  // Fetch siblings for all pools in one query
+  const poolSiblingsMap = new Map<string, string[]>();
+  if (poolIds.length > 0) {
+    const { data: poolStudents } = await supabaseAdmin
+      .from('pool_students')
+      .select(`
+        pool_id,
+        student:students(name)
+      `)
+      .in('pool_id', poolIds);
+
+    for (const ps of poolStudents ?? []) {
+      const studentData = ps.student as unknown as { name: string };
+      const existing = poolSiblingsMap.get(ps.pool_id) ?? [];
+      existing.push(studentData.name);
+      poolSiblingsMap.set(ps.pool_id, existing);
+    }
+  }
+
+  // Check voucher availability for each student+course combo
+  const voucherMap = new Map<string, number>();
+  const studentCourseKeys = new Set<string>();
+  for (const payment of data ?? []) {
+    const student = payment.student as unknown as { id: string };
+    const courseId = (payment as unknown as { course_id: string | null }).course_id;
+    if (courseId) {
+      studentCourseKeys.add(`${student.id}|${courseId}`);
+    }
+  }
+  if (studentCourseKeys.size > 0) {
+    const { data: availableVouchers } = await supabaseAdmin
+      .from('vouchers')
+      .select('student_id, course_id, amount')
+      .eq('status', 'available');
+
+    for (const v of availableVouchers ?? []) {
+      const key = `${v.student_id}|${v.course_id}`;
+      if (studentCourseKeys.has(key)) {
+        const existing = voucherMap.get(key) ?? 0;
+        if (v.amount > existing) {
+          voucherMap.set(key, v.amount);
+        }
+      }
+    }
+  }
+
+  const rows: PendingPaymentRow[] = (data ?? []).map((payment) => {
+    const student = payment.student as unknown as {
+      id: string;
+      name: string;
+      phone: string | null;
+      branch_id: string;
+      branch: { id: string; name: string; city: string | null };
+      parent_students: Array<{
+        parent: { id: string; name: string; phone: string | null } | null;
+      }>;
+    };
+    const course = payment.course as unknown as { name: string } | null;
+    const courseId = (payment as unknown as { course_id: string | null }).course_id;
+    const poolId = (payment as unknown as { pool_id: string | null }).pool_id;
+    const isSharedPackage = (payment as unknown as { is_shared_package: boolean }).is_shared_package ?? false;
+
+    const parentInfo = student.parent_students?.[0]?.parent;
+
+    let packageName: string | null = null;
+    if (courseId) {
+      const key = `${courseId}-${payment.amount}`;
+      const pricing = pricingMap.get(key);
+      if (pricing) {
+        const typeLabel = pricing.packageType === 'monthly' ? 'Month' : 'Session';
+        const plural = pricing.duration > 1 ? 's' : '';
+        packageName = `${pricing.duration} ${typeLabel}${plural}`;
+      }
+    }
+
+    const sharedStudentNames = poolId ? (poolSiblingsMap.get(poolId) ?? null) : null;
+
+    const voucherKey = courseId ? `${student.id}|${courseId}` : '';
+    const voucherAmount = voucherKey ? (voucherMap.get(voucherKey) ?? null) : null;
+
+    return {
+      id: payment.id,
+      parentName: parentInfo?.name ?? null,
+      parentPhone: parentInfo?.phone ?? null,
+      studentId: student.id,
+      studentName: student.name,
+      studentPhone: student.phone,
+      branchId: student.branch_id,
+      branchName: useCityName ? (student.branch.city || student.branch.name) : student.branch.name,
+      courseId,
+      courseName: course?.name ?? null,
+      packageId: (payment as unknown as { package_id: string | null }).package_id,
+      packageName,
+      price: payment.amount,
+      paymentMethod: payment.payment_method as PaymentMethod | null,
+      status: payment.status as PaymentStatus,
+      receiptPhoto: payment.receipt_photo,
+      createdAt: payment.created_at,
+      paidAt: payment.paid_at,
+      isSharedPackage: isSharedPackage || !!poolId,
+      poolId,
+      sharedStudentNames,
+      hasVoucher: voucherAmount !== null && voucherAmount > 0,
+      voucherAmount,
+    };
+  });
+
+  return { rows, totalCount: resolvedCount };
+}
+
 /**
  * Creates a frozen invoice snapshot for a payment.
  * Captures all display data (company info, student names, items) at the moment of payment.
@@ -1491,6 +1716,259 @@ export async function getPaymentRecordsForTable(
       invoiceSnapshot: (payment as unknown as { invoice_snapshot: InvoiceSnapshot | null }).invoice_snapshot ?? null,
     };
   });
+}
+
+export async function getPaymentRecordsForTablePaginated(
+  userEmail: string,
+  startDate?: string,
+  endDate?: string,
+  options: { offset: number; limit: number } = { offset: 0, limit: 50 }
+): Promise<{ rows: PaymentRecordRow[]; totalCount: number }> {
+  // Import user helpers dynamically to avoid circular imports
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  // Only expand company IDs for admin role, NOT branch_admin/instructor
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  // --- Count query (same table, same filters) ---
+  let countQuery = branchIds
+    ? supabaseAdmin
+        .from('payments')
+        .select('id, student:students!inner(branch_id)', { count: 'exact', head: true })
+        .eq('status', 'paid')
+        .in('students.branch_id', branchIds)
+    : supabaseAdmin
+        .from('payments')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'paid');
+
+  if (startDate) {
+    countQuery = countQuery.gte('paid_at', `${startDate}T00:00:00`);
+  }
+  if (endDate) {
+    const endDateObj = new Date(endDate);
+    endDateObj.setDate(endDateObj.getDate() + 1);
+    const nextDay = endDateObj.toISOString().split('T')[0];
+    countQuery = countQuery.lt('paid_at', `${nextDay}T00:00:00`);
+  }
+
+  const { count: totalCount } = await countQuery;
+
+  // --- Main paginated query ---
+  let query = supabaseAdmin
+    .from('payments')
+    .select(`
+      id,
+      amount,
+      payment_method,
+      paid_at,
+      receipt_photo,
+      invoice_number,
+      invoice_snapshot,
+      course_id,
+      package_id,
+      pool_id,
+      is_shared_package,
+      student:students!inner(
+        id,
+        name,
+        branch_id,
+        branch:branches!inner(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
+        parent_students(
+          parent:parents(id, name, address, postcode, city)
+        )
+      ),
+      course:courses(name, code)
+    `)
+    .eq('status', 'paid')
+    .order('paid_at', { ascending: false })
+    .range(options.offset, options.offset + options.limit - 1);
+
+  if (branchIds) {
+    query = query.in('students.branch_id', branchIds);
+  }
+
+  if (startDate) {
+    query = query.gte('paid_at', `${startDate}T00:00:00`);
+  }
+
+  if (endDate) {
+    const endDateObj = new Date(endDate);
+    endDateObj.setDate(endDateObj.getDate() + 1);
+    const nextDay = endDateObj.toISOString().split('T')[0];
+    query = query.lt('paid_at', `${nextDay}T00:00:00`);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching paginated payment records:', error);
+    return { rows: [], totalCount: 0 };
+  }
+
+  // Fetch parent company names for branches
+  const parentIds = new Set<string>();
+  for (const payment of data ?? []) {
+    const student = payment.student as unknown as { branch: { parent_id: string | null } };
+    if (student.branch.parent_id) parentIds.add(student.branch.parent_id);
+  }
+  const companyNameMap = new Map<string, string>();
+  if (parentIds.size > 0) {
+    const { data: companies } = await supabaseAdmin
+      .from('branches')
+      .select('id, name')
+      .in('id', [...parentIds])
+      .eq('type', 'company');
+    for (const c of companies ?? []) {
+      companyNameMap.set(c.id, c.name);
+    }
+  }
+
+  // Get all course_pricing to match packages by course_id and amount
+  const { data: allPricing } = await supabaseAdmin
+    .from('course_pricing')
+    .select('id, course_id, package_type, duration, price')
+    .is('deleted_at', null);
+
+  const pricingMap = new Map<string, { packageType: string; duration: number }>();
+  for (const p of allPricing ?? []) {
+    const key = `${p.course_id}-${p.price}`;
+    pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
+  }
+
+  // Get all pool IDs from payments that have pool_id
+  const poolIds = (data ?? [])
+    .map((p) => (p as unknown as { pool_id: string | null }).pool_id)
+    .filter((id): id is string => id !== null);
+
+  // Fetch siblings for all pools in one query
+  const poolSiblingsMap = new Map<string, string[]>();
+  if (poolIds.length > 0) {
+    const { data: poolStudents } = await supabaseAdmin
+      .from('pool_students')
+      .select(`
+        pool_id,
+        student:students(name)
+      `)
+      .in('pool_id', poolIds);
+
+    for (const ps of poolStudents ?? []) {
+      const studentData = ps.student as unknown as { name: string };
+      const existing = poolSiblingsMap.get(ps.pool_id) ?? [];
+      existing.push(studentData.name);
+      poolSiblingsMap.set(ps.pool_id, existing);
+    }
+  }
+
+  const rows: PaymentRecordRow[] = (data ?? []).map((payment) => {
+    const student = payment.student as unknown as {
+      id: string;
+      name: string;
+      branch_id: string;
+      branch: {
+        id: string;
+        name: string;
+        city: string | null;
+        parent_id: string | null;
+        address: string | null;
+        phone: string | null;
+        email: string | null;
+        bank_name: string | null;
+        bank_account: string | null;
+      };
+      parent_students: Array<{
+        parent: { id: string; name: string; address: string | null; postcode: string | null; city: string | null } | null;
+      }>;
+    };
+    const course = payment.course as unknown as { name: string; code: string | null } | null;
+    const courseId = (payment as unknown as { course_id: string | null }).course_id;
+    const poolId = (payment as unknown as { pool_id: string | null }).pool_id;
+    const isSharedPackage = (payment as unknown as { is_shared_package: boolean }).is_shared_package ?? false;
+
+    const parentInfo = student.parent_students?.[0]?.parent;
+    const parentAddress = parentInfo?.address ?? null;
+    const parentPostcode = parentInfo?.postcode ?? null;
+    const parentCity = parentInfo?.city ?? null;
+    const courseCode = course?.code ?? null;
+
+    let packageName: string | null = null;
+    let packageDuration: number | null = null;
+    let packageType: "monthly" | "session" | null = null;
+    if (courseId) {
+      const key = `${courseId}-${payment.amount}`;
+      const pricing = pricingMap.get(key);
+      if (pricing) {
+        const typeLabel = pricing.packageType === 'monthly' ? 'Month' : 'Session';
+        const plural = pricing.duration > 1 ? 's' : '';
+        packageName = `${pricing.duration} ${typeLabel}${plural}`;
+        packageDuration = pricing.duration;
+        packageType = pricing.packageType as "monthly" | "session";
+      }
+    }
+
+    const sharedStudentNames = poolId ? (poolSiblingsMap.get(poolId) ?? null) : null;
+
+    return {
+      id: payment.id,
+      parentName: parentInfo?.name ?? null,
+      parentAddress,
+      parentPostcode,
+      parentCity,
+      studentId: student.id,
+      courseCode,
+      studentName: student.name,
+      branchId: student.branch_id,
+      branchName: useCityName ? (student.branch.city || student.branch.name) : student.branch.name,
+      branchCompanyName: student.branch.parent_id ? (companyNameMap.get(student.branch.parent_id) ?? null) : null,
+      branchAddress: student.branch.address,
+      branchPhone: student.branch.phone,
+      branchEmail: student.branch.email,
+      branchBankName: student.branch.bank_name,
+      branchBankAccount: student.branch.bank_account,
+      courseId,
+      courseName: course?.name ?? null,
+      packageId: (payment as unknown as { package_id: string | null }).package_id,
+      packageName,
+      packageDuration,
+      packageType,
+      price: payment.amount,
+      paymentMethod: payment.payment_method as PaymentMethod | null,
+      paidAt: payment.paid_at,
+      receiptPhoto: payment.receipt_photo,
+      invoiceNumber: payment.invoice_number,
+      isSharedPackage: isSharedPackage || !!poolId,
+      poolId,
+      sharedStudentNames,
+      invoiceSnapshot: (payment as unknown as { invoice_snapshot: InvoiceSnapshot | null }).invoice_snapshot ?? null,
+    };
+  });
+
+  return { rows, totalCount: totalCount ?? 0 };
 }
 
 // ============================================

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Pencil,
@@ -54,6 +54,7 @@ interface ExaminationTableProps {
   canEdit?: boolean;
   canDelete?: boolean;
   hideBranch?: boolean;
+  totalCount: number;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -109,10 +110,50 @@ export function ExaminationTable({
   canEdit,
   canDelete,
   hideBranch,
+  totalCount,
 }: ExaminationTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Progressive loading: start with server-provided first batch, load rest in background
+  const [serverData, setServerData] = useState<ExaminationTableRow[]>(initialData);
+  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
+  const fetchedRef = useRef(false);
+
+  const fetchRemainingData = useCallback(async () => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    let offset = initialData.length;
+    const existingIds = new Set(initialData.map((r) => r.id));
+
+    while (offset < totalCount) {
+      try {
+        const res = await fetch(`/api/examination/table?offset=${offset}&limit=10`);
+        if (!res.ok) break;
+        const result: { rows: ExaminationTableRow[] } = await res.json();
+        if (!result.rows || result.rows.length === 0) break;
+
+        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
+        for (const r of result.rows) existingIds.add(r.id);
+
+        if (newRows.length > 0) {
+          setServerData((prev) => [...prev, ...newRows]);
+        }
+        offset += 10;
+      } catch {
+        break;
+      }
+    }
+    setIsLoadingMore(false);
+  }, [initialData, totalCount]);
+
+  useEffect(() => {
+    if (initialData.length < totalCount) {
+      fetchRemainingData();
+    }
+  }, [initialData.length, totalCount, fetchRemainingData]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -175,7 +216,7 @@ export function ExaminationTable({
   const allData = useMemo(() => {
     // Create a set of existing exam keys (student+course+level) to avoid duplicates
     const existingExamKeys = new Set(
-      initialData.map((row) => `${row.studentId}-${row.courseId}-${row.examLevel}`)
+      serverData.map((row) => `${row.studentId}-${row.courseId}-${row.examLevel}`)
     );
 
     // Convert eligible students to virtual ExaminationTableRow entries
@@ -215,8 +256,8 @@ export function ExaminationTable({
         };
       });
 
-    return [...eligibleRows, ...initialData];
-  }, [initialData, eligibleStudents]);
+    return [...eligibleRows, ...serverData];
+  }, [serverData, eligibleStudents]);
 
   // Filter data based on search and status
   const filteredData = useMemo(() => {
@@ -343,7 +384,14 @@ export function ExaminationTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No examinations found.
+                      {isLoadingMore ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="h-4 w-4 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+                          Loading examinations...
+                        </div>
+                      ) : (
+                        "No examinations found."
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -551,6 +599,13 @@ export function ExaminationTable({
               </tbody>
             </table>
           </div>
+
+          {isLoadingMore && paginatedData.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+              <div className="h-3 w-3 rounded-full border-2 border-[#615DFA] border-t-transparent animate-spin" />
+              Loading more examinations...
+            </div>
+          )}
 
           {/* Pagination */}
           <Pagination

@@ -101,6 +101,52 @@ export async function getAllParents(): Promise<Parent[]> {
   return data ?? [];
 }
 
+export async function getParentsByBranchIds(branchIds: string[]): Promise<Parent[]> {
+  if (branchIds.length === 0) return [];
+
+  // Step 1: Get student IDs in these branches
+  const { data: students, error: studentError } = await supabaseAdmin
+    .from('students')
+    .select('id')
+    .in('branch_id', branchIds)
+    .is('deleted_at', null);
+
+  if (studentError || !students?.length) {
+    if (studentError) console.error('Error fetching students by branch:', studentError);
+    return [];
+  }
+
+  const studentIds = students.map((s) => s.id);
+
+  // Step 2: Get parent IDs linked to those students
+  const { data: links, error: linkError } = await supabaseAdmin
+    .from('parent_students')
+    .select('parent_id')
+    .in('student_id', studentIds);
+
+  if (linkError || !links?.length) {
+    if (linkError) console.error('Error fetching parent-student links:', linkError);
+    return [];
+  }
+
+  const parentIds = [...new Set(links.map((l) => l.parent_id))];
+
+  // Step 3: Fetch the parents
+  const { data, error } = await supabaseAdmin
+    .from('parents')
+    .select('*')
+    .in('id', parentIds)
+    .is('deleted_at', null)
+    .order('name');
+
+  if (error) {
+    console.error('Error fetching parents by branch:', error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
 export async function searchParents(query: string): Promise<Parent[]> {
   const { data, error } = await supabaseAdmin
     .from('parents')
