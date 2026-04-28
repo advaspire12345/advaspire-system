@@ -19,6 +19,7 @@ import {
   Users,
   Award,
   Ticket,
+  Upload,
 } from "lucide-react";
 import {
   Sidebar,
@@ -133,6 +134,12 @@ const navigationItems: {
     href: "/transactions",
     resource: "transactions",
   },
+  {
+    title: "Import",
+    icon: Upload,
+    href: "/import",
+    resource: "import",
+  },
 ];
 
 
@@ -145,17 +152,11 @@ const badges = [
   { id: 5, src: "/badges/peoplesp-s.png", alt: "Badge 5" },
 ];
 
-// Placeholder stats - replace with actual user data
-const userStats = {
-  level: 12,
-  adcoin: 2450,
-  mission: 8,
-};
-
 interface UserProfile {
   name: string;
   email: string;
   avatar: string | null;
+  adcoinBalance: number;
 }
 
 interface AppSidebarProps {
@@ -174,6 +175,13 @@ export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
         data: { user: authUser },
       } = await supabase.auth.getUser();
       if (authUser) {
+        // Fetch adcoin balance from users table
+        const { data: dbUser } = await supabase
+          .from("users")
+          .select("adcoin_balance")
+          .eq("auth_id", authUser.id)
+          .single();
+
         setUser({
           name:
             authUser.user_metadata?.full_name ||
@@ -181,6 +189,7 @@ export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
             "User",
           email: authUser.email || "",
           avatar: authUser.user_metadata?.avatar_url || null,
+          adcoinBalance: dbUser?.adcoin_balance ?? 0,
         });
       }
     }
@@ -216,7 +225,7 @@ export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
               cornerRadius={20}
             />
             <div className="absolute bottom-3 right-3 z-20 pointer-events-none">
-              <HexagonNumberBadge value={userStats.level} size={40} />
+              <HexagonNumberBadge value={Math.floor((user?.adcoinBalance ?? 0) / 500) + 1} size={40} />
             </div>
           </div>
 
@@ -247,19 +256,19 @@ export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
           {/* Stats Row */}
           <div className="mt-7 flex w-full items-center justify-center text-center">
             <div className="flex flex-col px-6">
-              <span className="text-xs font-bold">{userStats.level}</span>
+              <span className="text-xs font-bold">{Math.floor((user?.adcoinBalance ?? 0) / 500) + 1}</span>
               <span className="text-xs text-muted-foreground">Level</span>
             </div>
             <Separator orientation="vertical" className="!h-4 bg-border" />
             <div className="flex flex-col px-6">
               <span className="text-xs font-bold">
-                {userStats.adcoin.toLocaleString()}
+                {(user?.adcoinBalance ?? 0).toLocaleString()}
               </span>
               <span className="text-xs text-muted-foreground">Adcoin</span>
             </div>
             <Separator orientation="vertical" className="!h-4 bg-border" />
             <div className="flex flex-col px-6">
-              <span className="text-xs font-bold">{userStats.mission}</span>
+              <span className="text-xs font-bold">{0}</span>
               <span className="text-xs text-muted-foreground">Mission</span>
             </div>
           </div>

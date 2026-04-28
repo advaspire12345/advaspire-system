@@ -99,17 +99,24 @@ export function TopMenuBar() {
   useEffect(() => {
     async function fetchAdcoinStats() {
       try {
-        const response = await fetch("/api/dashboard/stats");
-        if (response.ok) {
-          const data = await response.json();
-          setAdcoinStats(data);
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          const { data: dbUser } = await supabase
+            .from("users")
+            .select("adcoin_balance")
+            .eq("auth_id", authUser.id)
+            .single();
+          setAdcoinStats({
+            totalAdcoinBalance: dbUser?.adcoin_balance ?? 0,
+            adcoinChange: 0,
+          });
         }
       } catch (error) {
         console.error("Error fetching adcoin stats:", error);
       }
     }
     fetchAdcoinStats();
-  }, []);
+  }, [supabase]);
 
   const handleClearSearch = () => {
     setSearchValue("");
