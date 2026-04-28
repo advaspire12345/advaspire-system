@@ -22,7 +22,7 @@ async function resolveExamBranchIds(userEmail: string): Promise<{
   const useCityName = !(isSuperAdmin(userEmail) || user?.role === "super_admin");
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && user?.role === "admin") {
+  if (branchIds && branchIds.length > 0 && user?.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")
@@ -196,11 +196,12 @@ export async function getExaminationsForTablePaginated(
 
   if (branchIds) {
     // To filter by branch we need to join through students
+    // @ts-expect-error -- Supabase type conflict when reassigning with different select shape
     countQuery = supabaseAdmin
       .from("examinations")
       .select("id, student:students!inner(branch_id)", { count: "exact", head: true })
       .is("deleted_at", null)
-      .in("student.branch_id", branchIds);
+      .in("student.branch_id" as any, branchIds);
   }
 
   const { count: totalCount } = await countQuery;
@@ -708,7 +709,7 @@ export async function getExaminers(userEmail: string): Promise<ExaminerOption[]>
   let query = supabaseAdmin
     .from("users")
     .select("id, name, photo")
-    .in("role", ["super_admin", "admin", "branch_admin", "instructor"])
+    .in("role", ["super_admin", "group_admin", "company_admin", "assistant_admin", "instructor"])
     .is("deleted_at", null)
     .order("name");
 

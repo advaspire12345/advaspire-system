@@ -48,7 +48,7 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
           initialData={paymentsResult.rows}
           totalCount={paymentsResult.totalCount}
           initialStartDate={startDate}
-          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           initialEndDate={endDate}
           courses={courses}
           packages={packages}

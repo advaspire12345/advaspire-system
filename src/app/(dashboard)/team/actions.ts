@@ -13,7 +13,16 @@ import {
   getPermissionsForUser,
   getUserPermissionRows,
   authorizeAction,
+  getCurrentUserPermissions,
+  resolveCompanyId,
+  getRolePermissions,
+  saveRolePermissions,
+  getCustomRoles,
+  createCustomRole,
+  updateCustomRoleName,
+  deleteCustomRole,
 } from "@/data/permissions";
+import type { CustomRole, PermissionsMap } from "@/db/schema";
 
 export interface TeamMemberFormPayload {
   name: string;
@@ -195,5 +204,148 @@ export async function loadUserPermissionsAction(
   } catch (error) {
     console.error("Error loading user permissions:", error);
     return null;
+  }
+}
+
+// ============================================
+// ROLE PERMISSION ACTIONS
+// ============================================
+
+async function getCurrentCompanyId(): Promise<string | null> {
+  const permData = await getCurrentUserPermissions();
+  if (!permData) return null;
+
+  const { data: user } = await supabaseAdmin
+    .from("users")
+    .select("branch_id")
+    .eq("id", permData.userId)
+    .single();
+
+  if (!user?.branch_id) return null;
+  return resolveCompanyId(user.branch_id);
+}
+
+export async function loadRolePermissionsAction(
+  role: string
+): Promise<PermissionsMap | null> {
+  try {
+    const companyId = await getCurrentCompanyId();
+    if (!companyId) return null;
+    return getRolePermissions(role, companyId);
+  } catch (error) {
+    console.error("Error loading role permissions:", error);
+    return null;
+  }
+}
+
+export async function saveRolePermissionsAction(
+  role: string,
+  permissions: { resource: PermissionResource; can_view: boolean; can_create: boolean; can_edit: boolean; can_delete: boolean }[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await authorizeAction("team", "can_edit");
+
+    const permData = await getCurrentUserPermissions();
+    if (!permData) return { success: false, error: "Unauthorized" };
+
+    // company_admin can only edit assistant_admin and instructor
+    if (permData.role === "company_admin") {
+      if (role !== "assistant_admin" && role !== "instructor" && !role.startsWith("custom:")) {
+        return { success: false, error: "You can only edit permissions for Assistant Admin and Instructor roles" };
+      }
+    }
+
+    const companyId = await getCurrentCompanyId();
+    if (!companyId) return { success: false, error: "No company found" };
+
+    const success = await saveRolePermissions(role, companyId, permissions);
+    if (!success) return { success: false, error: "Failed to save permissions" };
+
+    revalidatePath("/team");
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving role permissions:", error);
+    return { success: false, error: error instanceof Error ? error.message : "An error occurred" };
+  }
+}
+
+export async function getCustomRolesAction(): Promise<CustomRole[]> {
+  try {
+    const companyId = await getCurrentCompanyId();
+    if (!companyId) return [];
+    return getCustomRoles(companyId);
+  } catch (error) {
+    console.error("Error fetching custom roles:", error);
+    return [];
+  }
+}
+
+export async function createCustomRoleAction(
+  name: string
+): Promise<{ success: boolean; error?: string; role?: CustomRole }> {
+  try {
+    await authorizeAction("team", "can_edit");
+
+    const permData = await getCurrentUserPermissions();
+    if (!permData || permData.role !== "group_admin") {
+      return { success: false, error: "Only Group Admin can create custom roles" };
+    }
+
+    const companyId = await getCurrentCompanyId();
+    if (!companyId) return { success: false, error: "No company found" };
+
+    const role = await createCustomRole(companyId, name, permData.userId);
+    if (!role) return { success: false, error: "Failed to create custom role (max 2 per company)" };
+
+    revalidatePath("/team");
+    return { success: true, role };
+  } catch (error) {
+    console.error("Error creating custom role:", error);
+    return { success: false, error: error instanceof Error ? error.message : "An error occurred" };
+  }
+}
+
+export async function updateCustomRoleNameAction(
+  roleId: string,
+  name: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await authorizeAction("team", "can_edit");
+
+    const permData = await getCurrentUserPermissions();
+    if (!permData || permData.role !== "group_admin") {
+      return { success: false, error: "Only Group Admin can rename custom roles" };
+    }
+
+    const success = await updateCustomRoleName(roleId, name);
+    if (!success) return { success: false, error: "Failed to rename role" };
+
+    revalidatePath("/team");
+    return { success: true };
+  } catch (error) {
+    console.error("Error renaming custom role:", error);
+    return { success: false, error: error instanceof Error ? error.message : "An error occurred" };
+  }
+}
+
+export async function deleteCustomRoleAction(
+  roleId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await authorizeAction("team", "can_edit");
+
+    const permData = await getCurrentUserPermissions();
+    if (!permData || permData.role !== "group_admin") {
+      return { success: false, error: "Only Group Admin can delete custom roles" };
+    }
+
+    const success = await deleteCustomRole(roleId);
+    if (!success) return { success: false, error: "Failed to delete role" };
+
+    revalidatePath("/team");
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting custom role:", error);
+    return { success: false, error: error instanceof Error ? error.message : "An error occurred" };
   }
 }

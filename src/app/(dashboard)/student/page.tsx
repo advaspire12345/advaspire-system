@@ -43,7 +43,7 @@ export default async function StudentsPage() {
 
   // Expand branch IDs: for admin, include all child branches under their company
   let expandedBranchIds = rawBranchIds;
-  if (rawBranchIds && rawBranchIds.length > 0 && permData!.role === "admin") {
+  if (rawBranchIds && rawBranchIds.length > 0 && permData!.role === "group_admin") {
     const companyIds = new Set<string>();
     for (const b of branchesData) {
       if (rawBranchIds.includes(b.id)) {
@@ -72,7 +72,7 @@ export default async function StudentsPage() {
   // Filter branches for the dropdown based on role
   let filteredBranches = branchesData;
   if (useCityName && rawBranchIds && rawBranchIds.length > 0) {
-    if (permData!.role === "admin") {
+    if (permData!.role === "group_admin") {
       filteredBranches = branchesData.filter(
         (b) => b.type !== "company" && b.parent_id && expandedBranchIds!.includes(b.id)
       );
@@ -137,7 +137,7 @@ export default async function StudentsPage() {
           initialData={studentsResult.rows}
           totalStudents={studentsResult.totalStudents}
           branches={branches}
-          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           courses={courses}
           coursePricing={coursePricing}
           courseSlots={courseSlots}

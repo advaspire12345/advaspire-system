@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/data/leaderboard";
 import type { TransferParticipant } from "@/data/users";
 
+type BranchFilter = "local" | "global";
+
 interface LeaderboardTableProps {
   initialData: LeaderboardEntry[];
   totalCount: number;
@@ -24,6 +26,9 @@ interface LeaderboardTableProps {
   hideBranch?: boolean;
   canTransfer?: boolean;
   currentUserId?: string;
+  currentUserName?: string;
+  currentUserBranchId?: string | null;
+  showBranchFilter?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -31,7 +36,7 @@ const ITEMS_PER_PAGE = 10;
 const columns = [
   { key: "rank", label: "Rank", width: "70px", align: "center" as const },
   { key: "photo", label: "Photo", width: "80px", align: "center" as const },
-  { key: "username", label: "Username", width: "160px" },
+  { key: "studentName", label: "Student Name", width: "200px" },
   { key: "branch", label: "Branch", width: "120px" },
   { key: "program", label: "Program", width: "140px" },
   { key: "level", label: "Level", width: "80px", align: "center" as const },
@@ -53,10 +58,14 @@ export function LeaderboardTable({
   hideBranch,
   canTransfer = true,
   currentUserId,
+  currentUserName,
+  currentUserBranchId,
+  showBranchFilter,
 }: LeaderboardTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [branchFilter, setBranchFilter] = useState<BranchFilter>("local");
 
   // Progressive loading: start with server-provided first batch, load rest in background
   const [allData, setAllData] = useState<LeaderboardEntry[]>(initialData);
@@ -103,18 +112,41 @@ export function LeaderboardTable({
     null,
   );
 
-  // Filter data based on search
+  // Filter data based on search and branch filter, re-rank for local
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return allData;
+    let data = allData;
 
-    const query = searchQuery.toLowerCase();
-    return allData.filter(
-      (row) =>
-        row.studentName.toLowerCase().includes(query) ||
-        row.branchName.toLowerCase().includes(query) ||
-        (row.program?.toLowerCase().includes(query) ?? false),
-    );
-  }, [allData, searchQuery]);
+    // Apply branch filter (local = own branch only)
+    const isLocal = showBranchFilter && branchFilter === "local" && currentUserBranchId;
+    if (isLocal) {
+      data = data.filter((row) => row.branchId === currentUserBranchId);
+    }
+
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      data = data.filter(
+        (row) =>
+          row.studentName.toLowerCase().includes(query) ||
+          row.branchName.toLowerCase().includes(query) ||
+          (row.program?.toLowerCase().includes(query) ?? false),
+      );
+    }
+
+    // Re-rank from 1 when in local mode
+    if (isLocal) {
+      return data.map((row, idx) => ({ ...row, rank: idx + 1 }));
+    }
+
+    return data;
+  }, [allData, searchQuery, branchFilter, showBranchFilter, currentUserBranchId]);
+
+  // Transfer modal: own branch only for non-admin roles, all participants for admin roles
+  const localParticipants = useMemo(() => {
+    if (showBranchFilter && currentUserBranchId) {
+      return participants.filter((p) => p.branchId === currentUserBranchId);
+    }
+    return participants;
+  }, [participants, currentUserBranchId, showBranchFilter]);
 
   // Pagination
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
@@ -129,9 +161,13 @@ export function LeaderboardTable({
     setCurrentPage(1);
   };
 
+  // Track whether modal was opened from global action
+  const [useGlobalParticipants, setUseGlobalParticipants] = useState(false);
+
   // Open transfer modal
-  const openTransferModal = (recipientId?: string) => {
+  const openTransferModal = (recipientId?: string, isGlobal?: boolean) => {
     setSelectedRecipientId(recipientId ?? null);
+    setUseGlobalParticipants(!!isGlobal);
     setModalOpen(true);
   };
 
@@ -190,6 +226,33 @@ export function LeaderboardTable({
               onChange={handleSearchChange}
               placeholder="Search by name, branch, or program..."
             />
+
+            {/* Branch Filter Tabs */}
+            {showBranchFilter && (
+              <div className="flex items-center">
+                {(["Local", "Global"] as const).map((filter, idx) => (
+                  <div key={filter} className="flex items-center">
+                    <div className="h-5 w-px bg-[#eaeaf5]" />
+                    <button
+                      type="button"
+                      onClick={() => { setBranchFilter(filter.toLowerCase() as BranchFilter); setCurrentPage(1); }}
+                      className={cn(
+                        "relative px-10 py-2 text-sm font-bold transition-colors",
+                        branchFilter === filter.toLowerCase()
+                          ? "text-foreground"
+                          : "text-[#8B8FB9] hover:text-foreground/70",
+                      )}
+                    >
+                      {filter}
+                      {branchFilter === filter.toLowerCase() && (
+                        <span className="absolute -bottom-[30px] left-0 right-0 h-[3px] rounded bg-[#23D2E2]" />
+                      )}
+                    </button>
+                    {idx === 1 && <div className="h-5 w-px bg-[#eaeaf5]" />}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Transfer Adcoin Button */}
             {canTransfer && (
@@ -302,12 +365,15 @@ export function LeaderboardTable({
                         </div>
                       </td>
 
-                      {/* Username */}
+                      {/* Student Name + ID */}
                       <td
-                        className="px-4 py-3 font-bold text-[#23d2e2]"
+                        className="px-4 py-3"
                         style={{ width: columns[2].width }}
                       >
-                        {row.studentName}
+                        <div className="font-bold text-[#23d2e2]">{row.studentName}</div>
+                        {row.displayId && (
+                          <div className="text-xs text-muted-foreground">{row.displayId}</div>
+                        )}
                       </td>
 
                       {/* Branch */}
@@ -393,7 +459,7 @@ export function LeaderboardTable({
                         <div className="flex items-center justify-center">
                           <button
                             type="button"
-                            onClick={() => openTransferModal(row.studentId)}
+                            onClick={() => openTransferModal(row.studentId, branchFilter === "global")}
                             className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
                             aria-label={`Transfer adcoin to ${row.studentName}`}
                             title="Transfer Adcoin"
@@ -431,9 +497,10 @@ export function LeaderboardTable({
       <TransferAdcoinModal
         open={modalOpen}
         onOpenChange={setModalOpen}
-        participants={participants}
+        participants={useGlobalParticipants ? participants : localParticipants}
         recipientId={selectedRecipientId}
         defaultSenderId={currentUserId}
+        defaultSenderName={currentUserName}
         onSubmit={handleTransferSubmit}
       />
     </>

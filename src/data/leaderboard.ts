@@ -10,6 +10,7 @@ export interface LeaderboardEntry {
   id: string;
   rank: number;
   studentId: string;
+  displayId: string | null;
   studentName: string;
   photo: string | null;
   branchId: string;
@@ -32,8 +33,8 @@ export async function getLeaderboardData(userEmail?: string): Promise<Leaderboar
     const currentUser = await getUserByEmail(userEmail);
     useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
-    // Only expand company IDs for admin role, NOT branch_admin/instructor
-    if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    // Expand company IDs to all child branches for admin roles
+    if (branchIds && branchIds.length > 0 && (currentUser?.role === "group_admin" || currentUser?.role === "company_admin" || currentUser?.role === "assistant_admin")) {
       const { data: assigned } = await supabaseAdmin
         .from("branches")
         .select("id, type, parent_id")
@@ -64,6 +65,7 @@ export async function getLeaderboardData(userEmail?: string): Promise<Leaderboar
     .select(
       `
       id,
+      student_id,
       name,
       photo,
       branch_id,
@@ -150,6 +152,7 @@ export async function getLeaderboardData(userEmail?: string): Promise<Leaderboar
       id: student.id,
       rank: index + 1,
       studentId: student.id,
+      displayId: student.student_id ?? null,
       studentName: student.name,
       photo: student.photo,
       branchId: student.branch_id,
@@ -183,8 +186,8 @@ export async function getLeaderboardDataPaginated(
     const currentUser = await getUserByEmail(userEmail);
     useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
-    // Only expand company IDs for admin role, NOT branch_admin/instructor
-    if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+    // Expand company IDs to all child branches for admin roles
+    if (branchIds && branchIds.length > 0 && (currentUser?.role === "group_admin" || currentUser?.role === "company_admin" || currentUser?.role === "assistant_admin")) {
       const { data: assigned } = await supabaseAdmin
         .from("branches")
         .select("id, type, parent_id")
@@ -227,6 +230,7 @@ export async function getLeaderboardDataPaginated(
     .select(
       `
       id,
+      student_id,
       name,
       photo,
       branch_id,
@@ -316,6 +320,7 @@ export async function getLeaderboardDataPaginated(
       id: student.id,
       rank: options.offset + index + 1,
       studentId: student.id,
+      displayId: student.student_id ?? null,
       studentName: student.name,
       photo: student.photo,
       branchId: student.branch_id,

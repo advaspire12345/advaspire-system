@@ -8,8 +8,9 @@
 // ============================================
 export type UserRole =
   | 'super_admin'
-  | 'admin'
-  | 'branch_admin'
+  | 'group_admin'
+  | 'company_admin'
+  | 'assistant_admin'
   | 'instructor'
   | 'student'
   | 'parent';
@@ -89,6 +90,7 @@ export interface User {
   city: string | null;
   cv_url: string | null;
   employed_date: string | null;
+  custom_role_id: string | null;
   status: TeamMemberStatus;
   adcoin_balance: number;
   created_at: string;
@@ -115,6 +117,7 @@ export interface Branch {
   id: string;
   name: string;
   type: BranchType;
+  code: string | null;
   parent_id: string | null;
   address: string | null;
   city: string | null;
@@ -169,6 +172,8 @@ export interface Parent {
   address: string | null;
   postcode: string | null;
   city: string | null;
+  photo: string | null;
+  cover_photo: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -534,6 +539,7 @@ export interface UserInsert {
   city?: string | null;
   cv_url?: string | null;
   employed_date?: string | null;
+  custom_role_id?: string | null;
   status?: TeamMemberStatus;
   adcoin_balance?: number;
 }
@@ -547,6 +553,7 @@ export interface AppSettingsInsert {
 export interface BranchInsert {
   name: string;
   type?: BranchType;
+  code?: string | null;
   parent_id?: string | null;
   address?: string | null;
   city?: string | null;
@@ -584,6 +591,8 @@ export interface ParentInsert {
   address?: string | null;
   postcode?: string | null;
   city?: string | null;
+  photo?: string | null;
+  cover_photo?: string | null;
   auth_id?: string | null;
 }
 
@@ -754,6 +763,7 @@ export interface UserUpdate {
   city?: string | null;
   cv_url?: string | null;
   employed_date?: string | null;
+  custom_role_id?: string | null;
   status?: TeamMemberStatus;
   adcoin_balance?: number;
 }
@@ -766,6 +776,7 @@ export interface AppSettingsUpdate {
 export interface BranchUpdate {
   name?: string;
   type?: BranchType;
+  code?: string | null;
   parent_id?: string | null;
   address?: string | null;
   city?: string | null;
@@ -803,6 +814,8 @@ export interface ParentUpdate {
   address?: string | null;
   postcode?: string | null;
   city?: string | null;
+  photo?: string | null;
+  cover_photo?: string | null;
 }
 
 export interface CourseUpdate {
@@ -1388,8 +1401,7 @@ export interface CoursePricing {
   description: string | null;
   is_default: boolean;
   expiry_months: number | null;
-  voucher_amount: number | null;
-  voucher_deadline_months: number | null;
+  voucher_id: string | null;
   deleted_at: string | null;
 }
 
@@ -1834,3 +1846,51 @@ export interface AdminBranch {
 }
 
 export type AdminBranchInsert = Omit<AdminBranch, 'id' | 'created_at'>;
+
+// ============================================
+// ROLE PERMISSION TYPES
+// ============================================
+
+export interface RolePermission {
+  id: string;
+  role: string;
+  company_id: string | null;
+  resource: PermissionResource;
+  can_view: boolean;
+  can_create: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================
+// VOUCHER TYPES
+// ============================================
+
+export type VoucherDiscountType = 'percentage' | 'fixed';
+export type VoucherExpiryType = 'monthly' | 'date';
+
+export interface Voucher {
+  id: string;
+  code: string;
+  discount_type: VoucherDiscountType;
+  discount_value: number;
+  expiry_type: VoucherExpiryType;
+  expiry_months: number | null;
+  expiry_date: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface CustomRole {
+  id: string;
+  name: string;
+  company_id: string;
+  created_by: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}

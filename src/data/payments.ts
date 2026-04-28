@@ -423,7 +423,7 @@ export async function getPendingPaymentsForTable(
   const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")
@@ -659,7 +659,7 @@ export async function getPendingPaymentsForTablePaginated(
   const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")
@@ -1497,7 +1497,7 @@ export async function getPaymentRecordsForTable(
   const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")
@@ -1731,7 +1731,7 @@ export async function getPaymentRecordsForTablePaginated(
   const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")

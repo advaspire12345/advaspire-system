@@ -184,6 +184,7 @@ export interface BranchEntry {
   id: string;
   branchName: string;
   type: 'company' | 'hq' | 'branch';
+  code: string | null;
   parentId: string | null;
   parentName: string | null;
   branchAddress: string;
@@ -263,6 +264,19 @@ export async function getBranchData(branchIds?: string[]): Promise<BranchEntry[]
     return [];
   }
 
+  // Fetch codes separately (column may not exist if migration not applied)
+  const codeMap = new Map<string, string>();
+  const branchIdList = (branches ?? []).map((b: any) => b.id);
+  if (branchIdList.length > 0) {
+    const { data: codeData } = await supabaseAdmin
+      .from("branches")
+      .select("id, code")
+      .in("id", branchIdList);
+    for (const c of codeData ?? []) {
+      if (c.code) codeMap.set(c.id, c.code);
+    }
+  }
+
   // Get unique admin IDs
   const adminIds = (branches ?? [])
     .map((b) => b.admin_id)
@@ -320,6 +334,7 @@ export async function getBranchData(branchIds?: string[]): Promise<BranchEntry[]
       id: branch.id,
       branchName: branch.name,
       type: branch.type as 'company' | 'hq' | 'branch',
+      code: codeMap.get(branch.id) ?? null,
       parentId: branch.parent_id,
       parentName: branch.parent_id ? parentMap[branch.parent_id] ?? null : null,
       branchAddress: branch.address ?? "",
@@ -367,7 +382,7 @@ export async function getAdminOptions(): Promise<AdminOption[]> {
   const { data, error } = await supabaseAdmin
     .from("users")
     .select("id, name")
-    .in("role", ["super_admin", "admin", "branch_admin"])
+    .in("role", ["super_admin", "group_admin", "company_admin", "assistant_admin"])
     .is("deleted_at", null)
     .order("name");
 
@@ -390,7 +405,7 @@ export async function getInstructorOptions(): Promise<InstructorOption[]> {
   const { data, error } = await supabaseAdmin
     .from("users")
     .select("id, name, branch_id")
-    .in("role", ["branch_admin", "instructor"])
+    .in("role", ["company_admin", "assistant_admin", "instructor"])
     .is("deleted_at", null)
     .order("name");
 

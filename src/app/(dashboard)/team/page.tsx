@@ -11,6 +11,12 @@ import {
   deleteTeamMemberAction,
   saveUserPermissionsAction,
   loadUserPermissionsAction,
+  loadRolePermissionsAction,
+  saveRolePermissionsAction,
+  getCustomRolesAction,
+  createCustomRoleAction,
+  updateCustomRoleNameAction,
+  deleteCustomRoleAction,
 } from "./actions";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
@@ -25,10 +31,11 @@ export default async function TeamPage() {
   const perms = permData?.permissions.team;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
-  const [teamMembers, branchesData, dbUser] = await Promise.all([
+  const [teamMembers, branchesData, dbUser, customRoles] = await Promise.all([
     getTeamMembersForTable(user.email),
     getAllBranches(),
     getUserByAuthId(user.id),
+    getCustomRolesAction(),
   ]);
 
   // Filter branches for admin: only show own company's HQ and branches
@@ -37,7 +44,7 @@ export default async function TeamPage() {
   if (useCityName) {
     const branchIds = await getUserBranchIds(user.email);
     if (branchIds && branchIds.length > 0) {
-      if (permData!.role === "admin") {
+      if (permData!.role === "group_admin") {
         const companyIds = new Set<string>();
         for (const b of branchesData) {
           if (branchIds.includes(b.id)) {
@@ -59,6 +66,10 @@ export default async function TeamPage() {
     name: useCityName ? (b.city || b.name) : b.name,
   }));
 
+  // Show Edit Permissions button for group_admin and company_admin only
+  const canEditRolePermissions =
+    permData!.role === "group_admin" || permData!.role === "company_admin";
+
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">
       <div className="space-y-2">
@@ -72,7 +83,7 @@ export default async function TeamPage() {
         <TeamTable
           initialData={teamMembers}
           branches={branches}
-          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           currentUserRole={permData?.role ?? null}
           currentUserBranchId={dbUser?.branch_id ?? null}
           onAdd={perms?.can_create ? createTeamMemberAction : undefined}
@@ -80,6 +91,13 @@ export default async function TeamPage() {
           onDelete={perms?.can_delete ? deleteTeamMemberAction : undefined}
           onSavePermissions={perms?.can_edit ? saveUserPermissionsAction : undefined}
           onLoadPermissions={perms?.can_edit ? loadUserPermissionsAction : undefined}
+          canEditRolePermissions={canEditRolePermissions}
+          customRoles={customRoles}
+          onLoadRolePermissions={canEditRolePermissions ? loadRolePermissionsAction : undefined}
+          onSaveRolePermissions={canEditRolePermissions ? saveRolePermissionsAction : undefined}
+          onCreateCustomRole={canEditRolePermissions ? createCustomRoleAction : undefined}
+          onUpdateCustomRoleName={canEditRolePermissions ? updateCustomRoleNameAction : undefined}
+          onDeleteCustomRole={canEditRolePermissions ? deleteCustomRoleAction : undefined}
         />
       </div>
     </main>

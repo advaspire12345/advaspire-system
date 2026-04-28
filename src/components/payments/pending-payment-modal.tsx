@@ -49,6 +49,12 @@ export interface PackageOption {
   duration: number;
 }
 
+export interface VoucherSelectOption {
+  id: string;
+  code: string;
+  discount: string;
+}
+
 interface PendingPaymentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,6 +63,7 @@ interface PendingPaymentModalProps {
   students?: StudentOption[];
   courses?: CourseOption[];
   packages?: PackageOption[];
+  vouchers?: VoucherSelectOption[];
   onSubmit: (data: PaymentFormData) => Promise<void>;
   onAdd?: (data: AddPaymentFormData) => Promise<void>;
   onApprove?: () => Promise<void>;
@@ -70,6 +77,7 @@ export interface PaymentFormData {
   paymentMethod: PaymentMethod | null;
   paidAt: string | null;
   receiptPhoto: string | null;
+  voucherId: string | null;
 }
 
 export interface AddPaymentFormData {
@@ -82,6 +90,7 @@ export interface AddPaymentFormData {
   receiptPhoto: string | null;
   poolId?: string;
   poolStudentIds?: string[];
+  voucherId: string | null;
 }
 
 const PAYMENT_METHODS = [
@@ -100,6 +109,7 @@ export function PendingPaymentModal({
   students = [],
   courses = [],
   packages = [],
+  vouchers = [],
   onSubmit,
   onAdd,
   onApprove,
@@ -109,6 +119,7 @@ export function PendingPaymentModal({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">("");
   const [paidAt, setPaidAt] = useState("");
   const [receiptPhoto, setReceiptPhoto] = useState<string[]>([]);
+  const [selectedVoucherId, setSelectedVoucherId] = useState<string>("");
 
   // Add mode fields
   const [selectedStudentId, setSelectedStudentId] = useState("");
@@ -162,6 +173,7 @@ export function PendingPaymentModal({
         setPaymentMethod("");
         setPaidAt("");
         setReceiptPhoto([]);
+        setSelectedVoucherId("");
       } else if (record) {
         // Edit/delete/approve mode: initialize from record
         setSelectedCourseId(record.courseId ?? "");
@@ -175,6 +187,8 @@ export function PendingPaymentModal({
         setPaymentMethod(record.paymentMethod ?? "");
         setPaidAt(record.paidAt ? format(new Date(record.paidAt), "yyyy-MM-dd") : "");
         setReceiptPhoto(record.receiptPhoto ? [record.receiptPhoto] : []);
+        // Auto-select voucher if student has one
+        setSelectedVoucherId(record.hasVoucher && record.voucherAmount ? "__auto__" : "");
       }
     }
   }, [open, record, mode, packages]);
@@ -202,6 +216,7 @@ export function PendingPaymentModal({
           receiptPhoto: receiptPhoto[0] || null,
           poolId: selectedStudent?.poolId,
           poolStudentIds: selectedStudent?.poolStudentIds,
+          voucherId: selectedVoucherId && selectedVoucherId !== "__auto__" ? selectedVoucherId : null,
         });
       } else {
         if (!record) return;
@@ -212,6 +227,7 @@ export function PendingPaymentModal({
           paymentMethod: paymentMethod || null,
           paidAt: paidAt ? new Date(paidAt).toISOString() : null,
           receiptPhoto: receiptPhoto[0] || null,
+          voucherId: selectedVoucherId && selectedVoucherId !== "__auto__" ? selectedVoucherId : null,
         });
       }
       onOpenChange(false);
@@ -615,6 +631,7 @@ export function PendingPaymentModal({
                     Payment Method
                   </label>
                 </div>
+                {/* Voucher — approve mode: readonly, add/edit mode: selectable */}
                 {mode === "approve" && record && (
                   <div className="relative">
                     <input
@@ -634,14 +651,29 @@ export function PendingPaymentModal({
                 )}
               </div>
             ) : (
-              <FloatingSelect
-                id="select-payment-method"
-                label="Payment Method"
-                placeholder="Select payment method..."
-                value={paymentMethod}
-                onChange={(val) => setPaymentMethod(val as PaymentMethod)}
-                options={PAYMENT_METHODS}
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <FloatingSelect
+                  id="select-payment-method"
+                  label="Payment Method"
+                  placeholder="Select payment method..."
+                  value={paymentMethod}
+                  onChange={(val) => setPaymentMethod(val as PaymentMethod)}
+                  options={PAYMENT_METHODS}
+                />
+                <FloatingSelect
+                  id="select-voucher"
+                  label="Voucher"
+                  value={selectedVoucherId}
+                  onChange={setSelectedVoucherId}
+                  options={[
+                    { value: "", label: "No Voucher" },
+                    ...(record?.hasVoucher && record?.voucherAmount
+                      ? [{ value: "__auto__", label: `Auto: RM${record.voucherAmount} discount` }]
+                      : []),
+                    ...vouchers.map((v) => ({ value: v.id, label: `${v.code} (${v.discount})` })),
+                  ]}
+                />
+              </div>
             )}
 
             {/* Paid On */}

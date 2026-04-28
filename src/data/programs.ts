@@ -58,7 +58,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
   const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")
@@ -321,8 +321,7 @@ export interface CreateProgramPayload {
     is_default: boolean;
     expiry_months: number | null;
     completion_months: number | null;
-    voucher_amount: number | null;
-    voucher_deadline_months: number | null;
+    voucher_id: string | null;
   }[];
 
   // Slots
@@ -483,8 +482,7 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
       is_default: p.is_default,
       expiry_months: p.expiry_months,
       completion_months: p.completion_months,
-      voucher_amount: p.voucher_amount,
-      voucher_deadline_months: p.voucher_deadline_months,
+      voucher_id: p.voucher_id,
     }));
     await supabaseAdmin.from("course_pricing").insert(pricingInserts);
   }
@@ -685,8 +683,7 @@ export async function updateProgram(
         is_default: p.is_default,
         expiry_months: p.expiry_months,
         completion_months: p.completion_months,
-        voucher_amount: p.voucher_amount,
-        voucher_deadline_months: p.voucher_deadline_months,
+        voucher_id: p.voucher_id,
       }))
     );
   }
@@ -829,7 +826,7 @@ export async function getInstructors(): Promise<{ id: string; name: string; bran
   const { data, error } = await supabaseAdmin
     .from("users")
     .select("id, name, branch_id")
-    .in("role", ["instructor", "branch_admin"])
+    .in("role", ["instructor", "assistant_admin", "company_admin"])
     .is("deleted_at", null)
     .order("name");
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -23,12 +23,32 @@ function LoginContent() {
   // Admin login fields
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("rememberMe") === "true";
+    }
+    return false;
+  });
+
+  // Auto-logout if "Remember Me" was not checked and browser was reopened
+  useEffect(() => {
+    const wasRemembered = localStorage.getItem("rememberMe") === "true";
+    if (!wasRemembered) {
+      // If sessionStorage is empty (new browser session) and not remembered, sign out
+      const isNewSession = !sessionStorage.getItem("sessionOnly");
+      if (isNewSession) {
+        supabase.auth.signOut();
+      }
+    }
+  }, [supabase]);
   // Student login fields
   const [studentUsername, setStudentUsername] = useState("");
   const [studentPassword, setStudentPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
 
   const resetForm = () => {
     setEmail("");
@@ -36,6 +56,9 @@ function LoginContent() {
     setStudentUsername("");
     setStudentPassword("");
     setError(null);
+    setSuccessMsg(null);
+    setShowForgotPassword(false);
+    setForgotEmail("");
   };
 
   const handleTabChange = (tab: ActiveTab) => {
@@ -57,6 +80,15 @@ function LoginContent() {
       setError(error.message);
       setLoading(false);
       return;
+    }
+
+    // Store remember me preference
+    if (rememberMe) {
+      localStorage.setItem("rememberMe", "true");
+    } else {
+      localStorage.removeItem("rememberMe");
+      // Set session storage flag — on window close, session will be cleared
+      sessionStorage.setItem("sessionOnly", "true");
     }
 
     // Check role to decide redirect destination
@@ -96,6 +128,29 @@ function LoginContent() {
       }
 
       router.push("/student-portal");
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccessMsg(null);
+    setLoading(true);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (error) {
+        setError(error.message);
+      } else {
+        setSuccessMsg("Password reset link has been sent to your email. Please check your inbox.");
+      }
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -179,14 +234,59 @@ function LoginContent() {
                     : "Student Login"}
                 </h2>
 
-                <form onSubmit={handleSubmit} className="space-y-4 px-8 mt-6">
+                <form onSubmit={showForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-4 px-8 mt-6">
                   {error && (
                     <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">
                       {error}
                     </div>
                   )}
 
-                  {activeTab === "login" ? (
+                  {successMsg && (
+                    <div className="p-3 text-sm text-green-600 bg-green-50 rounded-md">
+                      {successMsg}
+                    </div>
+                  )}
+
+                  {/* Forgot Password Form */}
+                  {showForgotPassword ? (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="forgotEmail" className="text-gray-700">
+                          Email Address
+                        </Label>
+                        <Input
+                          id="forgotEmail"
+                          type="email"
+                          placeholder="Enter your registered email"
+                          value={forgotEmail}
+                          onChange={(e) => setForgotEmail(e.target.value)}
+                          required
+                          className="h-12 rounded-lg border-gray-200"
+                        />
+                      </div>
+
+                      <p className="text-sm text-gray-500">
+                        We&apos;ll send a password reset link to your email.
+                      </p>
+
+                      <Button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full h-12 rounded-lg bg-[#615DFA] hover:bg-[#4b48d4] text-sm font-bold"
+                      >
+                        {loading ? "Sending..." : "Send Reset Link"}
+                      </Button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setShowForgotPassword(false); setError(null); setSuccessMsg(null); }}
+                        className="w-full text-sm font-semibold text-gray-400 hover:text-gray-600 hover:underline"
+                      >
+                        Back to Login
+                      </button>
+                    </>
+
+                  ) : activeTab === "login" ? (
                     <>
                       <div className="space-y-2">
                         <Label htmlFor="email" className="text-gray-700">
@@ -240,6 +340,7 @@ function LoginContent() {
 
                         <button
                           type="button"
+                          onClick={() => { setShowForgotPassword(true); setError(null); setSuccessMsg(null); }}
                           className="font-semibold text-gray-400 hover:text-gray-600 hover:underline"
                         >
                           Forgot password?

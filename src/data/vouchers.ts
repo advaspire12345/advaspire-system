@@ -130,7 +130,7 @@ export async function checkAndCreateVoucher(enrollmentId: string): Promise<Vouch
       package:course_pricing(
         id,
         duration,
-        voucher_amount,
+        voucher_id,
         completion_months
       )
     `)
@@ -145,12 +145,12 @@ export async function checkAndCreateVoucher(enrollmentId: string): Promise<Vouch
   const pricing = enrollment.package as unknown as {
     id: string;
     duration: number;
-    voucher_amount: number | null;
+    voucher_id: string | null;
     completion_months: number | null;
   } | null;
 
-  if (!pricing?.voucher_amount || !pricing?.completion_months) {
-    console.log('[Voucher Check] No voucher config on pricing (need voucher_amount and completion_months), skipping');
+  if (!pricing?.voucher_id || !pricing?.completion_months) {
+    console.log('[Voucher Check] No voucher config on pricing (need voucher_id and completion_months), skipping');
     return null;
   }
 
@@ -219,14 +219,22 @@ export async function checkAndCreateVoucher(enrollmentId: string): Promise<Vouch
     return null;
   }
 
-  // Student completed all sessions within the completion period — create voucher
-  console.log('[Voucher Check] Eligible! Completed', totalAttended, 'sessions within', pricing.completion_months, 'months. Creating voucher for RM', pricing.voucher_amount);
+  // Student completed all sessions within the completion period — link voucher
+  // Look up the voucher record to get the discount amount
+  const { data: voucherRecord } = await supabaseAdmin
+    .from('vouchers')
+    .select('discount_value')
+    .eq('id', pricing.voucher_id)
+    .single();
+
+  const amount = voucherRecord?.discount_value ?? 0;
+  console.log('[Voucher Check] Eligible! Completed', totalAttended, 'sessions within', pricing.completion_months, 'months. Creating voucher for', amount);
 
   return createVoucher({
     student_id: enrollment.student_id,
     enrollment_id: enrollmentId,
     pricing_id: pricing.id,
     course_id: enrollment.course_id,
-    amount: pricing.voucher_amount,
+    amount,
   });
 }

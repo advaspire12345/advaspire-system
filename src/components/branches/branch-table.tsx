@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, FileText, Copy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/ui/search-bar";
@@ -11,6 +11,13 @@ import {
   BranchModal,
   type BranchFormData,
 } from "@/components/branches/branch-modal";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RegistrationForm } from "@/components/registration/registration-form";
 import { cn } from "@/lib/utils";
 import type { BranchEntry, CompanyOption } from "@/data/branches";
 import type { UserRole } from "@/db/schema";
@@ -20,9 +27,25 @@ import {
   deleteBranchAction,
 } from "@/app/(dashboard)/branches/actions";
 
+interface CourseOption {
+  id: string;
+  name: string;
+}
+
+interface SlotOption {
+  id: string;
+  courseId: string;
+  branchId: string;
+  day: string;
+  time: string;
+  duration: number;
+}
+
 interface BranchTableProps {
   initialData: BranchEntry[];
   companyOptions: CompanyOption[];
+  courses?: CourseOption[];
+  courseSlots?: SlotOption[];
   userRole: UserRole;
   canCreateCompany: boolean;
   canEditCompany: boolean;
@@ -36,6 +59,7 @@ const ITEMS_PER_PAGE = 10;
 
 const columns = [
   { key: "type", label: "Type", width: "90px" },
+  { key: "code", label: "Code", width: "80px" },
   { key: "name", label: "Name", width: "120px" },
   { key: "company", label: "Company", width: "150px" },
   { key: "address", label: "Address", width: "150px" },
@@ -56,6 +80,8 @@ const TYPE_BADGE: Record<string, { bg: string; text: string; label: string }> = 
 export function BranchTable({
   initialData,
   companyOptions,
+  courses = [],
+  courseSlots = [],
   userRole,
   canCreateCompany,
   canEditCompany,
@@ -66,6 +92,10 @@ export function BranchTable({
 }: BranchTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Registration form modal
+  const [regModalOpen, setRegModalOpen] = useState(false);
+  const [regBranch, setRegBranch] = useState<BranchEntry | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Modal state
@@ -127,7 +157,7 @@ export function BranchTable({
   // Admin can edit their own company row
   const canEditRow = (row: BranchEntry) =>
     row.type === "company"
-      ? canEditCompany || userRole === "admin"
+      ? canEditCompany || userRole === "group_admin"
       : canEditBranch;
 
   const canDeleteRow = (row: BranchEntry) =>
@@ -140,6 +170,7 @@ export function BranchTable({
     const result = await addBranchAction({
       name: formData.name,
       type: formData.type,
+      code: formData.code,
       parentId: formData.parentId,
       address: formData.address,
       city: formData.city,
@@ -165,6 +196,7 @@ export function BranchTable({
     const result = await updateBranchAction(selectedRecord.id, {
       name: formData.name,
       type: formData.type,
+      code: formData.code,
       parentId: formData.parentId,
       address: formData.address,
       city: formData.city,
@@ -289,10 +321,18 @@ export function BranchTable({
                           </span>
                         </td>
 
+                        {/* Code */}
+                        <td
+                          className="px-4 py-3 font-mono text-xs text-muted-foreground"
+                          style={{ width: columns[1].width }}
+                        >
+                          {row.code || "-"}
+                        </td>
+
                         {/* Name */}
                         <td
                           className="px-4 py-3 font-bold"
-                          style={{ width: columns[1].width }}
+                          style={{ width: columns[2].width }}
                         >
                           {row.branchName}
                         </td>
@@ -300,7 +340,7 @@ export function BranchTable({
                         {/* Company */}
                         <td
                           className="px-4 py-3"
-                          style={{ width: columns[2].width }}
+                          style={{ width: columns[3].width }}
                         >
                           {row.parentName || "-"}
                         </td>
@@ -308,7 +348,7 @@ export function BranchTable({
                         {/* Address */}
                         <td
                           className="px-4 py-3"
-                          style={{ width: columns[3].width }}
+                          style={{ width: columns[4].width }}
                         >
                           {row.branchAddress || "-"}
                         </td>
@@ -316,7 +356,7 @@ export function BranchTable({
                         {/* Area */}
                         <td
                           className="px-4 py-3"
-                          style={{ width: columns[4].width }}
+                          style={{ width: columns[5].width }}
                         >
                           {row.city || "-"}
                         </td>
@@ -324,7 +364,7 @@ export function BranchTable({
                         {/* Phone */}
                         <td
                           className="px-4 py-3 font-bold text-[#23d2e2]"
-                          style={{ width: columns[5].width }}
+                          style={{ width: columns[6].width }}
                         >
                           {row.branchPhone || "-"}
                         </td>
@@ -332,7 +372,7 @@ export function BranchTable({
                         {/* Email */}
                         <td
                           className="px-4 py-3"
-                          style={{ width: columns[6].width }}
+                          style={{ width: columns[7].width }}
                         >
                           {row.branchEmail || "-"}
                         </td>
@@ -340,7 +380,7 @@ export function BranchTable({
                         {/* Bank Name */}
                         <td
                           className="px-4 py-3 font-bold"
-                          style={{ width: columns[7].width }}
+                          style={{ width: columns[8].width }}
                         >
                           {row.bankName || "-"}
                         </td>
@@ -348,7 +388,7 @@ export function BranchTable({
                         {/* Account No */}
                         <td
                           className="px-4 py-3 text-center font-bold"
-                          style={{ width: columns[8].width }}
+                          style={{ width: columns[9].width }}
                         >
                           {row.bankAccount || "-"}
                         </td>
@@ -356,9 +396,22 @@ export function BranchTable({
                         {/* Action */}
                         <td
                           className={cn("px-4 py-3", hideActions && "hidden")}
-                          style={{ width: columns[9].width }}
+                          style={{ width: columns[10].width }}
                         >
                           <div className="flex items-center justify-center gap-2">
+                            {/* Registration Form — only for hq/branch types */}
+                            {row.type !== "company" && (
+                              <button
+                                type="button"
+                                onClick={() => { setRegBranch(row); setRegModalOpen(true); }}
+                                className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#23D2E2] hover:text-white"
+                                aria-label={`Registration form for ${row.branchName}`}
+                                title="Registration Form"
+                              >
+                                <FileText className="h-5 w-5" />
+                              </button>
+                            )}
+
                             {canEditRow(row) && (
                               <button
                                 type="button"
@@ -416,12 +469,69 @@ export function BranchTable({
         mode={modalMode}
         record={selectedRecord}
         companyOptions={companyOptions}
+        existingBranches={initialData}
         userRole={userRole}
         canCreateCompany={canCreateCompany}
         onAdd={handleAdd}
         onEdit={handleEdit}
         onDelete={handleDelete}
       />
+
+      {/* Registration Form Modal */}
+      {regBranch && (
+        <Dialog open={regModalOpen} onOpenChange={setRegModalOpen}>
+          <DialogContent className="sm:max-w-lg p-0" floatingCloseButton>
+            <div className="max-h-[90vh] overflow-y-auto p-10">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-bold">
+                  Registration Form — {regBranch.branchName}
+                </DialogTitle>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-sm text-muted-foreground">Share link:</span>
+                  <a
+                    href={`/register/${regBranch.code || regBranch.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-mono text-[#23D2E2] hover:underline truncate"
+                  >
+                    {`${typeof window !== "undefined" ? window.location.origin : ""}/register/${regBranch.code || regBranch.id}`}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/register/${regBranch.code || regBranch.id}`)}
+                    className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:bg-muted transition"
+                    title="Copy link"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </DialogHeader>
+
+              <div className="mt-6">
+                <RegistrationForm
+                  branchId={regBranch.id}
+                  branchName={regBranch.branchName}
+                  courses={courses.filter((c) =>
+                    courseSlots.some((s) => s.courseId === c.id && s.branchId === regBranch.id)
+                  )}
+                  courseSlots={courseSlots
+                    .filter((s) => s.branchId === regBranch.id)
+                    .map((s) => ({
+                      id: s.id,
+                      courseId: s.courseId,
+                      day: s.day,
+                      time: s.time,
+                      duration: s.duration,
+                    }))}
+                  layout="default"
+                  noCard
+                  onSuccess={() => router.refresh()}
+                />
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

@@ -25,11 +25,18 @@ interface CategoryOption {
   name: string;
 }
 
+interface VoucherOption {
+  id: string;
+  code: string;
+  discount: string;
+}
+
 interface ProgramTableProps {
   initialData: ProgramTableRow[];
   branches: BranchOption[];
   instructors: InstructorOption[];
   categories: CategoryOption[];
+  vouchers?: VoucherOption[];
   hideBranch?: boolean;
   onAdd?: (payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
   onEdit?: (programId: string, payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
@@ -98,6 +105,7 @@ export function ProgramTable({
   branches,
   instructors,
   categories,
+  vouchers = [],
   hideBranch,
   onAdd,
   onEdit,
@@ -483,6 +491,7 @@ export function ProgramTable({
         branches={branches}
         instructors={instructors}
         categories={categories}
+        vouchers={vouchers}
         onAdd={handleAdd}
         onEdit={handleEdit}
         onDelete={handleDelete}

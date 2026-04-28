@@ -118,35 +118,44 @@ export function isSuperAdminRole(role: UserRole): boolean {
 }
 
 export function isAdminRole(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin';
+  return role === 'super_admin' || role === 'group_admin';
 }
 
+/** @deprecated Use isCompanyAdminRole instead */
 export function isBranchAdminRole(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin' || role === 'branch_admin';
+  return isCompanyAdminRole(role);
+}
+
+export function isCompanyAdminRole(role: UserRole): boolean {
+  return role === 'super_admin' || role === 'group_admin' || role === 'company_admin';
+}
+
+export function isAssistantAdminRole(role: UserRole): boolean {
+  return role === 'super_admin' || role === 'group_admin' || role === 'company_admin' || role === 'assistant_admin';
 }
 
 export function isInstructorRole(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin' || role === 'branch_admin' || role === 'instructor';
+  return role === 'super_admin' || role === 'group_admin' || role === 'company_admin' || role === 'assistant_admin' || role === 'instructor';
 }
 
 export function canManageBranch(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin';
+  return role === 'super_admin' || role === 'group_admin';
 }
 
 export function canManageUsers(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin' || role === 'branch_admin';
+  return role === 'super_admin' || role === 'group_admin' || role === 'company_admin';
 }
 
 export function canManageStudents(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin' || role === 'branch_admin' || role === 'instructor';
+  return role === 'super_admin' || role === 'group_admin' || role === 'company_admin' || role === 'assistant_admin' || role === 'instructor';
 }
 
 export function canMarkAttendance(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin' || role === 'branch_admin' || role === 'instructor';
+  return role === 'super_admin' || role === 'group_admin' || role === 'company_admin' || role === 'assistant_admin' || role === 'instructor';
 }
 
 export function canManageAdcoins(role: UserRole): boolean {
-  return role === 'super_admin' || role === 'admin' || role === 'branch_admin' || role === 'instructor';
+  return role === 'super_admin' || role === 'group_admin' || role === 'company_admin' || role === 'assistant_admin' || role === 'instructor';
 }
 
 // ============================================
@@ -199,14 +208,17 @@ export async function getUserBranchIds(email: string): Promise<string[] | null> 
     return null;
   }
 
-  // Admin: check admin_branches table
-  if (isAdminRole(user.role) && user.role === 'admin') {
+  // Group admin: check admin_branches table
+  const normalizedRole = (user.role as string) === "admin" ? "group_admin" : (user.role as string) === "branch_admin" ? "company_admin" : user.role;
+  if (normalizedRole === 'group_admin') {
     const { getAdminBranchIds } = await import("./permissions");
     const branchIds = await getAdminBranchIds(user.id);
-    // If admin has no branches assigned, fall back to their own branch_id
+    // If admin has branches assigned, return them
     if (branchIds.length > 0) return branchIds;
+    // Fall back to own branch_id
     if (user.branch_id) return [user.branch_id];
-    return [];
+    // No branches at all — treat like super_admin (see everything)
+    return null;
   }
 
   // Branch admin / instructor: their own branch
@@ -376,7 +388,7 @@ export async function getAllInstructors(): Promise<InstructorOption[]> {
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('id, name')
-    .in('role', ['instructor', 'branch_admin', 'admin', 'super_admin'])
+    .in('role', ['instructor', 'assistant_admin', 'company_admin', 'group_admin', 'super_admin'])
     .is('deleted_at', null)
     .order('name');
 
@@ -396,7 +408,7 @@ export async function getInstructorsByBranchForAttendance(branchId: string): Pro
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('id, name')
-    .in('role', ['instructor', 'branch_admin'])
+    .in('role', ['instructor', 'assistant_admin', 'company_admin'])
     .eq('branch_id', branchId)
     .is('deleted_at', null)
     .order('name');
@@ -416,7 +428,7 @@ export async function getAllInstructorsForAttendance(): Promise<InstructorOption
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('id, name')
-    .in('role', ['instructor', 'branch_admin'])
+    .in('role', ['instructor', 'assistant_admin', 'company_admin'])
     .is('deleted_at', null)
     .order('name');
 
@@ -443,11 +455,46 @@ export interface TransferParticipant {
   adcoinBalance: number;
 }
 
-export async function getTransferParticipants(): Promise<TransferParticipant[]> {
+export async function getTransferParticipants(userEmail?: string): Promise<TransferParticipant[]> {
   const participants: TransferParticipant[] = [];
 
+  // Get branch IDs for filtering (null = super_admin, sees all)
+  let branchIds: string[] | null = null;
+  if (userEmail) {
+    branchIds = await getUserBranchIds(userEmail);
+    const currentUser = await getUserByEmail(userEmail);
+
+    // Normalize old role names
+    const role = (currentUser?.role as string) === "admin" ? "group_admin" : (currentUser?.role as string) === "branch_admin" ? "company_admin" : currentUser?.role;
+
+    // Expand company branches for group_admin, company_admin, assistant_admin
+    if (branchIds && branchIds.length > 0 && currentUser && (role === "group_admin" || role === "company_admin" || role === "assistant_admin")) {
+      const { data: assigned } = await supabaseAdmin
+        .from("branches")
+        .select("id, type, parent_id")
+        .in("id", branchIds)
+        .is("deleted_at", null);
+
+      const companyIds = new Set<string>();
+      for (const b of assigned ?? []) {
+        if (b.type === "company") companyIds.add(b.id);
+        else if (b.parent_id) companyIds.add(b.parent_id);
+      }
+
+      if (companyIds.size > 0) {
+        const { data: children } = await supabaseAdmin
+          .from("branches")
+          .select("id")
+          .in("parent_id", [...companyIds])
+          .in("type", ["hq", "branch"])
+          .is("deleted_at", null);
+        branchIds = (children ?? []).map((b) => b.id);
+      }
+    }
+  }
+
   // Fetch students with branch info
-  const { data: students, error: studentsError } = await supabaseAdmin
+  let studentQuery = supabaseAdmin
     .from('students')
     .select(`
       id,
@@ -459,6 +506,12 @@ export async function getTransferParticipants(): Promise<TransferParticipant[]> 
     `)
     .is('deleted_at', null)
     .order('name');
+
+  if (branchIds && branchIds.length > 0) {
+    studentQuery = studentQuery.in('branch_id', branchIds);
+  }
+
+  const { data: students, error: studentsError } = await studentQuery;
 
   if (studentsError) {
     console.error('Error fetching students for transfer:', studentsError);
@@ -481,7 +534,7 @@ export async function getTransferParticipants(): Promise<TransferParticipant[]> 
   }
 
   // Fetch users with roles (excluding parent and student roles)
-  const { data: users, error: usersError } = await supabaseAdmin
+  let userQuery = supabaseAdmin
     .from('users')
     .select(`
       id,
@@ -495,6 +548,12 @@ export async function getTransferParticipants(): Promise<TransferParticipant[]> 
     .not('role', 'in', '("parent","student")')
     .is('deleted_at', null)
     .order('name');
+
+  if (branchIds && branchIds.length > 0) {
+    userQuery = userQuery.in('branch_id', branchIds);
+  }
+
+  const { data: users, error: usersError } = await userQuery;
 
   if (usersError) {
     console.error('Error fetching users for transfer:', usersError);
@@ -522,8 +581,9 @@ export async function getTransferParticipants(): Promise<TransferParticipant[]> 
 function formatRole(role: string): string {
   const roleLabels: Record<string, string> = {
     super_admin: 'Super Admin',
-    admin: 'Admin',
-    branch_admin: 'Branch Admin',
+    group_admin: 'Group Admin',
+    company_admin: 'Company Admin',
+    assistant_admin: 'Assistant Admin',
     instructor: 'Instructor',
   };
   return roleLabels[role] ?? role;

@@ -16,7 +16,7 @@ export async function updateSettingsAction(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const permData = await getCurrentUserPermissions();
-    if (permData?.role !== 'super_admin' && permData?.role !== 'admin') {
+    if (permData?.role !== 'super_admin' && permData?.role !== 'group_admin') {
       return { success: false, error: "Forbidden" };
     }
 

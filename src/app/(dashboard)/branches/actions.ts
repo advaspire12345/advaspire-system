@@ -13,6 +13,7 @@ import type { Branch, BranchType } from "@/db/schema";
 export interface AddBranchData {
   name: string;
   type: BranchType;
+  code: string | null;
   parentId: string | null;
   address: string | null;
   city: string | null;
@@ -28,6 +29,7 @@ export interface AddBranchData {
 export interface UpdateBranchData {
   name: string;
   type: BranchType;
+  code: string | null;
   parentId: string | null;
   address: string | null;
   city: string | null;
@@ -68,6 +70,7 @@ export async function addBranchAction(
     const result = await createBranch({
       name: data.name,
       type: data.type,
+      code: data.code,
       parent_id: data.type !== "company" ? data.parentId : null,
       address: data.address,
       city: data.city,
@@ -116,6 +119,7 @@ export async function updateBranchAction(
     const result = await updateBranch(branchId, {
       name: data.name,
       type: data.type,
+      code: data.code,
       parent_id: data.type !== "company" ? data.parentId : null,
       address: data.address,
       city: data.city,

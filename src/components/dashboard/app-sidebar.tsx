@@ -18,6 +18,7 @@ import {
   GraduationCap,
   Users,
   Award,
+  Ticket,
 } from "lucide-react";
 import {
   Sidebar,
@@ -76,6 +77,18 @@ const navigationItems: {
     title: "Program",
     icon: GraduationCap,
     href: "/program",
+    resource: "programs",
+  },
+  {
+    title: "Slot",
+    icon: Clock,
+    href: "/slot",
+    resource: "programs",
+  },
+  {
+    title: "Voucher",
+    icon: Ticket,
+    href: "/voucher",
     resource: "programs",
   },
   {

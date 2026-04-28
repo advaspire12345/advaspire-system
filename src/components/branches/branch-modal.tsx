@@ -22,6 +22,7 @@ interface BranchModalProps {
   mode: BranchModalMode;
   record: BranchEntry | null;
   companyOptions: CompanyOption[];
+  existingBranches: BranchEntry[];
   userRole: UserRole;
   canCreateCompany: boolean;
   onAdd: (data: BranchFormData) => Promise<void>;
@@ -32,6 +33,7 @@ interface BranchModalProps {
 export interface BranchFormData {
   name: string;
   type: BranchType;
+  code: string | null;
   parentId: string | null;
   address: string | null;
   city: string | null;
@@ -56,6 +58,7 @@ export function BranchModal({
   mode,
   record,
   companyOptions,
+  existingBranches,
   userRole,
   canCreateCompany,
   onAdd,
@@ -67,6 +70,7 @@ export function BranchModal({
 
   // Form fields
   const [type, setType] = useState<BranchType>("branch");
+  const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState("");
   const [address, setAddress] = useState("");
@@ -79,11 +83,22 @@ export function BranchModal({
   const [logoUrl, setLogoUrl] = useState("");
   const [registrationNumber, setRegistrationNumber] = useState("");
 
+  // Compute next auto-code for hq/branch
+  const getNextCode = (forParentId: string | null): string => {
+    // Count existing hq + branch entries under the same parent company
+    const siblings = existingBranches.filter(
+      (b) => (b.type === "hq" || b.type === "branch") && b.parentId === forParentId
+    );
+    const nextNum = siblings.length + 1;
+    return nextNum.toString().padStart(3, "0");
+  };
+
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open) {
       if (mode === "add") {
         setType(canCreateCompany ? "branch" : "branch");
+        setCode("");
         setName("");
         setParentId("");
         setAddress("");
@@ -97,6 +112,7 @@ export function BranchModal({
         setRegistrationNumber("");
       } else if (record) {
         setType(record.type);
+        setCode(record.code ?? "");
         setName(record.branchName);
         setParentId(record.parentId ?? "");
         setAddress(record.branchAddress ?? "");
@@ -112,6 +128,26 @@ export function BranchModal({
       setError(null);
     }
   }, [open, record, mode, canCreateCompany]);
+
+  // Track if user has interacted with type/parent in add mode
+  const [hasSelectedType, setHasSelectedType] = useState(false);
+
+  // Reset interaction flag when modal opens
+  useEffect(() => {
+    if (open && mode === "add") {
+      setHasSelectedType(false);
+    }
+  }, [open, mode]);
+
+  // Auto-generate code for hq/branch when parent company is selected
+  useEffect(() => {
+    if (mode !== "add") return;
+    if ((type === "hq" || type === "branch") && parentId) {
+      setCode(getNextCode(parentId));
+    } else if (hasSelectedType && type === "company") {
+      setCode("");
+    }
+  }, [type, parentId, mode, hasSelectedType]);
 
   const handleSubmit = async () => {
     // Validation (only for add/edit)
@@ -133,6 +169,7 @@ export function BranchModal({
       const formData: BranchFormData = {
         name: name.trim(),
         type,
+        code: code.trim() || null,
         parentId: type !== "company" && parentId ? parentId : null,
         address: address.trim() || null,
         city: city.trim() || null,
@@ -211,7 +248,7 @@ export function BranchModal({
   const showParentCompany = type === "hq" || type === "branch";
 
   // Admin editing their own company: hide type selector and city/area
-  const isAdminEditingCompany = mode === "edit" && type === "company" && userRole === "admin";
+  const isAdminEditingCompany = mode === "edit" && type === "company" && userRole === "group_admin";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -231,32 +268,44 @@ export function BranchModal({
           )}
 
           <div className="space-y-5 mt-8">
-            {/* Type Selector - hidden for admin editing company */}
-            {!isAdminEditingCompany && (isReadonly ? (
-              <div className="relative">
-                <input
-                  type="text"
-                  readOnly
-                  value={TYPE_LABELS[type]}
-                  className={cn(
-                    "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
-                    readonlyFieldClass
-                  )}
+            {/* Type + Code Row */}
+            {!isAdminEditingCompany && (
+              <div className="grid grid-cols-2 gap-3">
+                {isReadonly ? (
+                  <div className="relative">
+                    <input
+                      type="text"
+                      readOnly
+                      value={TYPE_LABELS[type]}
+                      className={cn(
+                        "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground",
+                        readonlyFieldClass
+                      )}
+                    />
+                    <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                      Type
+                    </label>
+                  </div>
+                ) : (
+                  <FloatingSelect
+                    id="type"
+                    label="Type"
+                    placeholder="Select type..."
+                    value={type}
+                    onChange={(val) => { setType(val as BranchType); setHasSelectedType(true); }}
+                    options={typeOptions}
+                  />
+                )}
+
+                <FloatingInput
+                  id="code"
+                  label="Code"
+                  value={mode === "add" && type !== "company" && !parentId ? "" : code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  disabled={isReadonly || type === "hq" || type === "branch" || (mode === "add" && type !== "company" && !parentId)}
                 />
-                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                  Type
-                </label>
               </div>
-            ) : (
-              <FloatingSelect
-                id="type"
-                label="Type"
-                placeholder="Select type..."
-                value={type}
-                onChange={(val) => setType(val as BranchType)}
-                options={typeOptions}
-              />
-            ))}
+            )}
 
             {/* Parent Company - for HQ and Branch */}
             {showParentCompany && (

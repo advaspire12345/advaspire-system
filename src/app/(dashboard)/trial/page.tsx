@@ -31,7 +31,7 @@ export default async function TrialPage() {
   if (useCityName) {
     const branchIds = await getUserBranchIds(user.email);
     if (branchIds && branchIds.length > 0) {
-      if (permData!.role === "admin") {
+      if (permData!.role === "group_admin") {
         const companyIds = new Set<string>();
         for (const b of branchesData) {
           if (branchIds.includes(b.id)) {
@@ -71,7 +71,7 @@ export default async function TrialPage() {
         <TrialTable
           initialData={trials}
           branches={branches}
-          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           courses={courses}
           canCreate={perms?.can_create}
           canEdit={perms?.can_edit}

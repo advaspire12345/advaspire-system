@@ -9,7 +9,8 @@ import {
   getParentEvents,
 } from "@/data/parent-portal";
 import { ParentNav } from "@/components/parent/parent-nav";
-import { ParentStats } from "@/components/parent/parent-stats";
+import { updateParentProfileAction } from "@/app/(parent)/parent/profile-actions";
+import type { ParentProfileData } from "@/app/(parent)/parent/profile-actions";
 import { ChildrenSection } from "@/components/parent/children-section";
 import { UpcomingClasses } from "@/components/parent/upcoming-classes";
 import { ParentCalendar } from "@/components/parent/parent-calendar";
@@ -18,6 +19,7 @@ import { MissionActivity } from "@/components/parent/mission-activity";
 import { ProjectGallery } from "@/components/parent/project-gallery";
 import { PaymentList } from "@/components/parent/payment-list";
 import { PaymentWarningModal } from "@/components/parent/payment-warning-modal";
+import { ParentProfileHeader } from "@/components/parent/parent-profile-header";
 
 export default async function ParentPortalPage() {
   const user = await getUser();
@@ -63,21 +65,15 @@ export default async function ParentPortalPage() {
       <ParentNav parentName={portalData.parent.name} />
 
       <main className="mx-auto max-w-5xl px-4 py-6 space-y-6">
-        {/* Welcome Banner */}
-        <div className="rounded-xl bg-gradient-to-r from-[#615DFA] to-[#23D2E2] p-5 text-white">
-          <h1 className="text-2xl md:text-3xl font-bold">
-            Hi {portalData.parent.name.split(" ")[0]}!
-          </h1>
-          <p className="text-sm font-medium text-white/80 mt-1">
-            Here&apos;s what&apos;s happening with your children
-          </p>
-        </div>
-
-        {/* Stats Row */}
-        <ParentStats
+        {/* Profile Header Banner */}
+        <ParentProfileHeader
+          parentName={portalData.parent.name}
+          parentEmail={portalData.parent.email}
+          parentPhoto={portalData.parent.photo ?? portalData.children[0]?.photo}
+          coverPhoto={portalData.parent.cover_photo}
           childrenCount={portalData.children.length}
-          totalSessionsActive={portalData.totalSessionsRemaining}
-          totalSessionsAttended={portalData.totalSessionsAttended}
+          totalSessions={portalData.totalSessionsRemaining}
+          totalAttended={portalData.totalSessionsAttended}
           nextClass={
             portalData.nextClass
               ? {
@@ -87,6 +83,18 @@ export default async function ParentPortalPage() {
                 }
               : null
           }
+          profile={{
+            id: portalData.parent.id,
+            name: portalData.parent.name,
+            email: portalData.parent.email,
+            phone: portalData.parent.phone,
+            address: portalData.parent.address,
+            postcode: portalData.parent.postcode,
+            city: portalData.parent.city,
+            photo: portalData.parent.photo ?? null,
+            coverPhoto: portalData.parent.cover_photo ?? null,
+          } satisfies ParentProfileData}
+          onSaveProfile={updateParentProfileAction}
         />
 
         {/* Top row: Children + Upcoming Classes (same height) */}

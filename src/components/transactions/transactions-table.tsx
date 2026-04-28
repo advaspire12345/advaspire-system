@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { Plus } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
@@ -24,6 +24,10 @@ interface TransactionsTableProps {
   participants: TransferParticipant[];
   hideBranch?: boolean;
   currentUserId?: string;
+  currentUserName?: string;
+  currentUserBranchId?: string | null;
+  filterByBranch?: boolean;
+  canAdjust?: boolean;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -77,7 +81,7 @@ function getAmountDisplay(amount: number) {
   return <span className="font-bold">{Math.abs(amount).toLocaleString()}</span>;
 }
 
-export function TransactionsTable({ initialData, totalCount, participants, hideBranch, currentUserId }: TransactionsTableProps) {
+export function TransactionsTable({ initialData, totalCount, participants, hideBranch, currentUserId, currentUserName, currentUserBranchId, filterByBranch, canAdjust }: TransactionsTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -123,9 +127,15 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
+  const [adjustModalOpen, setAdjustModalOpen] = useState(false);
 
+  // Filter to own branch transactions only (for non-admin roles)
   const filteredData = useMemo(() => {
     let result = allData;
+
+    if (filterByBranch && currentUserBranchId) {
+      result = result.filter((row) => row.branchId === currentUserBranchId);
+    }
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -140,7 +150,15 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
     }
 
     return result;
-  }, [allData, searchQuery]);
+  }, [allData, searchQuery, currentUserBranchId]);
+
+  // Transfer modal: own branch only for non-admin roles, all participants for admin roles
+  const localParticipants = useMemo(() => {
+    if (filterByBranch && currentUserBranchId) {
+      return participants.filter((p) => p.branchId === currentUserBranchId);
+    }
+    return participants;
+  }, [participants, currentUserBranchId, filterByBranch]);
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedData = useMemo(() => {
@@ -152,6 +170,40 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
     setSearchQuery(value);
     setCurrentPage(1);
   };
+
+  // Re-fetch first page immediately, then load rest in background
+  const refetchData = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/transactions/table?offset=0&limit=10`);
+      if (!res.ok) return;
+      const result: { rows: TransactionDisplayRow[]; totalCount: number } = await res.json();
+      setAllData(result.rows ?? []);
+      setCurrentPage(1);
+
+      // Load remaining in background (non-blocking)
+      if ((result.rows?.length ?? 0) < (result.totalCount ?? 0)) {
+        setIsLoadingMore(true);
+        const loadRemaining = async () => {
+          let offset = result.rows.length;
+          const existingIds = new Set(result.rows.map((r) => r.id));
+          while (offset < result.totalCount) {
+            const batchRes = await fetch(`/api/transactions/table?offset=${offset}&limit=10`);
+            if (!batchRes.ok) break;
+            const batch: { rows: TransactionDisplayRow[] } = await batchRes.json();
+            if (!batch.rows?.length) break;
+            const newRows = batch.rows.filter((r) => !existingIds.has(r.id));
+            for (const r of batch.rows) existingIds.add(r.id);
+            if (newRows.length > 0) setAllData((prev) => [...prev, ...newRows]);
+            offset += 10;
+          }
+          setIsLoadingMore(false);
+        };
+        loadRemaining();
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Handle transfer submit
   const handleTransferSubmit = async (formData: TransferFormData) => {
@@ -175,6 +227,8 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to transfer adcoin");
       }
+      // Re-fetch first page (fast) then refresh server components for balance updates
+      refetchData();
       router.refresh();
     } catch (error) {
       console.error("Failed to transfer adcoin:", error);
@@ -194,13 +248,25 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
             placeholder="Search by name or description..."
           />
 
-          <Button
-            onClick={() => setModalOpen(true)}
-            className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-          >
-            <Plus className="h-4 w-4" />
-            Transfer Adcoin
-          </Button>
+          <div className="flex items-center gap-3">
+            {canAdjust && (
+              <Button
+                onClick={() => setAdjustModalOpen(true)}
+                variant="outline"
+                className="font-bold h-[50px] px-6"
+              >
+                <Settings className="h-4 w-4" />
+                Adcoin Adjustment
+              </Button>
+            )}
+            <Button
+              onClick={() => setModalOpen(true)}
+              className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+            >
+              <Plus className="h-4 w-4" />
+              Transfer Adcoin
+            </Button>
+          </div>
         </div>
 
         {/* Table */}
@@ -385,11 +451,26 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
     <TransferAdcoinModal
       open={modalOpen}
       onOpenChange={setModalOpen}
-      participants={participants}
+      participants={localParticipants}
       recipientId={null}
       defaultSenderId={currentUserId}
+      defaultSenderName={currentUserName}
       onSubmit={handleTransferSubmit}
     />
+
+    {/* Adcoin Adjustment Modal */}
+    {canAdjust && (
+      <TransferAdcoinModal
+        open={adjustModalOpen}
+        onOpenChange={setAdjustModalOpen}
+        participants={localParticipants}
+        recipientId={null}
+        defaultSenderId={currentUserId}
+        defaultSenderName={currentUserName}
+        onSubmit={handleTransferSubmit}
+        defaultTransactionType="adjusted"
+      />
+    )}
     </>
   );
 }

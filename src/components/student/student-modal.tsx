@@ -572,13 +572,14 @@ export function StudentModal({
     return () => controller.abort();
   }, [open, mode, formData.parentId, formData.courseId, isPooled, recordId]);
 
-  // Auto-generate student ID when add modal opens or "Add New Student" is selected
+  // Auto-generate student ID when add modal opens, "Add New Student" is selected, or branch changes
   useEffect(() => {
     const generateStudentId = async () => {
       if (mode === "add" && open && (!selectedStudentId || selectedStudentId === "new")) {
         setIsGeneratingId(true);
         try {
-          const response = await fetch('/api/student/generate-id');
+          const branchParam = formData.branchId ? `?branchId=${formData.branchId}` : '';
+          const response = await fetch(`/api/student/generate-id${branchParam}`);
           const data = await response.json();
           if (response.ok && data.studentId) {
             setFormData((prev) => ({
@@ -595,7 +596,7 @@ export function StudentModal({
     };
 
     generateStudentId();
-  }, [mode, open, selectedStudentId]);
+  }, [mode, open, selectedStudentId, formData.branchId]);
 
   // Fetch pool siblings for edit mode when student is pooled
   useEffect(() => {

@@ -12,6 +12,7 @@ import { getAllBranches } from "@/data/branches";
 import { getAllCourses } from "@/data/courses";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 import { getUserBranchIds } from "@/data/users";
+import { supabaseAdmin } from "@/db";
 
 export default async function ExaminationPage() {
   const user = await getUser();
@@ -41,7 +42,7 @@ export default async function ExaminationPage() {
   if (useCityName) {
     const branchIds = await getUserBranchIds(user.email);
     if (branchIds && branchIds.length > 0) {
-      if (permData!.role === "admin") {
+      if (permData!.role === "group_admin") {
         const companyIds = new Set<string>();
         for (const b of branches) {
           if (branchIds.includes(b.id)) {
@@ -75,6 +76,47 @@ export default async function ExaminationPage() {
     photo: e.photo,
   }));
 
+  // Fetch company admin names per branch (highest role user in each branch's company)
+  const branchIdList = filteredBranches.map((b) => b.id);
+  const companyAdminNames: Record<string, string> = {};
+  const companyNames: Record<string, string> = {};
+  if (branchIdList.length > 0) {
+    // Build company names map and find company_admin users
+    for (const branch of filteredBranches) {
+      // Find company name from parent
+      const parentCompany = branches.find((b) => b.id === branch.parent_id);
+      if (parentCompany) {
+        companyNames[branch.id] = parentCompany.name;
+      }
+      const parentId = branch.parent_id;
+      if (!parentId) continue;
+      // Find company_admin assigned to branches under this company
+      const { data: admins } = await supabaseAdmin
+        .from("users")
+        .select("name, branch_id")
+        .eq("role", "company_admin")
+        .is("deleted_at", null)
+        .limit(1);
+      if (admins?.[0]) {
+        companyAdminNames[branch.id] = admins[0].name;
+      }
+    }
+    // If no company_admin found, try group_admin
+    if (Object.keys(companyAdminNames).length === 0) {
+      const { data: groupAdmins } = await supabaseAdmin
+        .from("users")
+        .select("name")
+        .eq("role", "group_admin")
+        .is("deleted_at", null)
+        .limit(1);
+      if (groupAdmins?.[0]) {
+        for (const b of filteredBranches) {
+          companyAdminNames[b.id] = groupAdmins[0].name;
+        }
+      }
+    }
+  }
+
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">
       <div className="space-y-2">
@@ -89,7 +131,7 @@ export default async function ExaminationPage() {
           initialData={examinationsResult.rows}
           totalCount={examinationsResult.totalCount}
           eligibleStudents={eligibleStudents}
-          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           allStudents={allStudents}
           examiners={examinerOptions}
           branches={branchOptions}
@@ -97,6 +139,8 @@ export default async function ExaminationPage() {
           canCreate={perms?.can_create}
           canEdit={perms?.can_edit}
           canDelete={perms?.can_delete}
+          companyAdminNames={companyAdminNames}
+          companyNames={companyNames}
         />
       </div>
     </main>
