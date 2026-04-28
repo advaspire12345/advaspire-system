@@ -29,11 +29,11 @@ export default async function AttendancePage() {
 
   // Fetch instructors based on role:
   // - instructor: no need to fetch (auto-fill with own name)
-  // - branch_admin: instructors + branch_admins in same branch
-  // - admin/super_admin: all instructors + branch_admins
+  // - company_admin: instructors + company_admins in same branch
+  // - group_admin/super_admin: all instructors + company_admins
   const getInstructors = () => {
     if (role === "instructor") return Promise.resolve([]);
-    if (role === "branch_admin" && dbUser?.branch_id) {
+    if (role === "company_admin" && dbUser?.branch_id) {
       return getInstructorsByBranchForAttendance(dbUser.branch_id);
     }
     return getAllInstructorsForAttendance();
@@ -65,7 +65,7 @@ export default async function AttendancePage() {
           totalCount={enrollmentsResult.totalCount}
           allStudentsForManualAdd={allStudentsForManual}
           instructors={instructors}
-          hideBranch={role === "branch_admin" || role === "instructor"}
+          hideBranch={role === "company_admin" || role === "instructor"}
           canCreate={perms?.can_create}
           currentUserName={role === "instructor" ? dbUser?.name : undefined}
         />

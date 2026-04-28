@@ -706,8 +706,8 @@ export async function getTransactionsForDisplay(userEmail: string): Promise<Tran
   const currentUser = await getUserByEmail(userEmail);
   const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
-  // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+  // Expand company IDs to all child branches for admin roles
+  if (branchIds && branchIds.length > 0 && (currentUser?.role === "group_admin" || currentUser?.role === "company_admin" || currentUser?.role === "assistant_admin")) {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")
@@ -890,8 +890,8 @@ export async function getTransactionsForDisplayPaginated(
   const currentUser = await getUserByEmail(userEmail);
   const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
 
-  // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (branchIds && branchIds.length > 0 && currentUser?.role === "admin") {
+  // Expand company IDs to all child branches for admin roles
+  if (branchIds && branchIds.length > 0 && (currentUser?.role === "group_admin" || currentUser?.role === "company_admin" || currentUser?.role === "assistant_admin")) {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")

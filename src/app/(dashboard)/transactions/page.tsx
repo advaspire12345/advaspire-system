@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { TransactionsTable } from "@/components/transactions/transactions-table";
 import { getTransactionsForDisplayPaginated } from "@/data/adcoins";
-import { getTransferParticipants } from "@/data/users";
+import { getTransferParticipants, getUserByAuthId } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 export default async function TransactionsPage() {
@@ -17,9 +17,10 @@ export default async function TransactionsPage() {
   const perms = permData?.permissions.transactions;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
-  const [transactionsResult, participants] = await Promise.all([
+  const [transactionsResult, participants, dbUser] = await Promise.all([
     getTransactionsForDisplayPaginated(user.email, { offset: 0, limit: 10 }),
-    getTransferParticipants(),
+    getTransferParticipants(user.email),
+    getUserByAuthId(user.id),
   ]);
 
   return (
@@ -32,7 +33,17 @@ export default async function TransactionsPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <TransactionsTable initialData={transactionsResult.rows} totalCount={transactionsResult.totalCount} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} currentUserId={permData!.userId} />
+        <TransactionsTable
+          initialData={transactionsResult.rows}
+          totalCount={transactionsResult.totalCount}
+          participants={participants}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
+          currentUserId={permData!.userId}
+          currentUserName={dbUser?.name}
+          currentUserBranchId={dbUser?.branch_id ?? null}
+          filterByBranch={permData!.role !== "super_admin" && permData!.role !== "group_admin"}
+          canAdjust={permData!.role === "super_admin" || permData!.role === "group_admin" || permData!.role === "company_admin"}
+        />
       </div>
     </main>
   );

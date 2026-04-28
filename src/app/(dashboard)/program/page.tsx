@@ -14,6 +14,7 @@ import {
 } from "./actions";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 import { getUserBranchIds } from "@/data/users";
+import { supabaseAdmin } from "@/db";
 
 export default async function ProgramsPage() {
   const user = await getUser();
@@ -27,12 +28,26 @@ export default async function ProgramsPage() {
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   // Fetch all required data
-  const [programs, branchesData, categoriesData, instructorsData] = await Promise.all([
+  const [programs, branchesData, categoriesData, instructorsData, vouchersResult] = await Promise.all([
     getProgramsForTable(user.email),
     getAllBranches(),
     getAllCategories(),
     getInstructors(),
+    supabaseAdmin.from("vouchers").select("id, code, discount_type, discount_value, expiry_type, expiry_date").is("deleted_at", null).order("code"),
   ]);
+
+  const today = new Date().toISOString().split("T")[0];
+  const vouchers = (vouchersResult.data ?? [])
+    .filter((v: any) => {
+      // Exclude date-based vouchers that have expired
+      if (v.expiry_type === "date" && v.expiry_date && v.expiry_date < today) return false;
+      return true;
+    })
+    .map((v: any) => ({
+      id: v.id,
+      code: v.code,
+      discount: v.discount_type === "percentage" ? `${v.discount_value}%` : `RM${v.discount_value}`,
+    }));
 
   // Filter branches based on role
   const useCityName = permData!.role !== "super_admin";
@@ -40,7 +55,7 @@ export default async function ProgramsPage() {
   if (useCityName) {
     const branchIds = await getUserBranchIds(user.email);
     if (branchIds && branchIds.length > 0) {
-      if (permData!.role === "admin") {
+      if (permData!.role === "group_admin") {
         const companyIds = new Set<string>();
         for (const b of branchesData) {
           if (branchIds.includes(b.id)) {
@@ -86,9 +101,10 @@ export default async function ProgramsPage() {
         <ProgramTable
           initialData={programs}
           branches={branches}
-          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           instructors={instructors}
           categories={categories}
+          vouchers={vouchers}
           onAdd={perms?.can_create ? createProgramAction : undefined}
           onEdit={perms?.can_edit ? updateProgramAction : undefined}
           onDelete={perms?.can_delete ? deleteProgramAction : undefined}

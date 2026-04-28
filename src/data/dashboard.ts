@@ -25,7 +25,7 @@ async function getDashboardBranchAccess(userEmail: string): Promise<DashboardBra
   if (branchIds.length === 0) return { branchIds: [], useCityName: true };
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
-  if (user.role === "admin") {
+  if (user.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches")
       .select("id, type, parent_id")
@@ -1237,7 +1237,7 @@ export const getAdcoinPoolData = unstable_cache(
         .from('users')
         .select('branch_id, adcoin_balance')
         .in('branch_id', branchIds)
-        .in('role', ['instructor', 'admin', 'branch_admin'])
+        .in('role', ['instructor', 'assistant_admin', 'company_admin', 'group_admin'])
         .is('deleted_at', null);
 
       // Aggregate adcoin balances by branch in JavaScript (fast, in-memory)
@@ -1274,7 +1274,7 @@ export const getAdcoinProgressData = unstable_cache(
       let teamQuery = supabaseAdmin
         .from('users')
         .select('adcoin_balance')
-        .in('role', ['instructor', 'admin', 'branch_admin'])
+        .in('role', ['instructor', 'assistant_admin', 'company_admin', 'group_admin'])
         .is('deleted_at', null);
 
       if (dashBranchIds) {

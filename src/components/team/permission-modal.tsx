@@ -31,7 +31,8 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  branch_admin: "Branch Admin",
+  company_admin: "Company Admin",
+  assistant_admin: "Assistant Admin",
   instructor: "Instructor",
 };
 
@@ -139,7 +140,7 @@ export function PermissionModal({
             <span
               className={cn(
                 "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-                data.userRole === "branch_admin"
+                data.userRole === "company_admin"
                   ? "bg-blue-100 text-blue-700"
                   : "bg-purple-100 text-purple-700"
               )}

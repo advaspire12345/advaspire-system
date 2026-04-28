@@ -38,11 +38,18 @@ import {
   addPendingPaymentAction,
 } from "@/app/(dashboard)/pending-payments/actions";
 
+interface VoucherSelectOption {
+  id: string;
+  code: string;
+  discount: string;
+}
+
 interface PendingPaymentTableProps {
   initialData: PendingPaymentRow[];
   students?: StudentOption[];
   courses?: CourseOption[];
   packages?: PackageOption[];
+  vouchers?: VoucherSelectOption[];
   hideBranch?: boolean;
   canCreate?: boolean;
   canEdit?: boolean;
@@ -87,6 +94,7 @@ export function PendingPaymentTable({
   students = [],
   courses = [],
   packages = [],
+  vouchers = [],
   hideBranch,
   canCreate = true,
   canEdit = true,
@@ -727,6 +735,7 @@ export function PendingPaymentTable({
         students={students}
         courses={courses}
         packages={packages}
+        vouchers={vouchers}
         onSubmit={handleUpdate}
         onAdd={handleAdd}
         onApprove={handleApprove}

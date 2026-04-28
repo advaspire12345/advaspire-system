@@ -14,7 +14,7 @@ export default async function SettingsPage() {
   }
 
   const permData = await getCurrentUserPermissions();
-  if (permData?.role !== 'super_admin' && permData?.role !== 'admin') redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (permData?.role !== 'super_admin' && permData?.role !== 'group_admin') redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
   const settings = await getSettings();
 

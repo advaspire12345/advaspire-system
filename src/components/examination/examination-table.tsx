@@ -55,6 +55,8 @@ interface ExaminationTableProps {
   canDelete?: boolean;
   hideBranch?: boolean;
   totalCount: number;
+  companyAdminNames?: Record<string, string>;
+  companyNames?: Record<string, string>;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -111,6 +113,8 @@ export function ExaminationTable({
   canDelete,
   hideBranch,
   totalCount,
+  companyAdminNames = {},
+  companyNames = {},
 }: ExaminationTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -642,6 +646,8 @@ export function ExaminationTable({
           examLevel={certRecord.examLevel}
           mark={certRecord.mark}
           examinerName={certRecord.examinerName}
+          companyAdminName={companyAdminNames[certRecord.branchId] ?? null}
+          companyName={companyNames[certRecord.branchId] ?? null}
           examDate={certRecord.examDate}
           certificateNumber={certRecord.certificateNumber}
         />

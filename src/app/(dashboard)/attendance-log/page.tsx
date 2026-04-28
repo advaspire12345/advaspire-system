@@ -45,7 +45,7 @@ export default async function AttendanceLogPage({
           initialData={attendanceLogResult.rows}
           totalCount={attendanceLogResult.totalCount}
           instructors={instructors}
-          hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           canEdit={perms?.can_edit}
           canDelete={perms?.can_delete}
           initialStartDate={startDate}

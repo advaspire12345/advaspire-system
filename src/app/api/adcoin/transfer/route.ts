@@ -123,25 +123,45 @@ export async function POST(request: NextRequest) {
         break;
 
       case "earned":
-        // For "earned", we award coins to the receiver
-        transaction = await unifiedAward(
+        // For "earned", treat as a transfer (sender deducts, receiver adds) with balance check
+        transaction = await unifiedTransfer(
+          body.senderId,
+          senderType,
           body.receiverId,
           receiverType,
           body.amount,
           description,
           user.id
         );
+        // Override the transaction type to 'earned' after creation
+        if (transaction) {
+          await supabaseAdmin
+            .from("adcoin_transactions")
+            .update({ type: "earned" })
+            .eq("id", transaction.id);
+          transaction.type = "earned";
+        }
         break;
 
       case "adjusted":
-        // For "adjusted", we adjust the receiver's balance
-        transaction = await unifiedAdjust(
+        // For "adjusted", treat as a transfer (sender deducts, receiver adds) with balance check
+        transaction = await unifiedTransfer(
+          body.senderId,
+          senderType,
           body.receiverId,
           receiverType,
           body.amount,
           description,
           user.id
         );
+        // Override the transaction type to 'adjusted' after creation
+        if (transaction) {
+          await supabaseAdmin
+            .from("adcoin_transactions")
+            .update({ type: "adjusted" })
+            .eq("id", transaction.id);
+          transaction.type = "adjusted";
+        }
         break;
 
       default:

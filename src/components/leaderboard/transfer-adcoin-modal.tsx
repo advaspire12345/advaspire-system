@@ -19,6 +19,10 @@ interface TransferAdcoinModalProps {
   recipientId?: string | null;
   /** Pre-select sender (current logged-in user). User can still change it. */
   defaultSenderId?: string;
+  /** Name of the logged-in user for display when not in participants list */
+  defaultSenderName?: string;
+  /** Pre-select transaction type (e.g. "adjusted" for adjustment modal) */
+  defaultTransactionType?: "transfer" | "earned" | "adjusted";
   onSubmit: (data: TransferFormData) => Promise<void>;
 }
 
@@ -45,6 +49,8 @@ export function TransferAdcoinModal({
   participants,
   recipientId: initialRecipientId,
   defaultSenderId,
+  defaultSenderName,
+  defaultTransactionType,
   onSubmit,
 }: TransferAdcoinModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -57,8 +63,9 @@ export function TransferAdcoinModal({
   const [error, setError] = useState<string | null>(null);
 
   // Get participant options for dropdowns (with ID and balance)
+  // Ensure logged-in user is always included
   const participantOptions = useMemo(() => {
-    return participants.map((p) => ({
+    const options = participants.map((p) => ({
       value: p.id,
       label: p.name,
       meta: {
@@ -68,25 +75,41 @@ export function TransferAdcoinModal({
         type: p.type,
       },
     }));
-  }, [participants]);
+
+    // Add logged-in user if not already in the list
+    if (defaultSenderId && !participants.some((p) => p.id === defaultSenderId)) {
+      options.unshift({
+        value: defaultSenderId,
+        label: defaultSenderName ?? "You",
+        meta: {
+          name: defaultSenderName ?? "You",
+          id: defaultSenderId.slice(0, 8),
+          balance: 0,
+          type: "user" as const,
+        },
+      });
+    }
+
+    return options;
+  }, [participants, defaultSenderId, defaultSenderName]);
 
   // Get selected sender details (for balance validation)
   const selectedSender = useMemo(() => {
     return participants.find((p) => p.id === senderId);
   }, [participants, senderId]);
 
-  // Reset form when modal opens
+  // Reset form when modal opens — always pre-select logged-in user as sender
   useEffect(() => {
     if (open) {
       setSenderId(defaultSenderId ?? "");
       setRecipientId(initialRecipientId ?? "");
-      setTransactionType("transfer");
+      setTransactionType(defaultTransactionType ?? "transfer");
       setAmount("");
       setMessage("");
       setPassword("");
       setError(null);
     }
-  }, [open, initialRecipientId, defaultSenderId]);
+  }, [open, initialRecipientId, defaultSenderId, defaultTransactionType]);
 
   const handleSubmit = async () => {
     // Validation
@@ -163,7 +186,7 @@ export function TransferAdcoinModal({
         <div className="max-h-[90vh] overflow-y-auto p-10">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold">
-              Transfer Adcoin
+              {defaultTransactionType === "adjusted" ? "Adjust Adcoin" : "Transfer Adcoin"}
             </DialogTitle>
           </DialogHeader>
 
@@ -218,10 +241,10 @@ export function TransferAdcoinModal({
               onChange={(e) => setMessage(e.target.value)}
             />
 
-            {/* Sender's Password Confirmation */}
+            {/* Password Confirmation */}
             <FloatingInput
               id="password"
-              label="Sender's Password"
+              label={defaultTransactionType === "adjusted" ? "Your Password" : "Sender's Password"}
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

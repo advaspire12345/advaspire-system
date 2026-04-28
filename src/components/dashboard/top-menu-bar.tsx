@@ -115,6 +115,7 @@ export function TopMenuBar() {
     setSearchValue("");
   };
 
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/");
@@ -307,7 +308,7 @@ export function TopMenuBar() {
               </DropdownMenuLabel>
 
               <DropdownMenuItem
-                onClick={() => router.push("/dashboard/profile")}
+                onClick={() => router.push("/profile")}
                 className="font-bold hover:translate-x-1 !hover:bg-white backdrop-blur-sm border-white/20 hover:text-[#23D2E2] data-[highlighted]:translate-x-1 data-[highlighted]:text-[#23D2E2]"
               >
                 <span>Profile</span>

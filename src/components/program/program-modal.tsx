@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   BookOpen,
@@ -46,6 +47,12 @@ interface CategoryOption {
   name: string;
 }
 
+interface VoucherOption {
+  id: string;
+  code: string;
+  discount: string; // e.g. "10%" or "RM50"
+}
+
 interface PricingItem {
   id: string;
   package_type: PricingPackageType;
@@ -55,8 +62,7 @@ interface PricingItem {
   is_default: boolean;
   expiry_months: number | null;
   completion_months: number | null;
-  voucher_amount: number | null;
-  voucher_deadline_months: number | null;
+  voucher_id: string | null;
 }
 
 interface SlotItem {
@@ -77,6 +83,7 @@ interface ProgramModalProps {
   branches: BranchOption[];
   instructors: InstructorOption[];
   categories: CategoryOption[];
+  vouchers?: VoucherOption[];
   onAdd: (payload: ProgramFormPayload) => Promise<void>;
   onEdit: (payload: ProgramFormPayload) => Promise<void>;
   onDelete: () => Promise<void>;
@@ -90,7 +97,6 @@ const TABS = [
   { id: "info" as const, label: "Info" },
   { id: "curriculum" as const, label: "Curriculum" },
   { id: "pricing" as const, label: "Pricing" },
-  { id: "slot" as const, label: "Slot" },
   { id: "media" as const, label: "Media" },
 ] as const;
 
@@ -112,12 +118,14 @@ function generateTempId() {
 
 interface PricingFieldListProps {
   items: PricingItem[];
+  vouchers: VoucherOption[];
   onAdd: () => void;
   onUpdate: (id: string, updates: Partial<PricingItem>) => void;
   onRemove: (id: string) => void;
 }
 
-function PricingFieldList({ items, onAdd, onUpdate, onRemove }: PricingFieldListProps) {
+function PricingFieldList({ items, vouchers, onAdd, onUpdate, onRemove }: PricingFieldListProps) {
+  const router = useRouter();
   return (
     <>
       <h6 className="text-base font-bold">Pricing Plans</h6>
@@ -133,7 +141,7 @@ function PricingFieldList({ items, onAdd, onUpdate, onRemove }: PricingFieldList
                   value={plan.package_type}
                   onChange={(val) => onUpdate(plan.id, {
                     package_type: val as PricingPackageType,
-                    ...(val === "monthly" ? { expiry_months: null, completion_months: null, voucher_amount: null, voucher_deadline_months: null } : {}),
+                    ...(val === "monthly" ? { expiry_months: null, completion_months: null, voucher_id: null } : {}),
                   })}
                   options={[
                     { value: "monthly", label: "Monthly" },
@@ -160,7 +168,7 @@ function PricingFieldList({ items, onAdd, onUpdate, onRemove }: PricingFieldList
                 />
               </div>
 
-              {/* Row 2: Expiry, Completion, Voucher Value — session packages only */}
+              {/* Row 2: Expiry, Completion, Voucher — session packages only */}
               {plan.package_type === "session" && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <FloatingInput
@@ -175,11 +183,21 @@ function PricingFieldList({ items, onAdd, onUpdate, onRemove }: PricingFieldList
                     value={plan.completion_months?.toString() ?? ""}
                     onChange={(e) => onUpdate(plan.id, { completion_months: e.target.value ? parseInt(e.target.value) : null })}
                   />
-                  <FloatingInput
-                    label="Voucher Value (RM)"
-                    type="number"
-                    value={plan.voucher_amount?.toString() ?? ""}
-                    onChange={(e) => onUpdate(plan.id, { voucher_amount: e.target.value ? parseFloat(e.target.value) : null })}
+                  <FloatingSelect
+                    label="Voucher"
+                    value={plan.voucher_id ?? ""}
+                    onChange={(val) => {
+                      if (val === "__create__") {
+                        router.push("/voucher");
+                        return;
+                      }
+                      onUpdate(plan.id, { voucher_id: val || null });
+                    }}
+                    options={[
+                      { value: "", label: "No Voucher" },
+                      ...vouchers.map((v) => ({ value: v.id, label: `${v.code} (${v.discount})` })),
+                      { value: "__create__", label: "+ Create Voucher" },
+                    ]}
                   />
                 </div>
               )}
@@ -331,6 +349,7 @@ export function ProgramModal({
   branches,
   instructors,
   categories,
+  vouchers,
   onAdd,
   onEdit,
   onDelete,
@@ -383,8 +402,7 @@ export function ProgramModal({
     is_default: true,
     expiry_months: null,
     completion_months: null,
-    voucher_amount: null,
-    voucher_deadline_months: null,
+    voucher_id: null,
   }]);
 
   // Slot tab state
@@ -543,8 +561,7 @@ export function ProgramModal({
           is_default: p.is_default,
           expiry_months: p.expiry_months ?? null,
           completion_months: p.completion_months ?? null,
-          voucher_amount: p.voucher_amount ?? null,
-          voucher_deadline_months: p.voucher_deadline_months ?? null,
+          voucher_id: p.voucher_id ?? null,
         }))
       );
     } else {
@@ -557,8 +574,7 @@ export function ProgramModal({
         is_default: true,
         expiry_months: null,
         completion_months: null,
-        voucher_amount: null,
-        voucher_deadline_months: null,
+        voucher_id: null,
       }]);
     }
 
@@ -624,8 +640,7 @@ export function ProgramModal({
       is_default: true,
       expiry_months: null,
       completion_months: null,
-      voucher_amount: null,
-      voucher_deadline_months: null,
+      voucher_id: null,
     }]);
     setSlots([]);
     setYoutubeUrl("");
@@ -643,8 +658,7 @@ export function ProgramModal({
       is_default: pricing.length === 0,
       expiry_months: null,
       completion_months: null,
-      voucher_amount: null,
-      voucher_deadline_months: null,
+      voucher_id: null,
     };
     setPricing([...pricing, newPricing]);
   };
@@ -674,8 +688,7 @@ export function ProgramModal({
         is_default: true,
         expiry_months: null,
         completion_months: null,
-        voucher_amount: null,
-        voucher_deadline_months: null,
+        voucher_id: null,
       }]);
     }
   };
@@ -774,8 +787,7 @@ export function ProgramModal({
         is_default: p.is_default,
         expiry_months: p.expiry_months,
         completion_months: p.completion_months,
-        voucher_amount: p.voucher_amount,
-        voucher_deadline_months: p.voucher_deadline_months,
+        voucher_id: p.voucher_id,
       })),
       slots: slots.map((s) => ({
         branch_id: s.branch_id,
@@ -1338,45 +1350,11 @@ export function ProgramModal({
                 {activeTab === "pricing" && (
                   <PricingFieldList
                     items={pricing}
+                    vouchers={vouchers ?? []}
                     onAdd={handleAddPricing}
                     onUpdate={handleUpdatePricing}
                     onRemove={handleRemovePricing}
                   />
-                )}
-
-                {/* SLOT TAB */}
-                {activeTab === "slot" && (
-                  <>
-                    <h6 className="text-base font-bold">Time Slots</h6>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Configure time slots for each branch selected in Basic info.
-                    </p>
-
-                    {branchIds.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <p>Please select branches in the Basic tab first.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-6">
-                        {branchIds.map((branchId) => {
-                          const branch = branches.find((b) => b.id === branchId);
-                          if (!branch) return null;
-                          return (
-                            <SlotFieldList
-                              key={branchId}
-                              branchId={branchId}
-                              branchName={branch.name}
-                              items={slots}
-                              instructors={instructors.filter((i) => i.branch_id === branchId)}
-                              onAdd={handleAddSlot}
-                              onUpdate={handleUpdateSlot}
-                              onRemove={handleRemoveSlot}
-                            />
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>
                 )}
 
                 {/* MEDIA TAB */}

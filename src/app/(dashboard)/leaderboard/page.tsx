@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { getLeaderboardDataPaginated } from "@/data/leaderboard";
-import { getTransferParticipants } from "@/data/users";
+import { getTransferParticipants, getUserByAuthId } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
 export default async function LeaderboardPage() {
@@ -17,10 +17,14 @@ export default async function LeaderboardPage() {
   const perms = permData?.permissions.leaderboard;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
 
-  const [leaderboardResult, participants] = await Promise.all([
+  const [leaderboardResult, participants, dbUser] = await Promise.all([
     getLeaderboardDataPaginated(user.email, { offset: 0, limit: 10 }),
-    getTransferParticipants(),
+    getTransferParticipants(user.email),
+    getUserByAuthId(user.id),
   ]);
+
+  // Show branch filter for company_admin, assistant_admin, instructor
+  const showBranchFilter = permData!.role === "company_admin" || permData!.role === "assistant_admin" || permData!.role === "instructor";
 
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">
@@ -32,7 +36,17 @@ export default async function LeaderboardPage() {
           mascotImage="/banners/mascot.png"
         />
 
-        <LeaderboardTable initialData={leaderboardResult.rows} totalCount={leaderboardResult.totalCount} participants={participants} hideBranch={permData!.role === "branch_admin" || permData!.role === "instructor"} canTransfer={permData?.permissions.transactions?.can_create} currentUserId={permData!.userId} />
+        <LeaderboardTable
+          initialData={leaderboardResult.rows}
+          totalCount={leaderboardResult.totalCount}
+          participants={participants}
+          hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
+          canTransfer={permData?.permissions.transactions?.can_create}
+          currentUserId={permData!.userId}
+          currentUserName={dbUser?.name}
+          currentUserBranchId={dbUser?.branch_id ?? null}
+          showBranchFilter={showBranchFilter}
+        />
       </div>
     </main>
   );

@@ -14,10 +14,11 @@ import { TeamModal } from "@/components/team/team-modal";
 import { CvPreviewModal } from "@/components/team/cv-preview-modal";
 import { PermissionModal } from "@/components/team/permission-modal";
 import type { PermissionModalData } from "@/components/team/permission-modal";
+import { RolePermissionModal } from "@/components/team/role-permission-modal";
 import type { TeamTableRow } from "@/data/team";
 import type { TeamMemberFormData } from "@/components/team/team-modal";
 import type { TeamMemberFormPayload } from "@/app/(dashboard)/team/actions";
-import type { PermissionResource, ResourcePermission, UserRole } from "@/db/schema";
+import type { PermissionResource, ResourcePermission, PermissionsMap, UserRole, CustomRole } from "@/db/schema";
 
 interface BranchOption {
   id: string;
@@ -40,6 +41,14 @@ interface TeamTableProps {
   onLoadPermissions?: (
     userId: string
   ) => Promise<{ permissions: Record<PermissionResource, ResourcePermission>; role: string } | null>;
+  // Role permission modal props
+  canEditRolePermissions?: boolean;
+  customRoles?: CustomRole[];
+  onLoadRolePermissions?: (role: string) => Promise<PermissionsMap | null>;
+  onSaveRolePermissions?: (role: string, permissions: { resource: PermissionResource; can_view: boolean; can_create: boolean; can_edit: boolean; can_delete: boolean }[]) => Promise<{ success: boolean; error?: string }>;
+  onCreateCustomRole?: (name: string) => Promise<{ success: boolean; error?: string; role?: CustomRole }>;
+  onUpdateCustomRoleName?: (roleId: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  onDeleteCustomRole?: (roleId: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -65,8 +74,9 @@ const columns: {
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
-  admin: "Admin",
-  branch_admin: "Branch Admin",
+  group_admin: "Group Admin",
+  company_admin: "Company Admin",
+  assistant_admin: "Assistant Admin",
   instructor: "Instructor",
 };
 
@@ -91,6 +101,13 @@ export function TeamTable({
   onDelete,
   onSavePermissions,
   onLoadPermissions,
+  canEditRolePermissions,
+  customRoles = [],
+  onLoadRolePermissions,
+  onSaveRolePermissions,
+  onCreateCustomRole,
+  onUpdateCustomRoleName,
+  onDeleteCustomRole,
 }: TeamTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -106,9 +123,12 @@ export function TeamTable({
   const [cvPreviewUrl, setCvPreviewUrl] = useState("");
   const [cvMemberName, setCvMemberName] = useState("");
 
-  // Permission modal state
+  // Permission modal state (per-user)
   const [permissionModalOpen, setPermissionModalOpen] = useState(false);
   const [permissionModalData, setPermissionModalData] = useState<PermissionModalData | null>(null);
+
+  // Role permission modal state
+  const [rolePermModalOpen, setRolePermModalOpen] = useState(false);
 
   // Convert form data to payload
   // Note: avatarImage and coverImage are File objects that would need to be uploaded
@@ -257,15 +277,27 @@ export function TeamTable({
               onChange={handleSearchChange}
               placeholder="Search by name, email, branch or role..."
             />
-            {onAdd && (
-              <Button
-                onClick={openAddModal}
-                className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Team Member
-              </Button>
-            )}
+            <div className="flex items-center gap-3">
+              {canEditRolePermissions && (
+                <Button
+                  onClick={() => setRolePermModalOpen(true)}
+                  variant="outline"
+                  className="font-bold h-[50px] px-6"
+                >
+                  <Shield className="h-4 w-4 mr-2" />
+                  Edit Permissions
+                </Button>
+              )}
+              {onAdd && (
+                <Button
+                  onClick={openAddModal}
+                  className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Team Member
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Table */}
@@ -448,17 +480,6 @@ export function TeamTable({
                               <Pencil className="h-4 w-4" />
                             </button>
                           )}
-                          {onSavePermissions && (row.role === "branch_admin" || row.role === "instructor") && (
-                            <button
-                              type="button"
-                              onClick={() => openPermissionModal(row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                              aria-label={`Permissions for ${row.name}`}
-                              title="Permissions"
-                            >
-                              <Shield className="h-4 w-4" />
-                            </button>
-                          )}
                           {onDelete && (
                             <button
                               type="button"
@@ -512,13 +533,38 @@ export function TeamTable({
         memberName={cvMemberName}
       />
 
-      {/* Permission Modal */}
+      {/* Permission Modal (per-user) */}
       <PermissionModal
         open={permissionModalOpen}
         onOpenChange={setPermissionModalOpen}
         data={permissionModalData}
         onSave={handleSavePermissions}
       />
+
+      {/* Role Permission Modal */}
+      {canEditRolePermissions && onLoadRolePermissions && onSaveRolePermissions && onCreateCustomRole && onUpdateCustomRoleName && onDeleteCustomRole && (
+        <RolePermissionModal
+          open={rolePermModalOpen}
+          onOpenChange={setRolePermModalOpen}
+          currentUserRole={currentUserRole ?? "instructor"}
+          customRoles={customRoles}
+          onLoadRolePermissions={async (role) => {
+            const result = await onLoadRolePermissions(role);
+            if (!result) {
+              // Return empty permissions as fallback
+              const empty = {} as Record<PermissionResource, ResourcePermission>;
+              const resources: PermissionResource[] = ["dashboard", "companies", "branches", "trials", "students", "examinations", "programs", "team", "attendance", "attendance_log", "payment_record", "pending_payments", "leaderboard", "transactions"];
+              for (const r of resources) empty[r] = { can_view: false, can_create: false, can_edit: false, can_delete: false };
+              return empty;
+            }
+            return result;
+          }}
+          onSaveRolePermissions={onSaveRolePermissions}
+          onCreateCustomRole={onCreateCustomRole}
+          onUpdateCustomRoleName={onUpdateCustomRoleName}
+          onDeleteCustomRole={onDeleteCustomRole}
+        />
+      )}
     </>
   );
 }

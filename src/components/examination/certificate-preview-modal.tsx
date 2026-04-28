@@ -18,6 +18,8 @@ interface CertificatePreviewModalProps {
   examLevel: number;
   mark: number | null;
   examinerName: string | null;
+  companyAdminName: string | null;
+  companyName: string | null;
   examDate: string;
   certificateNumber: string | null;
 }
@@ -30,6 +32,8 @@ export function CertificatePreviewModal({
   examLevel,
   mark,
   examinerName,
+  companyAdminName,
+  companyName,
   examDate,
   certificateNumber,
 }: CertificatePreviewModalProps) {
@@ -45,10 +49,10 @@ export function CertificatePreviewModal({
       const jsPDF = (await import("jspdf")).default;
 
       const canvas = await html2canvas(certRef.current, {
-        scale: 2,
+        scale: 3,
         useCORS: true,
         logging: false,
-        backgroundColor: "#ffffff",
+        backgroundColor: null,
       });
 
       const imgData = canvas.toDataURL("image/png");
@@ -74,7 +78,7 @@ export function CertificatePreviewModal({
       const d = new Date(examDate);
       return d.toLocaleDateString("en-GB", {
         day: "numeric",
-        month: "long",
+        month: "short",
         year: "numeric",
       });
     } catch {
@@ -84,12 +88,10 @@ export function CertificatePreviewModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[800px] p-0 max-h-[95vh]" floatingCloseButton>
+      <DialogContent className="sm:max-w-[900px] p-0 max-h-[95vh]" floatingCloseButton>
         <div className="p-6 pb-0 flex items-center justify-between">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">
-              Certificate Preview
-            </DialogTitle>
+            <DialogTitle className="text-xl font-bold">Certificate Preview</DialogTitle>
           </DialogHeader>
           <Button
             onClick={handleDownload}
@@ -102,194 +104,172 @@ export function CertificatePreviewModal({
         </div>
 
         <div className="overflow-y-auto max-h-[calc(95vh-80px)] p-6 pt-4">
-          {/* Certificate Template */}
+          {/* Certificate: background template image + overlaid text */}
           <div
             ref={certRef}
             style={{
-              width: "740px",
-              height: "520px",
+              width: "842px",
+              height: "595px",
               margin: "0 auto",
-              background: "linear-gradient(135deg, #fefdfb 0%, #faf6ee 100%)",
-              border: "3px solid #c9a227",
-              borderRadius: "8px",
               position: "relative",
-              padding: "36px 44px",
-              fontFamily: "Georgia, 'Times New Roman', serif",
               overflow: "hidden",
             }}
           >
-            {/* Inner border */}
-            <div
+            {/* Template background image */}
+            <img
+              src="/cert-template.png"
+              alt="Certificate Template"
               style={{
                 position: "absolute",
-                top: "12px",
-                left: "12px",
-                right: "12px",
-                bottom: "12px",
-                border: "2px solid #d4af37",
-                borderRadius: "4px",
-                pointerEvents: "none",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
               }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                top: "20px",
-                left: "20px",
-                right: "20px",
-                bottom: "20px",
-                border: "1px solid #e5c76b",
-                borderRadius: "2px",
-                pointerEvents: "none",
-              }}
+              crossOrigin="anonymous"
             />
 
-            {/* Corner ornaments */}
-            {[
-              { top: "26px", left: "26px" },
-              { top: "26px", right: "26px" },
-              { bottom: "26px", left: "26px" },
-              { bottom: "26px", right: "26px" },
-            ].map((pos, i) => (
+            {/* Student name — positioned on the line below "This is to certify that" */}
+            <div
+              style={{
+                position: "absolute",
+                top: "313px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                textAlign: "center",
+                zIndex: 2,
+              }}
+            >
               <div
-                key={i}
                 style={{
-                  position: "absolute",
-                  ...pos,
-                  width: "20px",
-                  height: "20px",
-                  borderColor: "#c9a227",
-                  borderStyle: "solid",
-                  borderWidth: 0,
-                  ...(i === 0
-                    ? { borderTopWidth: "2px", borderLeftWidth: "2px" }
-                    : i === 1
-                    ? { borderTopWidth: "2px", borderRightWidth: "2px" }
-                    : i === 2
-                    ? { borderBottomWidth: "2px", borderLeftWidth: "2px" }
-                    : { borderBottomWidth: "2px", borderRightWidth: "2px" }),
-                  zIndex: 2,
-                }}
-              />
-            ))}
-
-            {/* Header */}
-            <div style={{ textAlign: "center", marginBottom: "8px", position: "relative", zIndex: 1 }}>
-              <div style={{ fontSize: "12px", letterSpacing: "3px", color: "#c9a227", textTransform: "uppercase", marginBottom: "4px" }}>
-                ✦ AdCoin Academy ✦
-              </div>
-              <h1
-                style={{
-                  fontSize: "32px",
-                  fontWeight: 700,
-                  color: "#1a1a2e",
-                  letterSpacing: "3px",
+                  fontSize: "28px",
+                  fontWeight: 600,
+                  color: "#1a1a1a",
+                  fontFamily: "'Arial Black', 'Impact', sans-serif",
+                  whiteSpace: "nowrap",
                   textTransform: "uppercase",
-                  margin: "0 0 4px 0",
-                  lineHeight: 1.2,
-                }}
-              >
-                Certificate
-              </h1>
-              <div style={{ fontSize: "14px", letterSpacing: "6px", color: "#888", textTransform: "uppercase" }}>
-                of Achievement
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div style={{ textAlign: "center", margin: "10px 0", position: "relative", zIndex: 1 }}>
-              <span style={{ color: "#c9a227", fontSize: "14px", letterSpacing: "8px" }}>✦ ✦ ✦</span>
-            </div>
-
-            {/* Content */}
-            <div style={{ textAlign: "center", position: "relative", zIndex: 1 }}>
-              <p style={{ fontSize: "12px", color: "#777", margin: "0 0 6px 0" }}>
-                This is to certify that
-              </p>
-
-              <div
-                style={{
-                  fontSize: "36px",
-                  fontWeight: 700,
-                  color: "#1a1a2e",
-                  margin: "6px 0",
-                  padding: "4px 30px 8px",
-                  borderBottom: "2px solid #c9a227",
-                  display: "inline-block",
-                  lineHeight: 1.2,
+                  letterSpacing: "3px",
                 }}
               >
                 {studentName}
               </div>
+            </div>
 
-              <p style={{ fontSize: "12px", color: "#777", margin: "10px 0 4px 0" }}>
-                has successfully completed the examination for
-              </p>
+            {/* Course name — positioned right under "successfully completed the course" */}
+            <div
+              style={{
+                position: "absolute",
+                top: "378px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                textAlign: "center",
+                zIndex: 2,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 900,
+                  color: "#1a1a1a",
+                  fontFamily: "'Arial', 'Helvetica', sans-serif",
+                  textTransform: "uppercase",
+                  letterSpacing: "1px",
+                }}
+              >
+                {courseName} [LEVEL {examLevel}]
+              </div>
+            </div>
 
+            {/* Date — positioned over "DATE" text at bottom left */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: "120px",
+                left: "165px",
+                textAlign: "center",
+                zIndex: 2,
+              }}
+            >
               <div
                 style={{
                   fontSize: "22px",
                   fontWeight: 700,
-                  color: "#615DFA",
-                  margin: "6px 0 2px",
+                  color: "#1a1a1a",
+                  fontFamily: "'Arial', 'Helvetica', sans-serif",
                 }}
               >
-                {courseName}
+                {formattedDate}
               </div>
-
-              <div style={{ fontSize: "16px", color: "#23D2E2", fontWeight: 600, margin: "2px 0" }}>
-                Level {examLevel}
-              </div>
-
-              {mark !== null && (
-                <div style={{ fontSize: "14px", color: "#28a745", fontWeight: 600, marginTop: "4px" }}>
-                  Score: {mark}%
-                </div>
-              )}
             </div>
 
-            {/* Footer Details */}
+            {/* Company admin name — bottom right, always centered at fixed point */}
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-end",
-                marginTop: "20px",
-                paddingTop: "14px",
-                borderTop: "1px solid #e5c76b",
-                position: "relative",
-                zIndex: 1,
+                position: "absolute",
+                bottom: "90px",
+                left: "620px",
+                transform: "translateX(-50%)",
+                textAlign: "center",
+                zIndex: 2,
+                fontSize: "14px",
+                fontWeight: 700,
+                color: "#1a1a1a",
+                fontFamily: "'Arial', 'Helvetica', sans-serif",
+                textTransform: "uppercase",
+                letterSpacing: "1px",
               }}
             >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "10px", color: "#999", textTransform: "uppercase", letterSpacing: "1px" }}>
-                  Date
-                </div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1a2e", marginTop: "2px" }}>
-                  {formattedDate}
-                </div>
-              </div>
-
-              {certificateNumber && (
-                <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: "10px", color: "#999", textTransform: "uppercase", letterSpacing: "1px" }}>
-                    Certificate No.
-                  </div>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1a2e", marginTop: "2px" }}>
-                    {certificateNumber}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "10px", color: "#999", textTransform: "uppercase", letterSpacing: "1px" }}>
-                  Examiner
-                </div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#1a1a2e", marginTop: "2px" }}>
-                  {examinerName || "-"}
-                </div>
-              </div>
+              {companyAdminName || "-"}
             </div>
+
+            {/* Company name — below admin name */}
+            {companyName && (
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "76px",
+                  left: "620px",
+                  transform: "translateX(-50%)",
+                  textAlign: "center",
+                  zIndex: 2,
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  color: "#555",
+                  fontFamily: "'Arial', 'Helvetica', sans-serif",
+                  textTransform: "uppercase",
+                  letterSpacing: "1px",
+                }}
+              >
+                {companyName}
+              </div>
+            )}
+
+            {/* Certificate number — positioned over "certificate no:" at bottom center */}
+            {certificateNumber && (
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "28px",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  textAlign: "center",
+                  zIndex: 2,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: 500,
+                    color: "#999",
+                    letterSpacing: "2px",
+                    fontFamily: "'Courier New', monospace",
+                  }}
+                >
+                  {certificateNumber}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>

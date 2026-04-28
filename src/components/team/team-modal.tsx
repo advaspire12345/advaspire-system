@@ -55,8 +55,9 @@ interface TeamModalProps {
 
 const ALL_ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "super_admin", label: "Super Admin" },
-  { value: "admin", label: "Admin" },
-  { value: "branch_admin", label: "Branch Admin" },
+  { value: "group_admin", label: "Group Admin" },
+  { value: "company_admin", label: "Company Admin" },
+  { value: "assistant_admin", label: "Assistant Admin" },
   { value: "instructor", label: "Instructor" },
 ];
 
@@ -94,15 +95,15 @@ export function TeamModal({
 }: TeamModalProps) {
   // Filter role options based on current user's role
   const roleOptions = useMemo(() => {
-    if (currentUserRole === "admin") {
-      // Admin can only create branch_admin and instructor
+    if (currentUserRole === "group_admin") {
+      // Group admin can only create company_admin, assistant_admin, and instructor
       return ALL_ROLE_OPTIONS.filter(
-        (r) => r.value === "branch_admin" || r.value === "instructor"
+        (r) => r.value === "company_admin" || r.value === "assistant_admin" || r.value === "instructor"
       );
     }
-    if (currentUserRole === "branch_admin") {
-      // Branch admin can only create instructor
-      return ALL_ROLE_OPTIONS.filter((r) => r.value === "instructor");
+    if (currentUserRole === "company_admin") {
+      // Company admin can only create assistant_admin and instructor
+      return ALL_ROLE_OPTIONS.filter((r) => r.value === "assistant_admin" || r.value === "instructor");
     }
     // Super admin can create all roles
     return ALL_ROLE_OPTIONS;
@@ -110,8 +111,8 @@ export function TeamModal({
 
   // Filter branch options based on current user's role
   const branchOptions = useMemo(() => {
-    if (currentUserRole === "branch_admin" && currentUserBranchId) {
-      // Branch admin can only assign to their own branch
+    if (currentUserRole === "company_admin" && currentUserBranchId) {
+      // Company admin can only assign to their own branch
       return branches.filter((b) => b.id === currentUserBranchId);
     }
     return branches;
@@ -170,7 +171,7 @@ export function TeamModal({
           // Default role to first available option for the current user
           role: roleOptions[0]?.value ?? "instructor",
           // Auto-set branch for branch_admin (they can only assign their own branch)
-          branchId: currentUserRole === "branch_admin" && currentUserBranchId ? currentUserBranchId : null,
+          branchId: currentUserRole === "company_admin" && currentUserBranchId ? currentUserBranchId : null,
         });
       }
       setError(null);
