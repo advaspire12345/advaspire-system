@@ -423,16 +423,16 @@ export function RegistrationForm({
   if (isDesktop) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-5 gap-6">
-          {/* Parent — left (2 cols) */}
-          <div className="col-span-2">
-            <div className="sticky top-4">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Parent — left (2 cols on desktop, full width on mobile/tablet) */}
+          <div className="lg:col-span-2">
+            <div className="lg:sticky lg:top-4">
               {parentSection}
             </div>
           </div>
 
-          {/* Students — right (3 cols) */}
-          <div className="col-span-3">
+          {/* Students — right (3 cols on desktop, full width on mobile/tablet) */}
+          <div className="lg:col-span-3">
             {studentSection}
           </div>
         </div>

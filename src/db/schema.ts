@@ -1795,7 +1795,8 @@ export type PermissionResource =
   | 'payment_record'
   | 'pending_payments'
   | 'leaderboard'
-  | 'transactions';
+  | 'transactions'
+  | 'import';
 
 export const ALL_RESOURCES: PermissionResource[] = [
   'dashboard',
@@ -1812,6 +1813,7 @@ export const ALL_RESOURCES: PermissionResource[] = [
   'pending_payments',
   'leaderboard',
   'transactions',
+  'import',
 ];
 
 export interface ResourcePermission {

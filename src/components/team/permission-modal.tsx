@@ -28,6 +28,7 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   pending_payments: "Pending Payments",
   leaderboard: "Leaderboard",
   transactions: "Transactions",
+  import: "Import",
 };
 
 const ROLE_LABELS: Record<string, string> = {

@@ -58,7 +58,7 @@ const VIEW_EDIT: ResourcePermission = {
 const ALL_RESOURCE_KEYS: PermissionResource[] = [
   "dashboard", "companies", "branches", "trials", "students", "examinations",
   "programs", "team", "attendance", "attendance_log", "payment_record",
-  "pending_payments", "leaderboard", "transactions",
+  "pending_payments", "leaderboard", "transactions", "import",
 ];
 
 // ============================================
@@ -80,6 +80,7 @@ const GROUP_ADMIN_DEFAULTS: PermissionsMap = {
   pending_payments: FULL_ACCESS,
   leaderboard: FULL_ACCESS,
   transactions: FULL_ACCESS,
+  import: FULL_ACCESS,
 };
 
 const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
@@ -97,6 +98,7 @@ const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
   pending_payments: VIEW_CREATE_EDIT,
   leaderboard: VIEW_ONLY,
   transactions: VIEW_CREATE,
+  import: NO_ACCESS,
 };
 
 const ASSISTANT_ADMIN_DEFAULTS: PermissionsMap = {
@@ -114,6 +116,7 @@ const ASSISTANT_ADMIN_DEFAULTS: PermissionsMap = {
   pending_payments: VIEW_CREATE_EDIT,
   leaderboard: VIEW_ONLY,
   transactions: VIEW_CREATE,
+  import: NO_ACCESS,
 };
 
 const INSTRUCTOR_DEFAULTS: PermissionsMap = {
@@ -131,6 +134,7 @@ const INSTRUCTOR_DEFAULTS: PermissionsMap = {
   pending_payments: NO_ACCESS,
   leaderboard: VIEW_ONLY,
   transactions: VIEW_CREATE,
+  import: NO_ACCESS,
 };
 
 /** Hardcoded fallback when DB has no role_permissions rows */
@@ -629,6 +633,7 @@ const NAV_ORDER: { resource: PermissionResource; href: string }[] = [
   { resource: "pending_payments", href: "/pending-payments" },
   { resource: "leaderboard", href: "/leaderboard" },
   { resource: "transactions", href: "/transactions" },
+  { resource: "import", href: "/import" },
 ];
 
 /**
@@ -660,6 +665,7 @@ export const RESOURCE_LABELS: Record<PermissionResource, string> = {
   pending_payments: "Pending Payments",
   leaderboard: "Leaderboard",
   transactions: "Transactions",
+  import: "Import",
 };
 
 // ============================================
