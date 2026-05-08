@@ -74,7 +74,7 @@ export async function getEnrollmentFull(enrollmentId: string): Promise<Enrollmen
       *,
       student:students(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       ),
       course:courses(*),
       package:packages(*)
@@ -133,7 +133,7 @@ export async function getEnrollmentsByBranchId(branchId: string): Promise<Enroll
       *,
       student:students!inner(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       ),
       course:courses(*),
       package:packages(*)
@@ -157,7 +157,7 @@ export async function getActiveEnrollments(branchId?: string): Promise<Enrollmen
       *,
       student:students!inner(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       ),
       course:courses(*),
       package:packages(*)
@@ -190,7 +190,7 @@ export async function getEnrollmentsByStatus(
       *,
       student:students!inner(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       ),
       course:courses(*),
       package:packages(*)

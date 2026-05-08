@@ -474,7 +474,7 @@ export const getRecentActivity = unstable_cache(
               photo,
               adcoin_balance,
               branch_id,
-              branches!inner(id, name, city)
+              branches!students_branch_id_branches_id_fk(id, name, city)
             )
           )
         `)
@@ -512,7 +512,7 @@ export const getAdcoinRanking = unstable_cache(
 
       let query = supabaseAdmin
         .from('students')
-        .select('id, name, adcoin_balance, photo, branch_id, branches!inner(id, name, city)')
+        .select('id, name, adcoin_balance, photo, branch_id, branches!students_branch_id_branches_id_fk(id, name, city)')
         .order('adcoin_balance', { ascending: false })
         .limit(limit);
 
@@ -1014,7 +1014,7 @@ export const getPaymentDueListData = unstable_cache(
           name,
           photo,
           branch_id,
-          branches!inner(id, name, city)
+          branches!students_branch_id_branches_id_fk(id, name, city)
         `)
         .is('deleted_at', null);
 

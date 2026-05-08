@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   try {
     const { data: trials } = await supabaseAdmin
       .from("trials")
-      .select("id, child_name, scheduled_date, scheduled_time, branch_id, branch:branches(parent_id, type)")
+      .select("id, child_name, scheduled_date, scheduled_time, branch_id, branch:branches!students_branch_id_branches_id_fk(parent_id, type)")
       .gte("scheduled_date", mondayStr)
       .lte("scheduled_date", sundayStr)
       .in("status", ["pending", "confirmed"])
@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
       .from("examinations")
       .select(`
         id, exam_name, exam_date, reattempt_count,
-        student:students(id, name, branch_id, branch:branches(parent_id, type))
+        student:students(id, name, branch_id, branch:branches!students_branch_id_branches_id_fk(parent_id, type))
       `)
       .gte("exam_date", mondayStr)
       .lte("exam_date", sundayStr)
@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
       .from("enrollments")
       .select(`
         id, student_id,
-        student:students(branch_id, branch:branches(parent_id, type))
+        student:students(branch_id, branch:branches!students_branch_id_branches_id_fk(parent_id, type))
       `)
       .eq("status", "active")
       .is("deleted_at", null);
