@@ -23,6 +23,8 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   students: "Student",
   examinations: "Examination",
   programs: "Program",
+  slots: "Slot",
+  vouchers: "Voucher",
   team: "Team",
   attendance: "Mark Attendance",
   attendance_log: "Attendance History",
@@ -30,6 +32,7 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   pending_payments: "Pending Payments",
   leaderboard: "Leaderboard",
   transactions: "Transactions",
+  marketplace: "Marketplace",
   import: "Import",
 };
 

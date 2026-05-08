@@ -5,6 +5,7 @@ export interface CourseOption {
   id: string;
   name: string;
   numberOfLevels: number | null;
+  programType?: string | null;
 }
 
 export interface PackageOption {
@@ -39,7 +40,7 @@ export interface CourseSlotOption {
 export async function getAllCourses(): Promise<CourseOption[]> {
   const { data, error } = await supabaseAdmin
     .from("courses")
-    .select("id, name, number_of_levels")
+    .select("id, name, number_of_levels, program_type")
     .is("deleted_at", null)
     .order("name");
 
@@ -52,13 +53,14 @@ export async function getAllCourses(): Promise<CourseOption[]> {
     id: c.id,
     name: c.name,
     numberOfLevels: c.number_of_levels,
+    programType: c.program_type ?? null,
   }));
 }
 
 export async function getCoursesByBranchId(branchId: string): Promise<CourseOption[]> {
   const { data, error } = await supabaseAdmin
     .from("courses")
-    .select("id, name, number_of_levels")
+    .select("id, name, number_of_levels, program_type")
     .eq("branch_id", branchId)
     .is("deleted_at", null)
     .order("name");
@@ -72,7 +74,96 @@ export async function getCoursesByBranchId(branchId: string): Promise<CourseOpti
     id: c.id,
     name: c.name,
     numberOfLevels: c.number_of_levels,
+    programType: c.program_type ?? null,
   }));
+}
+
+export async function getCoursesByBranchIds(branchIds: string[]): Promise<CourseOption[]> {
+  if (!branchIds || branchIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from("courses")
+    .select("id, name, number_of_levels, program_type, course_branches!inner(branch_id)")
+    .in("course_branches.branch_id", branchIds)
+    .is("deleted_at", null)
+    .order("name");
+
+  if (error) {
+    console.error("Error fetching courses by branch ids:", error);
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const out: CourseOption[] = [];
+  for (const c of data ?? []) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    out.push({
+      id: c.id,
+      name: c.name,
+      numberOfLevels: c.number_of_levels,
+      programType: (c as { program_type?: string | null }).program_type ?? null,
+    });
+  }
+  return out;
+}
+
+export async function getCoursesForUser(userEmail: string): Promise<CourseOption[]> {
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  const currentUser = await getUserByEmail(userEmail);
+  if (isSuperAdmin(userEmail) || currentUser?.role === "super_admin") {
+    return getAllCourses();
+  }
+
+  let branchIds = await getUserBranchIds(userEmail);
+  if (!branchIds || branchIds.length === 0) return [];
+
+  if (currentUser?.role === "group_admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  } else {
+    const { data: ownBranches } = await supabaseAdmin
+      .from("branches")
+      .select("id, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+
+    const companyIds = new Set<string>();
+    for (const b of ownBranches ?? []) {
+      if (b.parent_id) companyIds.add(b.parent_id);
+    }
+
+    if (companyIds.size > 0) {
+      const { data: siblings } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = Array.from(new Set([...(branchIds ?? []), ...(siblings ?? []).map((b) => b.id)]));
+    }
+  }
+
+  return getCoursesByBranchIds(branchIds);
 }
 
 export async function getCoursesAndPackages(): Promise<{

@@ -394,14 +394,15 @@ export async function checkAndExpireEnrollments(): Promise<number> {
     expiredCount++;
     console.log(`[Expiry Check] Expired enrollment ${enrollment.id} for student ${enrollment.student_id}`);
 
-    // If pooled, remove student from pool and redistribute
+    // If pooled, redistribute pool sessions and keep enrollment.pool_id as
+    // a breadcrumb so the student can be restored later (Scenario 7).
     if (enrollment.pool_id) {
       try {
-        const { removeStudentFromPool } = await import("./pools");
-        await removeStudentFromPool(enrollment.pool_id, enrollment.student_id);
-        console.log(`[Expiry Check] Removed student ${enrollment.student_id} from pool ${enrollment.pool_id}`);
+        const { redistributePoolOnInactive } = await import("./pools");
+        await redistributePoolOnInactive(enrollment.id, enrollment.student_id);
+        console.log(`[Expiry Check] Redistributed pool ${enrollment.pool_id} for student ${enrollment.student_id}`);
       } catch (poolError) {
-        console.error(`[Expiry Check] Error removing from pool:`, poolError);
+        console.error(`[Expiry Check] Error redistributing pool:`, poolError);
       }
     }
   }

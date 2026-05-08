@@ -572,14 +572,28 @@ export function ExaminationTable({
                         className={cn("px-3 py-2", !canEdit && !canDelete && "hidden")}
                         style={{ width: columns[13].width }}
                       >
+                        {(() => {
+                          const isFinalized = row.status === "pass" || row.status === "fail";
+                          const lockedSinceExam =
+                            isFinalized &&
+                            row.examDate &&
+                            (Date.now() - new Date(row.examDate).getTime()) > 7 * 24 * 60 * 60 * 1000;
+                          const lockTitle = lockedSinceExam ? "Locked — over 1 week since exam date" : undefined;
+                          return (
                         <div className="flex items-center justify-center gap-2">
                           {canEdit && (
                             <button
                               type="button"
-                              onClick={() => openEditModal(row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              onClick={() => !lockedSinceExam && openEditModal(row)}
+                              disabled={!!lockedSinceExam}
+                              className={cn(
+                                "rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition",
+                                lockedSinceExam
+                                  ? "cursor-not-allowed opacity-40"
+                                  : "hover:border-transparent hover:bg-[#615DFA] hover:text-white"
+                              )}
                               aria-label={`Edit examination for ${row.studentName}`}
-                              title="Edit"
+                              title={lockTitle ?? "Edit"}
                             >
                               <Pencil className="h-4 w-4" />
                             </button>
@@ -587,15 +601,23 @@ export function ExaminationTable({
                           {canDelete && (
                             <button
                               type="button"
-                              onClick={() => openDeleteModal(row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              onClick={() => !lockedSinceExam && openDeleteModal(row)}
+                              disabled={!!lockedSinceExam}
+                              className={cn(
+                                "rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition",
+                                lockedSinceExam
+                                  ? "cursor-not-allowed opacity-40"
+                                  : "hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              )}
                               aria-label={`Delete examination for ${row.studentName}`}
-                              title="Delete"
+                              title={lockTitle ?? "Delete"}
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
                           )}
                         </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))

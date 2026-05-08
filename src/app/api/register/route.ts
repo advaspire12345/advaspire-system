@@ -184,6 +184,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to create any students" }, { status: 500 });
     }
 
+    // F1: notify staff at the branch that a parent self-registered through the public form
+    try {
+      const { notifyStaff, resolveBranchCompanyId } = await import("@/data/notifications");
+      const companyId = await resolveBranchCompanyId(body.branchId);
+      await notifyStaff(
+        {
+          roles: ["company_admin", "assistant_admin"],
+          companyId,
+        },
+        {
+          type: "register_form_filled",
+          title: "Parent self-registered",
+          body: `${createdStudents.length} student(s) registered via the public form — review and assign packages`,
+          link: `/student`,
+          data: { studentIds: createdStudents, branchId: body.branchId },
+        },
+      );
+    } catch (notifyErr) {
+      console.warn("[Notify register_form_filled] failed:", notifyErr);
+    }
+
     // Revalidate all related pages so data shows immediately
     revalidatePath("/student");
     revalidatePath("/trial");

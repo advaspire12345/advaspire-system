@@ -57,30 +57,42 @@ const VIEW_EDIT: ResourcePermission = {
 
 const ALL_RESOURCE_KEYS: PermissionResource[] = [
   "dashboard", "companies", "branches", "trials", "students", "examinations",
-  "programs", "team", "attendance", "attendance_log", "payment_record",
-  "pending_payments", "leaderboard", "transactions", "import",
+  "programs", "slots", "vouchers", "team", "attendance", "attendance_log",
+  "payment_record", "pending_payments", "leaderboard", "transactions",
+  "marketplace", "import",
 ];
 
 // ============================================
 // HARDCODED FALLBACKS (used when DB has no rows)
 // ============================================
 
+// COMPANIES_NO_DELETE: VCED = 1110 — used by group_admin (cannot delete company rows but can manage them)
+const COMPANIES_NO_DELETE: ResourcePermission = {
+  can_view: true,
+  can_create: true,
+  can_edit: true,
+  can_delete: false,
+};
+
 const GROUP_ADMIN_DEFAULTS: PermissionsMap = {
-  dashboard: FULL_ACCESS,
-  companies: VIEW_ONLY,
+  dashboard: VIEW_ONLY,
+  companies: COMPANIES_NO_DELETE,
   branches: FULL_ACCESS,
   trials: FULL_ACCESS,
   students: FULL_ACCESS,
   examinations: FULL_ACCESS,
   programs: FULL_ACCESS,
+  slots: VIEW_ONLY,
+  vouchers: FULL_ACCESS,
   team: FULL_ACCESS,
-  attendance: FULL_ACCESS,
+  attendance: NO_ACCESS,
   attendance_log: FULL_ACCESS,
-  payment_record: FULL_ACCESS,
-  pending_payments: FULL_ACCESS,
-  leaderboard: FULL_ACCESS,
-  transactions: FULL_ACCESS,
-  import: FULL_ACCESS,
+  payment_record: VIEW_ONLY,
+  pending_payments: FULL_ACCESS, // approve button gated separately by role
+  leaderboard: VIEW_CREATE, // can_create gates Transfer Adcoin button
+  transactions: NO_ACCESS,
+  marketplace: VIEW_ONLY, // sees the topup-request table; no actions (super_admin only approves)
+  import: VIEW_CREATE, // view = download templates, create = upload CSV
 };
 
 const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
@@ -91,49 +103,58 @@ const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
   students: FULL_ACCESS,
   examinations: FULL_ACCESS,
   programs: VIEW_ONLY,
-  team: VIEW_CREATE_EDIT,
-  attendance: VIEW_CREATE_EDIT,
-  attendance_log: VIEW_EDIT,
-  payment_record: VIEW_EDIT,
-  pending_payments: VIEW_CREATE_EDIT,
-  leaderboard: VIEW_ONLY,
+  slots: FULL_ACCESS,
+  vouchers: FULL_ACCESS,
+  team: FULL_ACCESS,
+  attendance: FULL_ACCESS,
+  attendance_log: FULL_ACCESS,
+  payment_record: FULL_ACCESS,
+  pending_payments: FULL_ACCESS, // approve button gated separately by role
+  leaderboard: VIEW_CREATE,
   transactions: VIEW_CREATE,
+  marketplace: VIEW_CREATE, // can browse + create top-up requests
   import: NO_ACCESS,
 };
 
 const ASSISTANT_ADMIN_DEFAULTS: PermissionsMap = {
-  dashboard: VIEW_ONLY,
-  companies: VIEW_ONLY,
-  branches: VIEW_ONLY,
+  dashboard: NO_ACCESS,
+  companies: NO_ACCESS,
+  branches: NO_ACCESS,
   trials: VIEW_CREATE_EDIT,
   students: VIEW_CREATE_EDIT,
   examinations: VIEW_CREATE_EDIT,
   programs: VIEW_ONLY,
+  slots: VIEW_CREATE_EDIT,
+  vouchers: NO_ACCESS,
   team: NO_ACCESS,
   attendance: VIEW_CREATE_EDIT,
   attendance_log: VIEW_EDIT,
-  payment_record: VIEW_EDIT,
-  pending_payments: VIEW_CREATE_EDIT,
-  leaderboard: VIEW_ONLY,
+  payment_record: NO_ACCESS,
+  pending_payments: VIEW_CREATE_EDIT, // no approve button per spec
+  leaderboard: VIEW_CREATE,
   transactions: VIEW_CREATE,
+  marketplace: NO_ACCESS,
   import: NO_ACCESS,
 };
 
 const INSTRUCTOR_DEFAULTS: PermissionsMap = {
-  dashboard: VIEW_ONLY,
+  dashboard: NO_ACCESS,
   companies: NO_ACCESS,
   branches: NO_ACCESS,
-  trials: VIEW_CREATE_EDIT,
+  trials: VIEW_EDIT,
   students: VIEW_ONLY,
   examinations: VIEW_CREATE_EDIT,
   programs: VIEW_ONLY,
+  slots: VIEW_ONLY,
+  vouchers: NO_ACCESS,
   team: NO_ACCESS,
   attendance: VIEW_CREATE_EDIT,
   attendance_log: VIEW_ONLY,
   payment_record: NO_ACCESS,
   pending_payments: NO_ACCESS,
-  leaderboard: VIEW_ONLY,
+  leaderboard: VIEW_CREATE,
   transactions: VIEW_CREATE,
+  marketplace: NO_ACCESS,
   import: NO_ACCESS,
 };
 
@@ -228,8 +249,8 @@ async function getRolePermissionsFromDB(
 
 /**
  * Get permissions for a specific user.
- * super_admin always gets full access.
- * Others resolve from role_permissions table (DB-driven).
+ * super_admin always gets full access (god-tier).
+ * Others resolve from role_permissions table → hardcoded defaults.
  */
 export async function getPermissionsForUser(
   userId: string,
@@ -244,14 +265,6 @@ export async function getPermissionsForUser(
 
   // Normalize old role names to new ones (backward compat if migration not yet applied)
   const normalizedRole = role === "admin" ? "group_admin" : role === "branch_admin" ? "company_admin" : role;
-
-  // Group admin gets full access (like old admin role) — companies is view-only
-  if (normalizedRole === "group_admin") {
-    const full: Partial<PermissionsMap> = {};
-    for (const r of ALL_RESOURCE_KEYS) full[r] = { ...FULL_ACCESS };
-    full.companies = { ...VIEW_ONLY };
-    return full as PermissionsMap;
-  }
 
   // Get user's branch to resolve company
   const { data: user } = await supabaseAdmin
@@ -626,6 +639,8 @@ const NAV_ORDER: { resource: PermissionResource; href: string }[] = [
   { resource: "students", href: "/student" },
   { resource: "examinations", href: "/examination" },
   { resource: "programs", href: "/program" },
+  { resource: "slots", href: "/slot" },
+  { resource: "vouchers", href: "/voucher" },
   { resource: "team", href: "/team" },
   { resource: "attendance", href: "/attendance" },
   { resource: "attendance_log", href: "/attendance-log" },
@@ -633,13 +648,18 @@ const NAV_ORDER: { resource: PermissionResource; href: string }[] = [
   { resource: "pending_payments", href: "/pending-payments" },
   { resource: "leaderboard", href: "/leaderboard" },
   { resource: "transactions", href: "/transactions" },
+  { resource: "marketplace", href: "/marketplace" },
   { resource: "import", href: "/import" },
 ];
 
 /**
  * Returns the first page the user has can_view permission for.
+ * Instructors are redirected to /attendance (their primary workflow).
  */
-export function getFirstViewablePath(permissions: PermissionsMap): string {
+export function getFirstViewablePath(permissions: PermissionsMap, role?: string): string {
+  if (role === "instructor" && permissions.attendance?.can_view) {
+    return "/attendance";
+  }
   for (const { resource, href } of NAV_ORDER) {
     if (permissions[resource]?.can_view) return href;
   }
@@ -658,6 +678,8 @@ export const RESOURCE_LABELS: Record<PermissionResource, string> = {
   students: "Student",
   examinations: "Examination",
   programs: "Program",
+  slots: "Slot",
+  vouchers: "Voucher",
   team: "Team",
   attendance: "Mark Attendance",
   attendance_log: "Attendance History",
@@ -665,6 +687,7 @@ export const RESOURCE_LABELS: Record<PermissionResource, string> = {
   pending_payments: "Pending Payments",
   leaderboard: "Leaderboard",
   transactions: "Transactions",
+  marketplace: "Marketplace",
   import: "Import",
 };
 

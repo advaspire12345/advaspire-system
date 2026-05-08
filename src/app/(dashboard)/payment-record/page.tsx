@@ -22,7 +22,7 @@ export default async function PaymentRecordPage({ searchParams }: PageProps) {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.payment_record;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   const params = await searchParams;
   const startDate = params.startDate;

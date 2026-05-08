@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, Plus, Star } from "lucide-react";
+import { ArrowLeftRight, Plus, Settings, Star } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
@@ -19,16 +19,25 @@ import type { TransferParticipant } from "@/data/users";
 
 type BranchFilter = "local" | "global";
 
+export interface CompanyTab {
+  id: string;
+  name: string;
+  branchIds: string[];
+}
+
 interface LeaderboardTableProps {
   initialData: LeaderboardEntry[];
   totalCount: number;
   participants: TransferParticipant[];
   hideBranch?: boolean;
   canTransfer?: boolean;
+  canAdjust?: boolean;
   currentUserId?: string;
   currentUserName?: string;
   currentUserBranchId?: string | null;
   showBranchFilter?: boolean;
+  /** When provided (super_admin), renders one tab per company instead of Local/Global */
+  companyTabs?: CompanyTab[];
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -57,15 +66,20 @@ export function LeaderboardTable({
   participants,
   hideBranch,
   canTransfer = true,
+  canAdjust = false,
   currentUserId,
   currentUserName,
   currentUserBranchId,
   showBranchFilter,
+  companyTabs,
 }: LeaderboardTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [branchFilter, setBranchFilter] = useState<BranchFilter>("local");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(
+    companyTabs && companyTabs.length > 0 ? companyTabs[0].id : null,
+  );
 
   // Progressive loading: start with server-provided first batch, load rest in background
   const [allData, setAllData] = useState<LeaderboardEntry[]>(initialData);
@@ -108,13 +122,24 @@ export function LeaderboardTable({
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
+  const [adjustModalOpen, setAdjustModalOpen] = useState(false);
   const [selectedRecipientId, setSelectedRecipientId] = useState<string | null>(
     null,
   );
 
-  // Filter data based on search and branch filter, re-rank for local
+  // Filter data based on search, branch filter, and company tab; re-rank for filtered modes
   const filteredData = useMemo(() => {
     let data = allData;
+
+    // Company-tab filtering takes precedence (super_admin)
+    const activeCompanyTab =
+      companyTabs && selectedCompanyId
+        ? companyTabs.find((t) => t.id === selectedCompanyId)
+        : null;
+    if (activeCompanyTab) {
+      const branchSet = new Set(activeCompanyTab.branchIds);
+      data = data.filter((row) => branchSet.has(row.branchId));
+    }
 
     // Apply branch filter (local = own branch only)
     const isLocal = showBranchFilter && branchFilter === "local" && currentUserBranchId;
@@ -132,13 +157,13 @@ export function LeaderboardTable({
       );
     }
 
-    // Re-rank from 1 when in local mode
-    if (isLocal) {
+    // Re-rank from 1 whenever we've narrowed the scope
+    if (isLocal || activeCompanyTab) {
       return data.map((row, idx) => ({ ...row, rank: idx + 1 }));
     }
 
     return data;
-  }, [allData, searchQuery, branchFilter, showBranchFilter, currentUserBranchId]);
+  }, [allData, searchQuery, branchFilter, showBranchFilter, currentUserBranchId, companyTabs, selectedCompanyId]);
 
   // Transfer modal: own branch only for non-admin roles, all participants for admin roles
   const localParticipants = useMemo(() => {
@@ -227,8 +252,8 @@ export function LeaderboardTable({
               placeholder="Search by name, branch, or program..."
             />
 
-            {/* Branch Filter Tabs */}
-            {showBranchFilter && (
+            {/* Branch Filter Tabs (Local/Global) — for company_admin / assistant_admin / instructor */}
+            {showBranchFilter && !companyTabs && (
               <div className="flex items-center">
                 {(["Local", "Global"] as const).map((filter, idx) => (
                   <div key={filter} className="flex items-center">
@@ -252,6 +277,44 @@ export function LeaderboardTable({
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* Per-Company Tabs — for super_admin */}
+            {companyTabs && companyTabs.length > 0 && (
+              <div className="flex items-center flex-wrap">
+                {companyTabs.map((tab, idx) => (
+                  <div key={tab.id} className="flex items-center">
+                    {idx > 0 && <div className="h-5 w-px bg-[#eaeaf5]" />}
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedCompanyId(tab.id); setCurrentPage(1); }}
+                      className={cn(
+                        "relative px-6 py-2 text-sm font-bold transition-colors",
+                        selectedCompanyId === tab.id
+                          ? "text-foreground"
+                          : "text-[#8B8FB9] hover:text-foreground/70",
+                      )}
+                    >
+                      {tab.name}
+                      {selectedCompanyId === tab.id && (
+                        <span className="absolute -bottom-[30px] left-0 right-0 h-[3px] rounded bg-[#23D2E2]" />
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Adcoin Adjustment Button — gated to super_admin / group_admin only */}
+            {canAdjust && (
+              <Button
+                onClick={() => setAdjustModalOpen(true)}
+                variant="outline"
+                className="font-bold h-[50px] px-6"
+              >
+                <Settings className="h-4 w-4" />
+                Adcoin Adjustment
+              </Button>
             )}
 
             {/* Transfer Adcoin Button */}
@@ -503,6 +566,20 @@ export function LeaderboardTable({
         defaultSenderName={currentUserName}
         onSubmit={handleTransferSubmit}
       />
+
+      {/* Adcoin Adjustment Modal — same component, pre-selects "adjusted" type */}
+      {canAdjust && (
+        <TransferAdcoinModal
+          open={adjustModalOpen}
+          onOpenChange={setAdjustModalOpen}
+          participants={participants}
+          recipientId={null}
+          defaultSenderId={currentUserId}
+          defaultSenderName={currentUserName}
+          onSubmit={handleTransferSubmit}
+          defaultTransactionType="adjusted"
+        />
+      )}
     </>
   );
 }

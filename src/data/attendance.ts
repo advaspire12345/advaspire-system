@@ -725,6 +725,9 @@ export interface AttendanceTableRow {
   sessionsRemaining: number;
   // Whether student has an active exam for this enrollment
   hasExam: boolean;
+  // The level of the active exam (1..N) — surfaced so the mark-attendance modal
+  // can pre-populate the mission dropdown when lesson="Exam"
+  examLevel?: number | null;
   // Type to distinguish between enrollment and trial
   type: 'enrollment' | 'trial';
   // Trial-specific fields
@@ -765,6 +768,10 @@ export async function getEnrollmentsForAttendance(
 ): Promise<AttendanceTableRow[]> {
   // Auto-mark absent for previous week's unmarked slots
   await autoMarkAbsentForPreviousWeek();
+  // Auto-finalize previous-week present rows that were left incomplete (PIC=system)
+  await autoFinalizeIncompletePreviousWeek();
+  // Auto-mark trials that were never touched as no_show
+  await autoMarkNoShowForPreviousWeekTrials();
 
   // Import user helpers dynamically to avoid circular imports
   const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
@@ -849,13 +856,14 @@ export async function getEnrollmentsForAttendance(
     return true;
   });
 
-  // Fetch active exams for all enrollments to mark "Exam" badge
+  // Fetch active exams for all enrollments to mark "Exam" badge + carry exam_level for mission dropdown
   const enrollmentIds = filteredData.map((e) => e.id);
   const activeExamEnrollmentIds = new Set<string>();
+  const examLevelByEnrollment = new Map<string, number>();
   if (enrollmentIds.length > 0) {
     const { data: activeExams } = await supabaseAdmin
       .from('examinations')
-      .select('enrollment_id')
+      .select('enrollment_id, exam_level, status')
       .in('enrollment_id', enrollmentIds)
       .is('deleted_at', null)
       .in('status', ['eligible', 'scheduled', 'in_progress']);
@@ -863,6 +871,7 @@ export async function getEnrollmentsForAttendance(
     for (const exam of activeExams ?? []) {
       if (exam.enrollment_id) {
         activeExamEnrollmentIds.add(exam.enrollment_id);
+        examLevelByEnrollment.set(exam.enrollment_id, exam.exam_level);
       }
     }
   }
@@ -978,9 +987,9 @@ export async function getEnrollmentsForAttendance(
     // Only consider present/late records from previous weeks for historical fields
     const presentRecords = previousWeekRecords.filter((a) => a.status === 'present' || a.status === 'late');
 
-    // Last activity text from the most recent present/late attendance (previous weeks)
-    const lastActivityRecord = presentRecords.find((a) => a.last_activity);
-    const lastActivityText = lastActivityRecord?.last_activity ?? null;
+    // Last activity must come from the SAME record as last attendance (per spec).
+    // If that record has no last_activity filled in, show null — don't fall through to an older record.
+    const lastActivityText = lastPresentAttendance?.last_activity ?? null;
 
     // Last lesson, mission, and adcoin from the most recent present/late attendance (previous weeks)
     const lastLessonRecord = presentRecords.find((a) => a.lesson);
@@ -1161,6 +1170,7 @@ export async function getEnrollmentsForAttendance(
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
+        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         // Include existing attendance data if partially filled
         existingAttendance: slotAttendance ? {
@@ -1226,6 +1236,7 @@ export async function getEnrollmentsForAttendance(
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
+        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         existingAttendance: {
           id: orphan.id,
@@ -1347,6 +1358,10 @@ export async function getEnrollmentsForAttendancePaginated(
 ): Promise<{ rows: AttendanceTableRow[]; totalCount: number }> {
   // Auto-mark absent for previous week's unmarked slots
   await autoMarkAbsentForPreviousWeek();
+  // Auto-finalize previous-week present rows that were left incomplete (PIC=system)
+  await autoFinalizeIncompletePreviousWeek();
+  // Auto-mark trials that were never touched as no_show
+  await autoMarkNoShowForPreviousWeekTrials();
 
   // Import user helpers dynamically to avoid circular imports
   const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
@@ -1439,13 +1454,14 @@ export async function getEnrollmentsForAttendancePaginated(
     return true;
   });
 
-  // Fetch active exams for all enrollments to mark "Exam" badge
+  // Fetch active exams for all enrollments to mark "Exam" badge + carry exam_level for mission dropdown
   const enrollmentIds = filteredData.map((e) => e.id);
   const activeExamEnrollmentIds = new Set<string>();
+  const examLevelByEnrollment = new Map<string, number>();
   if (enrollmentIds.length > 0) {
     const { data: activeExams } = await supabaseAdmin
       .from('examinations')
-      .select('enrollment_id')
+      .select('enrollment_id, exam_level, status')
       .in('enrollment_id', enrollmentIds)
       .is('deleted_at', null)
       .in('status', ['eligible', 'scheduled', 'in_progress']);
@@ -1453,6 +1469,7 @@ export async function getEnrollmentsForAttendancePaginated(
     for (const exam of activeExams ?? []) {
       if (exam.enrollment_id) {
         activeExamEnrollmentIds.add(exam.enrollment_id);
+        examLevelByEnrollment.set(exam.enrollment_id, exam.exam_level);
       }
     }
   }
@@ -1568,9 +1585,9 @@ export async function getEnrollmentsForAttendancePaginated(
     // Only consider present/late records from previous weeks for historical fields
     const presentRecords = previousWeekRecords.filter((a) => a.status === 'present' || a.status === 'late');
 
-    // Last activity text from the most recent present/late attendance (previous weeks)
-    const lastActivityRecord = presentRecords.find((a) => a.last_activity);
-    const lastActivityText = lastActivityRecord?.last_activity ?? null;
+    // Last activity must come from the SAME record as last attendance (per spec).
+    // If that record has no last_activity filled in, show null — don't fall through to an older record.
+    const lastActivityText = lastPresentAttendance?.last_activity ?? null;
 
     // Last lesson, mission, and adcoin from the most recent present/late attendance (previous weeks)
     const lastLessonRecord = presentRecords.find((a) => a.lesson);
@@ -1751,6 +1768,7 @@ export async function getEnrollmentsForAttendancePaginated(
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
+        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         // Include existing attendance data if partially filled
         existingAttendance: slotAttendance ? {
@@ -1816,6 +1834,7 @@ export async function getEnrollmentsForAttendancePaginated(
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
+        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         existingAttendance: {
           id: orphan.id,
@@ -2360,6 +2379,91 @@ export async function autoMarkAbsentForPreviousWeek(): Promise<number> {
   }
 
   return markedCount;
+}
+
+/**
+ * Sunday-12pm cutoff sweep for trials whose scheduled_date was in the previous
+ * week and were never marked. Per spec, these become 'no_show' automatically.
+ * (Trials marked present/late are already 'completed' via the API; trials
+ * marked absent are already 'no_show'.)
+ */
+export async function autoMarkNoShowForPreviousWeekTrials(): Promise<number> {
+  const today = new Date();
+  const currentDayOfWeek = today.getDay();
+  const mondayOffset = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+  const currentWeekMonday = new Date(today);
+  currentWeekMonday.setDate(today.getDate() + mondayOffset);
+  currentWeekMonday.setHours(0, 0, 0, 0);
+
+  const lastWeekMonday = new Date(currentWeekMonday);
+  lastWeekMonday.setDate(lastWeekMonday.getDate() - 7);
+  const lastWeekSunday = new Date(currentWeekMonday);
+  lastWeekSunday.setDate(currentWeekMonday.getDate() - 1);
+
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  const { data, error } = await supabaseAdmin
+    .from("trials")
+    .update({ status: "no_show", updated_at: new Date().toISOString() })
+    .in("status", ["pending", "confirmed"])
+    .gte("scheduled_date", fmt(lastWeekMonday))
+    .lte("scheduled_date", fmt(lastWeekSunday))
+    .is("deleted_at", null)
+    .select("id");
+
+  if (error) {
+    console.error("[Sunday Cutoff Trials] Failed:", error);
+    return 0;
+  }
+  return (data ?? []).length;
+}
+
+/**
+ * Sunday-12pm cutoff sweep for previous-week present rows that were left
+ * incomplete. Per spec, if the PIC (instructor_name) is missing, fill it with
+ * "system" so the row can be finalized and disappear from the mark-attendance
+ * page. Other fields keep whatever was entered.
+ */
+export async function autoFinalizeIncompletePreviousWeek(): Promise<number> {
+  const today = new Date();
+  const currentDayOfWeek = today.getDay();
+  const mondayOffset = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+  const currentWeekMonday = new Date(today);
+  currentWeekMonday.setDate(today.getDate() + mondayOffset);
+  currentWeekMonday.setHours(0, 0, 0, 0);
+
+  const lastWeekMonday = new Date(currentWeekMonday);
+  lastWeekMonday.setDate(lastWeekMonday.getDate() - 7);
+  const lastWeekSunday = new Date(currentWeekMonday);
+  lastWeekSunday.setDate(currentWeekMonday.getDate() - 1);
+
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  const { data: rows, error } = await supabaseAdmin
+    .from("attendance")
+    .select("id, instructor_name")
+    .gte("date", fmt(lastWeekMonday))
+    .lte("date", fmt(lastWeekSunday))
+    .in("status", ["present", "late"])
+    .or("instructor_name.is.null,instructor_name.eq.");
+
+  if (error) {
+    console.error("[Sunday Cutoff] Failed to scan incomplete present rows:", error);
+    return 0;
+  }
+
+  let updated = 0;
+  for (const row of rows ?? []) {
+    const { error: updateError } = await supabaseAdmin
+      .from("attendance")
+      .update({ instructor_name: "system" })
+      .eq("id", row.id);
+    if (!updateError) updated++;
+  }
+
+  return updated;
 }
 
 // ============================================

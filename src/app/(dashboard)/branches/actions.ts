@@ -10,6 +10,55 @@ import { supabaseAdmin } from "@/db";
 import { authorizeAction } from "@/data/permissions";
 import type { Branch, BranchType } from "@/db/schema";
 
+async function findCodeConflict(
+  type: BranchType,
+  code: string,
+  parentId: string | null,
+  excludeId?: string,
+): Promise<boolean> {
+  let query = supabaseAdmin
+    .from("branches")
+    .select("id", { count: "exact", head: true })
+    .eq("code", code)
+    .is("deleted_at", null);
+
+  if (type === "company") {
+    query = query.eq("type", "company");
+  } else {
+    query = query.in("type", ["hq", "branch"]).eq("parent_id", parentId);
+  }
+
+  if (excludeId) query = query.neq("id", excludeId);
+
+  const { count } = await query;
+  return (count ?? 0) > 0;
+}
+
+async function findAreaConflict(
+  type: BranchType,
+  city: string,
+  parentId: string | null,
+  excludeId?: string,
+): Promise<boolean> {
+  // Two different companies are allowed to share a city. The constraint only
+  // applies to HQ/branch siblings under the same company — a company can't
+  // have two branches in the same city.
+  if (type === "company") return false;
+
+  let query = supabaseAdmin
+    .from("branches")
+    .select("id", { count: "exact", head: true })
+    .ilike("city", city)
+    .is("deleted_at", null)
+    .in("type", ["hq", "branch"])
+    .eq("parent_id", parentId);
+
+  if (excludeId) query = query.neq("id", excludeId);
+
+  const { count } = await query;
+  return (count ?? 0) > 0;
+}
+
 export interface AddBranchData {
   name: string;
   type: BranchType;
@@ -51,6 +100,33 @@ export async function addBranchAction(
       await authorizeAction("companies", "can_create");
     } else {
       await authorizeAction("branches", "can_create");
+    }
+
+    // Code is required and must be unique within its scope
+    const code = data.code?.trim();
+    if (!code) {
+      return { success: false, error: "Code is required" };
+    }
+    const parentForScope = data.type !== "company" ? data.parentId : null;
+    if (await findCodeConflict(data.type, code, parentForScope)) {
+      return {
+        success: false,
+        error:
+          data.type === "company"
+            ? `Company code "${code}" is already in use`
+            : `Branch code "${code}" is already in use within this company`,
+      };
+    }
+
+    const city = data.city?.trim();
+    if (city && (await findAreaConflict(data.type, city, parentForScope))) {
+      return {
+        success: false,
+        error:
+          data.type === "company"
+            ? `A company with area "${city}" already exists`
+            : `A branch with area "${city}" already exists in this company`,
+      };
     }
 
     // HQ: only 1 per company
@@ -114,6 +190,32 @@ export async function updateBranchAction(
       }
     } else {
       await authorizeAction("branches", "can_edit");
+    }
+
+    const code = data.code?.trim();
+    if (!code) {
+      return { success: false, error: "Code is required" };
+    }
+    const parentForScope = data.type !== "company" ? data.parentId : null;
+    if (await findCodeConflict(data.type, code, parentForScope, branchId)) {
+      return {
+        success: false,
+        error:
+          data.type === "company"
+            ? `Company code "${code}" is already in use`
+            : `Branch code "${code}" is already in use within this company`,
+      };
+    }
+
+    const city = data.city?.trim();
+    if (city && (await findAreaConflict(data.type, city, parentForScope, branchId))) {
+      return {
+        success: false,
+        error:
+          data.type === "company"
+            ? `A company with area "${city}" already exists`
+            : `A branch with area "${city}" already exists in this company`,
+      };
     }
 
     const result = await updateBranch(branchId, {

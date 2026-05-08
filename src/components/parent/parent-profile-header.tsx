@@ -14,6 +14,7 @@ import { FloatingInput } from "@/components/ui/floating-input";
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
 import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import { cn } from "@/lib/utils";
+import { ParentNotificationBell } from "@/components/parent/parent-notification-bell";
 import type { ParentProfileData, ParentProfilePayload } from "@/app/(parent)/parent/profile-actions";
 
 interface ParentProfileHeaderProps {
@@ -104,6 +105,7 @@ export function ParentProfileHeader({
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Next Class</p>
               </div>
               <div className="h-8 w-px bg-border" />
+              <ParentNotificationBell />
               <Button
                 onClick={() => setModalOpen(true)}
                 size="icon"
@@ -153,6 +155,7 @@ export function ParentProfileHeader({
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Next Class</p>
               </div>
               <div className="h-8 w-px bg-border" />
+              <ParentNotificationBell iconButtonClassName="h-[44px] w-[44px]" />
               <Button
                 onClick={() => setModalOpen(true)}
                 size="icon"

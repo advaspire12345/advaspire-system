@@ -58,10 +58,14 @@ export interface TrialFormData {
 
 const SOURCE_OPTIONS = [
   { value: "walk_in", label: "Walk-in" },
-  { value: "phone", label: "Phone" },
-  { value: "online", label: "Online" },
+  { value: "website", label: "Website" },
+  { value: "facebook", label: "Facebook" },
+  { value: "google", label: "Google" },
+  { value: "tiktok", label: "TikTok" },
+  { value: "xhs", label: "Xiaohongshu" },
+  { value: "youtube", label: "YouTube" },
+  { value: "instagram", label: "Instagram" },
   { value: "referral", label: "Referral" },
-  { value: "social_media", label: "Social Media" },
   { value: "other", label: "Other" },
 ];
 

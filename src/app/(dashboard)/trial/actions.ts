@@ -66,6 +66,27 @@ export async function addTrialAction(
       return { success: false, error: "Failed to create trial" };
     }
 
+    // F1: notify staff
+    try {
+      const { notifyStaff, resolveBranchCompanyId } = await import("@/data/notifications");
+      const companyId = await resolveBranchCompanyId(data.branchId);
+      await notifyStaff(
+        {
+          roles: ["group_admin", "company_admin", "assistant_admin"],
+          companyId,
+        },
+        {
+          type: "trial_added",
+          title: "New trial booked",
+          body: `${data.childName} (parent: ${data.parentName}) on ${data.scheduledDate}`,
+          link: `/trial?highlight=${result.id}`,
+          data: { trialId: result.id, branchId: data.branchId },
+        },
+      );
+    } catch (notifyErr) {
+      console.warn("[Notify trial_added] failed:", notifyErr);
+    }
+
     revalidatePath("/trial");
     revalidateTag("dashboard", "max");
     return { success: true, trial: result };

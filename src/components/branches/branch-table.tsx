@@ -17,8 +17,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { RegistrationForm } from "@/components/registration/registration-form";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 import type { BranchEntry, CompanyOption } from "@/data/branches";
 import type { UserRole } from "@/db/schema";
 import {
@@ -27,25 +27,9 @@ import {
   deleteBranchAction,
 } from "@/app/(dashboard)/branches/actions";
 
-interface CourseOption {
-  id: string;
-  name: string;
-}
-
-interface SlotOption {
-  id: string;
-  courseId: string;
-  branchId: string;
-  day: string;
-  time: string;
-  duration: number;
-}
-
 interface BranchTableProps {
   initialData: BranchEntry[];
   companyOptions: CompanyOption[];
-  courses?: CourseOption[];
-  courseSlots?: SlotOption[];
   userRole: UserRole;
   canCreateCompany: boolean;
   canEditCompany: boolean;
@@ -80,8 +64,6 @@ const TYPE_BADGE: Record<string, { bg: string; text: string; label: string }> = 
 export function BranchTable({
   initialData,
   companyOptions,
-  courses = [],
-  courseSlots = [],
   userRole,
   canCreateCompany,
   canEditCompany,
@@ -184,6 +166,14 @@ export function BranchTable({
     });
 
     if (!result.success) {
+      // Surface the server error in a toast — the modal also displays it
+      // inline, but the toast guarantees the user sees something even if the
+      // modal closes or the inline error is below the fold.
+      toast({
+        title: "Could not save",
+        description: result.error || "Failed to add entry",
+        variant: "destructive",
+      });
       throw new Error(result.error || "Failed to add entry");
     }
     router.refresh();
@@ -210,6 +200,11 @@ export function BranchTable({
     });
 
     if (!result.success) {
+      toast({
+        title: "Could not save",
+        description: result.error || "Failed to update entry",
+        variant: "destructive",
+      });
       throw new Error(result.error || "Failed to update entry");
     }
     router.refresh();
@@ -222,6 +217,11 @@ export function BranchTable({
     const result = await deleteBranchAction(selectedRecord.id, selectedRecord.type);
 
     if (!result.success) {
+      toast({
+        title: "Could not delete",
+        description: result.error || "Failed to delete entry",
+        variant: "destructive",
+      });
       throw new Error(result.error || "Failed to delete entry");
     }
     router.refresh();
@@ -477,61 +477,57 @@ export function BranchTable({
         onDelete={handleDelete}
       />
 
-      {/* Registration Form Modal */}
-      {regBranch && (
-        <Dialog open={regModalOpen} onOpenChange={setRegModalOpen}>
-          <DialogContent className="sm:max-w-lg p-0" floatingCloseButton>
-            <div className="max-h-[90vh] overflow-y-auto p-10">
-              <DialogHeader>
-                <DialogTitle className="text-xl font-bold">
-                  Registration Form — {regBranch.branchName}
-                </DialogTitle>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-sm text-muted-foreground">Share link:</span>
-                  <a
-                    href={`/register/${regBranch.code || regBranch.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-mono text-[#23D2E2] hover:underline truncate"
-                  >
-                    {`${typeof window !== "undefined" ? window.location.origin : ""}/register/${regBranch.code || regBranch.id}`}
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/register/${regBranch.code || regBranch.id}`)}
-                    className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:bg-muted transition"
-                    title="Copy link"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </DialogHeader>
+      {/* Registration Link Modal — link + copy only, no form preview */}
+      {regBranch && (() => {
+        const companyCode = initialData.find((b) => b.id === regBranch.parentId)?.code ?? null;
+        const branchCode = regBranch.code ?? null;
+        const path = companyCode && branchCode
+          ? `/register/${companyCode}/${branchCode}`
+          : null;
+        const fullUrl = path
+          ? `${typeof window !== "undefined" ? window.location.origin : ""}${path}`
+          : null;
+        return (
+          <Dialog open={regModalOpen} onOpenChange={setRegModalOpen}>
+            <DialogContent className="sm:max-w-md p-0" floatingCloseButton>
+              <div className="p-8">
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-bold">
+                    Registration Link
+                  </DialogTitle>
+                </DialogHeader>
 
-              <div className="mt-6">
-                <RegistrationForm
-                  branchId={regBranch.id}
-                  branchName={regBranch.branchName}
-                  courses={courses.filter((c) =>
-                    courseSlots.some((s) => s.courseId === c.id && s.branchId === regBranch.id)
+                <div className="mt-6">
+                  {fullUrl ? (
+                    <div className="flex items-stretch gap-2">
+                      <input
+                        readOnly
+                        value={fullUrl}
+                        className="flex-1 rounded-[10px] border border-[#ADAFCA] px-3 py-2 text-sm font-mono text-foreground bg-muted/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(fullUrl);
+                        }}
+                        className="rounded-[10px] border border-[#ADAFCA] px-3 text-muted-foreground hover:border-transparent hover:bg-[#23D2E2] hover:text-white transition"
+                        title="Copy link"
+                        aria-label="Copy registration link"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-red-500">
+                      This branch is missing a code or company code, so a registration link cannot be generated.
+                    </p>
                   )}
-                  courseSlots={courseSlots
-                    .filter((s) => s.branchId === regBranch.id)
-                    .map((s) => ({
-                      id: s.id,
-                      courseId: s.courseId,
-                      day: s.day,
-                      time: s.time,
-                      duration: s.duration,
-                    }))}
-                  layout="default"
-                  noCard
-                  onSuccess={() => router.refresh()}
-                />
+                </div>
               </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
     </>
   );
 }

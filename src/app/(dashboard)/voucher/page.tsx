@@ -45,8 +45,8 @@ export default async function VoucherPage() {
   if (!user?.email) redirect("/login");
 
   const permData = await getCurrentUserPermissions();
-  const perms = permData?.permissions.programs;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  const perms = permData?.permissions.vouchers;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   const vouchers = await getVouchers();
 

@@ -21,20 +21,29 @@ export default async function PendingPaymentsPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.pending_payments;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   // Fetch data in parallel
   const [paymentsResult, students, { courses, packages }, vouchersResult] = await Promise.all([
     getPendingPaymentsForTablePaginated(user.email ?? "", { offset: 0, limit: 10 }),
     getStudentsForPayment(user.email ?? ""),
     getCoursesAndPackages(),
-    supabaseAdmin.from("vouchers").select("id, code, discount_type, discount_value, expiry_type, expiry_date").is("deleted_at", null).order("code"),
+    supabaseAdmin.from("vouchers").select("id, code, discount_type, discount_value, expiry_type, expiry_date, expiry_months, created_at").is("deleted_at", null).order("code"),
   ]);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
   const voucherOptions = (vouchersResult.data ?? [])
     .filter((v: any) => {
-      if (v.expiry_type === "date" && v.expiry_date && v.expiry_date < today) return false;
+      // Date expiry: drop if past
+      if (v.expiry_type === "date" && v.expiry_date && v.expiry_date < todayStr) return false;
+      // Monthly expiry: drop if (created_at + expiry_months) is past
+      if (v.expiry_type === "monthly" && v.expiry_months && v.created_at) {
+        const issued = new Date(v.created_at);
+        const deadline = new Date(issued);
+        deadline.setMonth(deadline.getMonth() + v.expiry_months);
+        if (today > deadline) return false;
+      }
       return true;
     })
     .map((v: any) => ({
@@ -64,6 +73,11 @@ export default async function PendingPaymentsPage() {
           canCreate={perms?.can_create}
           canEdit={perms?.can_edit}
           canDelete={perms?.can_delete}
+          canApprove={
+            permData?.role === "super_admin" ||
+            permData?.role === "group_admin" ||
+            permData?.role === "company_admin"
+          }
         />
       </div>
     </main>

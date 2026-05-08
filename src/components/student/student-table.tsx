@@ -521,7 +521,17 @@ export function StudentTable({
                         className="px-3 py-2 font-bold truncate"
                         style={{ width: columns[1].width }}
                       >
-                        {row.name}
+                        <div className="flex items-center gap-2">
+                          <span>{row.name}</span>
+                          {row.transferredToBranchName && (
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700"
+                              title={`This student transferred to ${row.transferredToBranchName}`}
+                            >
+                              Transferred to {row.transferredToBranchName}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Student ID */}
@@ -707,28 +717,53 @@ export function StudentTable({
                         style={{ width: columns[17].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
-                          {onEdit && (
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                              aria-label={`Edit student ${row.name}`}
-                              title="Edit"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                          )}
-                          {onDelete && (
-                            <button
-                              type="button"
-                              onClick={() => openDeleteModal(row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                              aria-label={`Delete student ${row.name}`}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          )}
+                          {onEdit && (() => {
+                            const isGhost = !!row.transferredToBranchName;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => !isGhost && openEditModal(row)}
+                                disabled={isGhost}
+                                className={cn(
+                                  "rounded-lg border p-2 transition",
+                                  isGhost
+                                    ? "border-muted-foreground/20 text-muted-foreground/30 cursor-not-allowed"
+                                    : "border-muted-foreground/30 text-muted-foreground hover:border-transparent hover:bg-[#615DFA] hover:text-white",
+                                )}
+                                aria-label={`Edit student ${row.name}`}
+                                title={isGhost ? `Transferred to ${row.transferredToBranchName} — read-only` : "Edit"}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                            );
+                          })()}
+                          {onDelete && (() => {
+                            const hasAttendance = (row.sessionCount ?? 0) > 0;
+                            const isGhost = !!row.transferredToBranchName;
+                            const blocked = hasAttendance || isGhost;
+                            const blockedTitle = isGhost
+                              ? `Transferred to ${row.transferredToBranchName} — read-only`
+                              : hasAttendance
+                                ? "Cannot delete — student has attendance records"
+                                : "Delete";
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => !blocked && openDeleteModal(row)}
+                                disabled={blocked}
+                                className={cn(
+                                  "rounded-lg border p-2 transition",
+                                  blocked
+                                    ? "border-muted-foreground/20 text-muted-foreground/30 cursor-not-allowed"
+                                    : "border-muted-foreground/30 text-muted-foreground hover:border-transparent hover:bg-[#fd434f] hover:text-white",
+                                )}
+                                aria-label={`Delete student ${row.name}`}
+                                title={blockedTitle}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            );
+                          })()}
                         </div>
                       </td>
                     </tr>

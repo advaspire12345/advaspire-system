@@ -121,6 +121,18 @@ export async function updateExaminationAction(
       return { success: false, error: "Examination not found" };
     }
 
+    // Lock edits once exam is finalized (pass/fail) and 7 days have passed
+    if (
+      (currentExam.status === "pass" || currentExam.status === "fail") &&
+      currentExam.exam_date &&
+      Date.now() - new Date(currentExam.exam_date).getTime() > 7 * 24 * 60 * 60 * 1000
+    ) {
+      return {
+        success: false,
+        error: "This examination is locked — more than 1 week has passed since the exam date.",
+      };
+    }
+
     const updateData: Record<string, unknown> = {};
     if (payload.examName !== undefined) updateData.exam_name = payload.examName;
     if (payload.examLevel !== undefined) updateData.exam_level = payload.examLevel;
@@ -144,6 +156,15 @@ export async function updateExaminationAction(
       await handlePassStatus(examId, currentExam.student_id);
     }
 
+    // Handle status change to 'fail' — auto-reschedule a new exam +2 months
+    // and increment the reattempt counter on the new row.
+    if (
+      payload.status === "fail" &&
+      currentExam.status !== "fail"
+    ) {
+      await handleFailStatus(examId, currentExam.student_id);
+    }
+
     revalidatePath("/examination");
     revalidatePath("/student");
     return { success: true };
@@ -164,6 +185,19 @@ export async function deleteExaminationAction(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await authorizeAction('examinations', 'can_delete');
+
+    const currentExam = await getExaminationById(examId);
+    if (
+      currentExam &&
+      (currentExam.status === "pass" || currentExam.status === "fail") &&
+      currentExam.exam_date &&
+      Date.now() - new Date(currentExam.exam_date).getTime() > 7 * 24 * 60 * 60 * 1000
+    ) {
+      return {
+        success: false,
+        error: "This examination is locked — more than 1 week has passed since the exam date.",
+      };
+    }
 
     const success = await softDeleteExamination(examId);
 
@@ -236,10 +270,45 @@ async function handlePassStatus(
   }
 
   // 4. Generate certificate number and save it
-  const certificateNumber = await generateCertificateNumber();
+  const certificateNumber = await generateCertificateNumber(examId);
   await updateExamination(examId, {
     certificate_number: certificateNumber,
   });
+}
+
+/**
+ * Handle fail status — auto-reschedule a follow-up exam +2 months out,
+ * status='scheduled', incrementing reattempt_count from the failed row.
+ */
+async function handleFailStatus(
+  examId: string,
+  studentId: string,
+): Promise<void> {
+  const failedExam = await getExaminationById(examId);
+  if (!failedExam) return;
+
+  const failedDate = failedExam.exam_date ? new Date(failedExam.exam_date) : new Date();
+  const reschedule = new Date(failedDate);
+  reschedule.setMonth(reschedule.getMonth() + 2);
+  const rescheduleDate = reschedule.toISOString().split("T")[0];
+
+  // Insert a fresh exam row representing the next attempt
+  const { error } = await supabaseAdmin
+    .from("examinations")
+    .insert({
+      student_id: studentId,
+      enrollment_id: failedExam.enrollment_id,
+      exam_name: failedExam.exam_name,
+      exam_level: failedExam.exam_level,
+      exam_date: rescheduleDate,
+      status: "scheduled",
+      reattempt_count: (failedExam.reattempt_count ?? 0) + 1,
+      examiner_id: failedExam.examiner_id,
+    });
+
+  if (error) {
+    console.error("[Exam Fail] Failed to insert reattempt row:", error);
+  }
 }
 
 /**

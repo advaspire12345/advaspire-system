@@ -15,7 +15,7 @@ export default async function TransactionsPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.transactions;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   const [transactionsResult, participants, dbUser] = await Promise.all([
     getTransactionsForDisplayPaginated(user.email, { offset: 0, limit: 10 }),
@@ -42,7 +42,7 @@ export default async function TransactionsPage() {
           currentUserName={dbUser?.name}
           currentUserBranchId={dbUser?.branch_id ?? null}
           filterByBranch={permData!.role !== "super_admin" && permData!.role !== "group_admin"}
-          canAdjust={permData!.role === "super_admin" || permData!.role === "group_admin" || permData!.role === "company_admin"}
+          canAdjust={permData!.role === "super_admin" || permData!.role === "group_admin"}
         />
       </div>
     </main>

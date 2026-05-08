@@ -5,6 +5,7 @@ import { unstable_cache } from "next/cache";
 interface DashboardBranchAccess {
   branchIds: string[] | null;
   useCityName: boolean; // true for admin/branch_admin/instructor, false for super_admin
+  groupByCompany: boolean; // true for super_admin: aggregate branches under their parent company
 }
 
 /**
@@ -15,14 +16,14 @@ interface DashboardBranchAccess {
  */
 async function getDashboardBranchAccess(userEmail: string): Promise<DashboardBranchAccess> {
   const user = await getUserByEmail(userEmail);
-  if (!user) return { branchIds: [], useCityName: false };
+  if (!user) return { branchIds: [], useCityName: false, groupByCompany: false };
   if (isSuperAdmin(userEmail) || user.role === "super_admin") {
-    return { branchIds: null, useCityName: false };
+    return { branchIds: null, useCityName: false, groupByCompany: true };
   }
 
   let branchIds = await getUserBranchIds(userEmail);
-  if (!branchIds) return { branchIds: null, useCityName: true };
-  if (branchIds.length === 0) return { branchIds: [], useCityName: true };
+  if (!branchIds) return { branchIds: null, useCityName: true, groupByCompany: false };
+  if (branchIds.length === 0) return { branchIds: [], useCityName: true, groupByCompany: false };
 
   // Only expand company IDs for admin role, NOT branch_admin/instructor
   if (user.role === "group_admin") {
@@ -49,7 +50,70 @@ async function getDashboardBranchAccess(userEmail: string): Promise<DashboardBra
     }
   }
 
-  return { branchIds, useCityName: true };
+  return { branchIds, useCityName: true, groupByCompany: false };
+}
+
+/**
+ * Returns the entities to plot on the dashboard charts and a map from
+ * branch_id to entity_id. For super_admin, entities are companies and
+ * branches map to their parent company. For other roles, entities are
+ * the user's accessible branches (mapped to themselves).
+ */
+async function getChartEntities(
+  dashBranchIds: string[] | null,
+  useCityName: boolean,
+  groupByCompany: boolean,
+): Promise<{ entities: { id: string; name: string }[]; branchToEntity: Map<string, string> }> {
+  const branchToEntity = new Map<string, string>();
+
+  if (groupByCompany) {
+    const { data: companies } = await supabaseAdmin
+      .from("branches")
+      .select("id, name")
+      .eq("type", "company")
+      .is("deleted_at", null)
+      .order("name");
+
+    const entities = (companies ?? []).map((c: any) => ({ id: c.id, name: c.name }));
+    const companyIds = new Set(entities.map((c) => c.id));
+
+    const { data: children } = await supabaseAdmin
+      .from("branches")
+      .select("id, parent_id")
+      .in("type", ["hq", "branch"])
+      .is("deleted_at", null);
+
+    for (const b of children ?? []) {
+      if (b.parent_id && companyIds.has(b.parent_id)) {
+        branchToEntity.set(b.id, b.parent_id);
+      }
+    }
+
+    return { entities, branchToEntity };
+  }
+
+  let branchQuery = supabaseAdmin
+    .from("branches")
+    .select("id, name, city")
+    .in("type", ["hq", "branch"])
+    .is("deleted_at", null)
+    .order("name");
+
+  if (dashBranchIds) {
+    branchQuery = branchQuery.in("id", dashBranchIds);
+  }
+
+  const { data: branchesData } = await branchQuery;
+  const entities = (branchesData ?? []).map((b: any) => ({
+    id: b.id,
+    name: useCityName ? b.city || b.name : b.name,
+  }));
+
+  for (const b of branchesData ?? []) {
+    branchToEntity.set(b.id, b.id);
+  }
+
+  return { entities, branchToEntity };
 }
 
 // Helper function to group array items by a key
@@ -594,24 +658,12 @@ function getWeekOfMonth(date: Date): number {
 export const getAttendanceChartData = unstable_cache(
   async (userEmail: string): Promise<AttendanceChartData> => {
     return withRetry(async () => {
-      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
+      const { branchIds: dashBranchIds, useCityName, groupByCompany } = await getDashboardBranchAccess(userEmail);
 
-      // Get branches (exclude company-type entries — only hq/branch)
-      let branchQuery = supabaseAdmin
-        .from('branches')
-        .select('id, name, city')
-        .in('type', ['hq', 'branch'])
-        .is('deleted_at', null)
-        .order('name');
-
-      if (dashBranchIds) {
-        branchQuery = branchQuery.in('id', dashBranchIds);
-      }
-
-      const { data: branchesData } = await branchQuery;
-      const branches: ChartBranch[] = (branchesData ?? []).map((b: any, idx) => ({
-        id: b.id,
-        name: useCityName ? (b.city || b.name) : b.name,
+      const { entities, branchToEntity } = await getChartEntities(dashBranchIds, useCityName, groupByCompany);
+      const branches: ChartBranch[] = entities.map((e, idx) => ({
+        id: e.id,
+        name: e.name,
         color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
       }));
 
@@ -676,7 +728,8 @@ export const getAttendanceChartData = unstable_cache(
       // Process enrollment attendance data
       (enrollmentAttendanceRecords ?? []).forEach((record: any) => {
         const branchId = record.enrollments?.students?.branch_id;
-        if (!branchId || !attendanceData[branchId]) return;
+        const entityId = branchId ? branchToEntity.get(branchId) : undefined;
+        if (!entityId || !attendanceData[entityId]) return;
 
         const recordDate = new Date(record.date);
         const monthIndex = recordDate.getMonth();
@@ -688,9 +741,9 @@ export const getAttendanceChartData = unstable_cache(
 
         if (isPresent) {
           if (isTrial) {
-            attendanceData[branchId][monthIndex][weekIndex].trial += 1;
+            attendanceData[entityId][monthIndex][weekIndex].trial += 1;
           } else {
-            attendanceData[branchId][monthIndex][weekIndex].attendance += 1;
+            attendanceData[entityId][monthIndex][weekIndex].attendance += 1;
           }
         }
       });
@@ -698,7 +751,8 @@ export const getAttendanceChartData = unstable_cache(
       // Process trial attendance data - show in trial color (separate from weekly attendance)
       (trialAttendanceRecords ?? []).forEach((record: any) => {
         const branchId = record.trial?.branch_id;
-        if (!branchId || !attendanceData[branchId]) return;
+        const entityId = branchId ? branchToEntity.get(branchId) : undefined;
+        if (!entityId || !attendanceData[entityId]) return;
 
         const recordDate = new Date(record.date);
         const monthIndex = recordDate.getMonth();
@@ -708,7 +762,7 @@ export const getAttendanceChartData = unstable_cache(
 
         if (isPresent) {
           // Trial attendance shows in trial color (separate count)
-          attendanceData[branchId][monthIndex][weekIndex].trial += 1;
+          attendanceData[entityId][monthIndex][weekIndex].trial += 1;
         }
       });
 
@@ -726,23 +780,21 @@ export const getAttendanceChartData = unstable_cache(
       // Process enrollment data
       (enrollmentRecords ?? []).forEach((record: any) => {
         const branchId = record.students?.branch_id;
-        if (!branchId || !enrollmentData[branchId]) return;
+        const entityId = branchId ? branchToEntity.get(branchId) : undefined;
+        if (!entityId || !enrollmentData[entityId]) return;
 
         const enrolledDate = new Date(record.enrolled_at);
         const monthIndex = enrolledDate.getMonth();
         const weekIndex = Math.min(getWeekOfMonth(enrolledDate), 3);
 
         const status = record.status;
-        const isTrial = status === 'pending';
-        const isCancelled = status === 'cancelled';
 
-        if (isCancelled) {
-          enrollmentData[branchId][monthIndex][weekIndex].trial += 1; // trial = dropped
-        } else if (isTrial) {
-          enrollmentData[branchId][monthIndex][weekIndex].trial += 1;
-        } else {
-          enrollmentData[branchId][monthIndex][weekIndex].attendance += 1; // attendance = active enrollment
+        if (status === 'cancelled') {
+          enrollmentData[entityId][monthIndex][weekIndex].trial += 1; // trial = dropped
+        } else if (status === 'active') {
+          enrollmentData[entityId][monthIndex][weekIndex].attendance += 1; // attendance = active enrollment
         }
+        // pending enrollments are trials in flight — not counted here
       });
 
       return {
@@ -770,30 +822,18 @@ export interface MonthlyOverviewData {
 export interface OverviewChartData {
   branches: OverviewBranch[];
   attendanceData: MonthlyOverviewData;
-  engagementData: MonthlyOverviewData;
+  enrollmentData: MonthlyOverviewData;
 }
 
 export const getOverviewChartData = unstable_cache(
   async (userEmail: string): Promise<OverviewChartData> => {
     return withRetry(async () => {
-      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
+      const { branchIds: dashBranchIds, useCityName, groupByCompany } = await getDashboardBranchAccess(userEmail);
 
-      // Get branches (exclude company-type entries — only hq/branch)
-      let branchQuery = supabaseAdmin
-        .from('branches')
-        .select('id, name, city')
-        .in('type', ['hq', 'branch'])
-        .is('deleted_at', null)
-        .order('name');
-
-      if (dashBranchIds) {
-        branchQuery = branchQuery.in('id', dashBranchIds);
-      }
-
-      const { data: branchesData } = await branchQuery;
-      const branches: OverviewBranch[] = (branchesData ?? []).map((b: any, idx) => ({
-        id: b.id,
-        name: useCityName ? (b.city || b.name) : b.name,
+      const { entities, branchToEntity } = await getChartEntities(dashBranchIds, useCityName, groupByCompany);
+      const branches: OverviewBranch[] = entities.map((e, idx) => ({
+        id: e.id,
+        name: e.name,
         color: BRANCH_COLORS[idx % BRANCH_COLORS.length],
       }));
 
@@ -803,11 +843,11 @@ export const getOverviewChartData = unstable_cache(
 
       // Initialize monthly data arrays (60 months, oldest first)
       const attendanceData: MonthlyOverviewData = {};
-      const engagementData: MonthlyOverviewData = {};
+      const enrollmentData: MonthlyOverviewData = {};
 
       branches.forEach((branch) => {
         attendanceData[branch.id] = new Array(60).fill(0);
-        engagementData[branch.id] = new Array(60).fill(0);
+        enrollmentData[branch.id] = new Array(60).fill(0);
       });
 
       // Fetch enrollment attendance records with branch info from students table
@@ -843,7 +883,8 @@ export const getOverviewChartData = unstable_cache(
       // Process enrollment attendance data - aggregate by month
       (enrollmentAttendanceRecords ?? []).forEach((record: any) => {
         const branchId = record.enrollments?.students?.branch_id;
-        if (!branchId || !attendanceData[branchId]) return;
+        const entityId = branchId ? branchToEntity.get(branchId) : undefined;
+        if (!entityId || !attendanceData[entityId]) return;
 
         const recordDate = new Date(record.date);
         const isPresent = record.status === 'present' || record.status === 'late';
@@ -856,7 +897,7 @@ export const getOverviewChartData = unstable_cache(
           const monthIndex = 59 - monthsDiff;
 
           if (monthIndex >= 0 && monthIndex < 60) {
-            attendanceData[branchId][monthIndex] += 1;
+            attendanceData[entityId][monthIndex] += 1;
           }
         }
       });
@@ -864,7 +905,8 @@ export const getOverviewChartData = unstable_cache(
       // Process trial attendance data - add to attendance count
       (trialAttendanceRecords ?? []).forEach((record: any) => {
         const branchId = record.trial?.branch_id;
-        if (!branchId || !attendanceData[branchId]) return;
+        const entityId = branchId ? branchToEntity.get(branchId) : undefined;
+        if (!entityId || !attendanceData[entityId]) return;
 
         const recordDate = new Date(record.date);
         const isPresent = record.status === 'present' || record.status === 'late';
@@ -877,27 +919,30 @@ export const getOverviewChartData = unstable_cache(
           const monthIndex = 59 - monthsDiff;
 
           if (monthIndex >= 0 && monthIndex < 60) {
-            attendanceData[branchId][monthIndex] += 1;
+            attendanceData[entityId][monthIndex] += 1;
           }
         }
       });
 
-      // Fetch engagement data (using adcoin transactions as engagement metric)
-      const { data: engagementRecords } = await supabaseAdmin
-        .from('adcoin_transactions')
+      // Fetch enrollment records with branch info from students table
+      const { data: enrollmentRecords } = await supabaseAdmin
+        .from('enrollments')
         .select(`
           id,
-          created_at,
+          enrolled_at,
+          status,
           students!inner(branch_id)
         `)
-        .gte('created_at', startDate.toISOString());
+        .eq('status', 'active')
+        .gte('enrolled_at', startDate.toISOString());
 
-      // Process engagement data
-      (engagementRecords ?? []).forEach((record: any) => {
+      // Process enrollment data — count active enrollments per month
+      (enrollmentRecords ?? []).forEach((record: any) => {
         const branchId = record.students?.branch_id;
-        if (!branchId || !engagementData[branchId]) return;
+        const entityId = branchId ? branchToEntity.get(branchId) : undefined;
+        if (!entityId || !enrollmentData[entityId]) return;
 
-        const recordDate = new Date(record.created_at);
+        const recordDate = new Date(record.enrolled_at);
 
         // Calculate month index (0 = oldest, 59 = current)
         const monthsDiff =
@@ -906,14 +951,14 @@ export const getOverviewChartData = unstable_cache(
         const monthIndex = 59 - monthsDiff;
 
         if (monthIndex >= 0 && monthIndex < 60) {
-          engagementData[branchId][monthIndex] += 1;
+          enrollmentData[entityId][monthIndex] += 1;
         }
       });
 
       return {
         branches,
         attendanceData,
-        engagementData,
+        enrollmentData,
       };
     });
   },

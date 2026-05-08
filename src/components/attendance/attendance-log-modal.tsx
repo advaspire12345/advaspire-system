@@ -50,17 +50,7 @@ interface AttendanceLogModalProps {
 }
 
 export interface AttendanceLogFormData {
-  status: AttendanceStatus;
-  classType: "Physical" | "Online";
-  actualDay: string;
-  actualStartTime: string;
-  instructorName: string;
-  lastActivity: string;
-  adcoin: number;
-  projectPhotos: string[];
-  notes: string;
-  lesson: string;
-  mission: string;
+  studentName: string;
 }
 
 const DAYS_OF_WEEK = [
@@ -104,6 +94,7 @@ export function AttendanceLogModal({
   onDelete,
 }: AttendanceLogModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [studentName, setStudentName] = useState("");
   const [status, setStatus] = useState<AttendanceStatus>("present");
   const [classType, setClassType] = useState<"Physical" | "Online">("Physical");
   const [actualDay, setActualDay] = useState("");
@@ -123,6 +114,7 @@ export function AttendanceLogModal({
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open && record) {
+      setStudentName(record.studentName);
       setStatus(record.status);
       setClassType(record.classType ?? "Physical");
       setActualDay(record.dayOfWeek ?? "");
@@ -235,19 +227,7 @@ export function AttendanceLogModal({
       if (mode === "delete") {
         await onDelete();
       } else {
-        await onSubmit({
-          status,
-          classType,
-          actualDay,
-          actualStartTime,
-          instructorName: status === "absent" ? "" : instructorName,
-          lastActivity: status === "absent" ? "" : lastActivity,
-          adcoin: status === "absent" ? 0 : adcoin,
-          projectPhotos: status === "absent" ? [] : projectPhotos,
-          notes: status === "absent" ? reason : "",
-          lesson: status === "absent" ? "" : lesson,
-          mission: status === "absent" ? "" : mission,
-        });
+        await onSubmit({ studentName });
       }
       onOpenChange(false);
     } catch (error) {
@@ -262,7 +242,8 @@ export function AttendanceLogModal({
     label: i.name,
   }));
 
-  const isReadonly = mode === "delete";
+  // Attendance history is immutable — only the student name can be changed.
+  const isReadonly = mode === "delete" || mode === "edit";
   const isAbsent = status === "absent";
   const readonlyFieldClass = "bg-muted/50 cursor-not-allowed opacity-70";
 
@@ -295,15 +276,16 @@ export function AttendanceLogModal({
           )}
 
           <div className="space-y-5 mt-8">
-            {/* Student (readonly) */}
+            {/* Student — the only field that can be edited on attendance history */}
             <div className="relative">
               <input
                 type="text"
-                readOnly
-                value={record.studentName}
+                readOnly={mode === "delete"}
+                value={mode === "edit" ? studentName : record.studentName}
+                onChange={(e) => setStudentName(e.target.value)}
                 className={cn(
-                  "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
-                  readonlyFieldClass
+                  "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center bg-transparent transition-colors focus:border-[#23D2E2] focus:outline-none",
+                  mode === "delete" && readonlyFieldClass
                 )}
               />
               <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">

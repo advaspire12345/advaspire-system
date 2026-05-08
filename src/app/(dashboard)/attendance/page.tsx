@@ -22,7 +22,7 @@ export default async function AttendancePage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.attendance;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   const dbUser = await getUserByEmail(user.email);
   const role = permData!.role;

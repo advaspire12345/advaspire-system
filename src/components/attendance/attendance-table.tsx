@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import {
   Search,
   UserCheck,
@@ -48,6 +49,7 @@ export interface AttendanceRow {
   sessionsRemaining: number;
   // Whether student has an active exam for this enrollment
   hasExam: boolean;
+  examLevel?: number | null;
   // Type to distinguish between enrollment and trial
   type: 'enrollment' | 'trial';
   // Trial-specific fields
@@ -181,6 +183,36 @@ export function AttendanceTable({
   useEffect(() => {
     setData(initialData);
   }, [initialData]);
+
+  // Real-time sync: when a trial is created/edited/deleted on the trial page,
+  // the mark-attendance row that mirrors it must reflect the change live without
+  // a manual refresh. Subscribe to postgres_changes on the trials table and
+  // refetch via router.refresh() — debounced so a burst of edits coalesces.
+  useEffect(() => {
+    const supabase = createClient();
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        router.refresh();
+      }, 400);
+    };
+
+    const channel = supabase
+      .channel("attendance-trial-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "trials" },
+        scheduleRefresh,
+      )
+      .subscribe();
+
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [router]);
 
   // Unified modal state
   const [modalOpen, setModalOpen] = useState(false);

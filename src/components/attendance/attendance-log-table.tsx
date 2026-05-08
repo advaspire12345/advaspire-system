@@ -285,44 +285,21 @@ export function AttendanceLogTable({
     setModalOpen(true);
   };
 
-  // Handle update
+  // Handle update — attendance history is immutable except for the student name.
   const handleUpdate = useCallback(
     async (formData: AttendanceLogFormData) => {
       if (!selectedRecord) return;
 
       const result = await updateAttendanceLogAction(selectedRecord.id, {
-        status: formData.status,
-        classType: formData.classType,
-        actualDay: formData.actualDay,
-        actualStartTime: formData.actualStartTime,
-        instructorName: formData.instructorName,
-        lastActivity: formData.lastActivity,
-        notes: formData.notes,
-        projectPhotos: formData.projectPhotos,
-        adcoin: formData.adcoin,
-        lesson: formData.lesson,
-        mission: formData.mission,
+        studentName: formData.studentName,
       });
 
       if (result.success) {
-        // Update local state
+        const renamedStudentId = selectedRecord.studentId;
         setData((prev) =>
           prev.map((item) =>
-            item.id === selectedRecord.id
-              ? {
-                  ...item,
-                  status: formData.status,
-                  classType: formData.classType,
-                  dayOfWeek: formData.actualDay,
-                  actualStartTime: formData.actualStartTime,
-                  instructorName: formData.instructorName,
-                  lastActivity: formData.lastActivity,
-                  notes: formData.notes,
-                  projectPhotos: formData.projectPhotos,
-                  adcoin: formData.adcoin,
-                  lesson: formData.lesson,
-                  mission: formData.mission,
-                }
+            item.studentId === renamedStudentId
+              ? { ...item, studentName: formData.studentName }
               : item,
           ),
         );
@@ -789,35 +766,21 @@ export function AttendanceLogTable({
                         />
                       </td>
 
-                      {/* Actions */}
+                      {/* Actions — attendance history is immutable except student name */}
                       <td
-                        className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")}
+                        className={cn("px-4 py-3", !canEdit && "hidden")}
                         style={{ width: columns[14].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
-                          {/* Edit Button */}
                           {canEdit && (
                             <button
                               type="button"
                               onClick={() => openModal("edit", row)}
                               className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                              aria-label={`Edit attendance for ${row.studentName}`}
-                              title="Edit"
+                              aria-label={`Edit student name for ${row.studentName}`}
+                              title="Edit student name"
                             >
                               <Pencil className="h-5 w-5" />
-                            </button>
-                          )}
-
-                          {/* Delete Button */}
-                          {canDelete && (
-                            <button
-                              type="button"
-                              onClick={() => openModal("delete", row)}
-                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                              aria-label={`Delete attendance for ${row.studentName}`}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-5 w-5" />
                             </button>
                           )}
                         </div>

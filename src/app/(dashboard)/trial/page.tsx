@@ -4,7 +4,7 @@ import { Banner } from "@/components/ui/banner";
 import { TrialTable } from "@/components/trial/trial-table";
 import { getTrialsForTable } from "@/data/trial";
 import { getAllBranches } from "@/data/branches";
-import { getAllCourses } from "@/data/courses";
+import { getCoursesForUser } from "@/data/courses";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 import { getUserBranchIds } from "@/data/users";
 
@@ -17,12 +17,12 @@ export default async function TrialPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.trials;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   const [trials, branchesData, coursesData] = await Promise.all([
     getTrialsForTable(user.email),
     getAllBranches(),
-    getAllCourses(),
+    getCoursesForUser(user.email),
   ]);
 
   // Filter branches based on role

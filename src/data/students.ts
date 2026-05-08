@@ -618,6 +618,10 @@ export interface StudentTableRow {
   parentPostcode: string | null;
   parentCity: string | null;
   parentRelationship: string | null;
+  // Branch transfer breadcrumb — set when this student row was transferred OUT
+  // to another branch. The frontend renders the row as a read-only "ghost"
+  // tagged "Transferred to {transferredToBranchName}".
+  transferredToBranchName: string | null;
 }
 
 /**
@@ -1074,6 +1078,7 @@ export async function getStudentsForTable(
       parentPostcode: parent?.postcode || null,
       parentCity: parent?.city || null,
       parentRelationship: firstParentLink?.relationship || null,
+      transferredToBranchName: null,
     };
   };
 
@@ -1166,7 +1171,9 @@ export async function getStudentsForTablePaginated(
       level,
       adcoin_balance,
       created_at,
+      transferred_to_student_id,
       branch:branches(name, city),
+      transferred_to:students!transferred_to_student_id(branch:branches(name, city)),
       enrollments(
         id,
         status,
@@ -1509,6 +1516,13 @@ export async function getStudentsForTablePaginated(
       parentPostcode: parent?.postcode || null,
       parentCity: parent?.city || null,
       parentRelationship: firstParentLink?.relationship || null,
+      transferredToBranchName: (() => {
+        if (!student.transferred_to_student_id) return null;
+        const xfer = student.transferred_to as unknown as { branch?: { name?: string; city?: string } } | null;
+        const b = xfer?.branch;
+        if (!b) return null;
+        return useCityName ? (b.city || b.name || null) : (b.name || null);
+      })(),
     };
   };
 
@@ -1613,6 +1627,18 @@ export async function updateOrCreateEnrollment(
     if (updateError) {
       console.error('Error updating enrollment:', updateError);
       return false;
+    }
+
+    // If pooled student is going inactive, redistribute the pool so it can
+    // auto-dissolve when only one member remains. Keeps enrollment.pool_id
+    // as a breadcrumb so the student can be restored later (Scenario 7).
+    if (isGoingInactive && sameCourseEnrollment.pool_id) {
+      try {
+        const { redistributePoolOnInactive } = await import("./pools");
+        await redistributePoolOnInactive(sameCourseEnrollment.id, studentId);
+      } catch (poolError) {
+        console.error('Error redistributing pool on inactive transition:', poolError);
+      }
     }
   } else {
     // No existing enrollment for this course - create a new one

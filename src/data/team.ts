@@ -25,6 +25,7 @@ export interface TeamTableRow {
   role: UserRole;
   employedDate: string | null;
   status: TeamMemberStatus;
+  inChargeProgramIds: string[];
 }
 
 // ============================================
@@ -90,7 +91,8 @@ export async function getTeamMembersForTable(
       role,
       employed_date,
       status,
-      branch:branches!users_branch_id_branches_id_fk(name, city)
+      branch:branches!users_branch_id_branches_id_fk(name, city),
+      course_instructors(course_id)
     `)
     .in('role', staffRoles)
     .is('deleted_at', null)
@@ -124,6 +126,9 @@ export async function getTeamMembersForTable(
     role: user.role as UserRole,
     employedDate: user.employed_date || null,
     status: (user.status as TeamMemberStatus) || 'active',
+    inChargeProgramIds: (user.course_instructors ?? [])
+      .map((ci: { course_id: string }) => ci.course_id)
+      .filter(Boolean),
   }));
 }
 

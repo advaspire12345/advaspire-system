@@ -27,6 +27,9 @@ export interface ProgramFormPayload {
   youtube_url: string | null;
   assessment_enabled: boolean;
   levelling_time_minutes: number | null;
+  // Only used when program_type is 'bootcamp' or 'workshop' — fixed-window programs.
+  start_date: string | null;
+  end_date: string | null;
 
   // Multi-select
   languages: string[];

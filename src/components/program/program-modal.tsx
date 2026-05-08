@@ -373,9 +373,11 @@ export function ProgramModal({
   const [numberOfLevels, setNumberOfLevels] = useState("");
   const [sessionsToLevelUp, setSessionsToLevelUp] = useState("");
   const [languages, setLanguages] = useState<string[]>([]);
-  const [instructorIds, setInstructorIds] = useState<string[]>([]);
   const [programType, setProgramType] = useState("");
   const [status, setStatus] = useState("active");
+  // For bootcamp/workshop only — datetime-local strings (e.g. "2026-05-10T18:30")
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [branchIds, setBranchIds] = useState<string[]>([]);
   const [coverImageUrl, setCoverImageUrl] = useState("");
   const [coverImagePreview, setCoverImagePreview] = useState("");
@@ -500,8 +502,9 @@ export function ProgramModal({
     setNumberOfLevels(data.number_of_levels?.toString() || "");
     setSessionsToLevelUp(data.sessions_to_level_up?.toString() || "");
     setLanguages(data.languages || []);
-    setInstructorIds(data.instructors?.map((i) => i.id) || []);
     setProgramType(data.program_type || "");
+    setStartDate(data.start_date ? data.start_date.slice(0, 16) : "");
+    setEndDate(data.end_date ? data.end_date.slice(0, 16) : "");
     setStatus(data.status || "active");
     setBranchIds(data.branches?.map((b) => b.id) || []);
     setCoverImageUrl(data.cover_image_url || "");
@@ -620,9 +623,10 @@ export function ProgramModal({
     setNumberOfLevels("");
     setSessionsToLevelUp("");
     setLanguages([]);
-    setInstructorIds([]);
     setProgramType("");
     setStatus("active");
+    setStartDate("");
+    setEndDate("");
     setBranchIds([]);
     setCoverImageUrl("");
     setCoverImagePreview("");
@@ -756,7 +760,13 @@ export function ProgramModal({
       assessment_enabled: false,
       levelling_time_minutes: null,
       languages,
-      instructor_ids: instructorIds,
+      instructor_ids: [],
+      start_date: (programType === "bootcamp" || programType === "workshop") && startDate
+        ? new Date(startDate).toISOString()
+        : null,
+      end_date: (programType === "bootcamp" || programType === "workshop") && endDate
+        ? new Date(endDate).toISOString()
+        : null,
       branch_ids: branchIds,
       requirements: requirements.filter((r) => r.trim()),
       outcomes: outcomes.filter((o) => o.trim()),
@@ -1227,9 +1237,11 @@ export function ProgramModal({
                         <FloatingInput
                           label="Number of Levels"
                           type="number"
+                          min={0}
                           value={numberOfLevels}
                           onChange={(e) => {
-                            const val = e.target.value;
+                            const raw = e.target.value;
+                            const val = raw === "" ? "" : Math.max(0, parseInt(raw) || 0).toString();
                             setNumberOfLevels(val);
                             if (val === "0") {
                               setSessionsToLevelUp("0");
@@ -1242,8 +1254,13 @@ export function ProgramModal({
                         <FloatingInput
                           label="Sessions to Level Up"
                           type="number"
+                          min={0}
                           value={sessionsToLevelUp}
-                          onChange={(e) => setSessionsToLevelUp(e.target.value)}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const val = raw === "" ? "" : Math.max(0, parseInt(raw) || 0).toString();
+                            setSessionsToLevelUp(val);
+                          }}
                         />
                       )}
 
@@ -1256,19 +1273,6 @@ export function ProgramModal({
                             value: l.value,
                             label: l.label,
                           }))}
-                        />
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <FloatingMultiSelect
-                          label="Instructors"
-                          value={instructorIds}
-                          onChange={setInstructorIds}
-                          options={instructors.map((i) => ({
-                            value: i.id,
-                            label: i.name,
-                          }))}
-                          searchable
                         />
                       </div>
 
@@ -1291,6 +1295,23 @@ export function ProgramModal({
                           label: s.label,
                         }))}
                       />
+
+                      {(programType === "bootcamp" || programType === "workshop") && (
+                        <>
+                          <FloatingInput
+                            label="Start From"
+                            type="datetime-local"
+                            value={startDate}
+                            onChange={(e) => setStartDate(e.target.value)}
+                          />
+                          <FloatingInput
+                            label="End To"
+                            type="datetime-local"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                          />
+                        </>
+                      )}
 
                       <div className="md:col-span-2">
                         <FloatingMultiSelect
@@ -1342,6 +1363,7 @@ export function ProgramModal({
                     <CurriculumBuilder
                       sections={sections}
                       onChange={setSections}
+                      numberOfLevels={Math.max(1, parseInt(numberOfLevels) || 4)}
                     />
                   </>
                 )}

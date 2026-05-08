@@ -36,6 +36,19 @@ export interface TeamMemberFormPayload {
   role: UserRole;
   employedDate: string | null;
   status: TeamMemberStatus;
+  // Programs this user is in charge of (company/assistant/instructor only).
+  // Persisted via the course_instructors junction table.
+  inChargeProgramIds?: string[];
+}
+
+async function syncInChargePrograms(userId: string, programIds: string[] | undefined): Promise<void> {
+  // Replace strategy: clear existing assignments, then insert the new set.
+  await supabaseAdmin.from("course_instructors").delete().eq("user_id", userId);
+  if (programIds && programIds.length > 0) {
+    await supabaseAdmin.from("course_instructors").insert(
+      programIds.map((course_id) => ({ user_id: userId, course_id }))
+    );
+  }
 }
 
 export async function createTeamMemberAction(
@@ -92,7 +105,17 @@ export async function createTeamMemberAction(
       return { success: false, error: "Failed to create team member" };
     }
 
+    // Sync in-charge programs (only relevant for company/assistant/instructor)
+    if (
+      payload.role === "company_admin" ||
+      payload.role === "assistant_admin" ||
+      payload.role === "instructor"
+    ) {
+      await syncInChargePrograms(user.id, payload.inChargeProgramIds);
+    }
+
     revalidatePath("/team");
+    revalidatePath("/program");
     return { success: true, userId: user.id };
   } catch (error) {
     console.error("Error in createTeamMemberAction:", error);
@@ -129,7 +152,19 @@ export async function updateTeamMemberAction(
       return { success: false, error: "Failed to update team member" };
     }
 
+    if (
+      payload.role === "company_admin" ||
+      payload.role === "assistant_admin" ||
+      payload.role === "instructor"
+    ) {
+      await syncInChargePrograms(userId, payload.inChargeProgramIds);
+    } else {
+      // Group admin / super admin don't have in-charge programs; clear if any.
+      await syncInChargePrograms(userId, []);
+    }
+
     revalidatePath("/team");
+    revalidatePath("/program");
     return { success: true };
   } catch (error) {
     console.error("Error in updateTeamMemberAction:", error);
