@@ -35,7 +35,7 @@ export async function getStudentWithBranch(studentId: string): Promise<StudentWi
     .from('students')
     .select(`
       *,
-      branch:branches(*)
+      branch:branches!students_branch_id_branches_id_fk(*)
     `)
     .eq('id', studentId)
     .is('deleted_at', null)
@@ -73,7 +73,7 @@ export async function getStudentFull(studentId: string): Promise<StudentFull | n
     .from('students')
     .select(`
       *,
-      branch:branches(*),
+      branch:branches!students_branch_id_branches_id_fk(*),
       enrollments(
         *,
         course:courses(*)
@@ -177,7 +177,7 @@ export async function getStudentsForPayment(userEmail: string): Promise<StudentF
     .select(`
       id,
       name,
-      branch:branches!inner(name, city),
+      branch:branches!students_branch_id_branches_id_fk(name, city),
       parent_students(
         parent:parents(name, phone)
       ),
@@ -681,7 +681,7 @@ export async function getStudentsForTable(
       level,
       adcoin_balance,
       created_at,
-      branch:branches(name, city),
+      branch:branches!students_branch_id_branches_id_fk(name, city),
       enrollments(
         id,
         status,
@@ -1172,8 +1172,7 @@ export async function getStudentsForTablePaginated(
       adcoin_balance,
       created_at,
       transferred_to_student_id,
-      branch:branches(name, city),
-      transferred_to:students!transferred_to_student_id(branch:branches(name, city)),
+      branch:branches!students_branch_id_branches_id_fk(name, city),
       enrollments(
         id,
         status,
@@ -1516,24 +1515,44 @@ export async function getStudentsForTablePaginated(
       parentPostcode: parent?.postcode || null,
       parentCity: parent?.city || null,
       parentRelationship: firstParentLink?.relationship || null,
-      transferredToBranchName: (() => {
-        if (!student.transferred_to_student_id) return null;
-        const xfer = student.transferred_to as unknown as { branch?: { name?: string; city?: string } } | null;
-        const b = xfer?.branch;
-        if (!b) return null;
-        return useCityName ? (b.city || b.name || null) : (b.name || null);
-      })(),
+      transferredToBranchName: null, // populated below in a single batched query
     };
   };
+
+  // Batched lookup for the "transferred-to" branch names — separate query
+  // avoids the brittle PostgREST self-join syntax.
+  const transferredTargetIds = (data ?? [])
+    .map((s: any) => s.transferred_to_student_id)
+    .filter((x: string | null): x is string => !!x);
+  const xferBranchByStudentId = new Map<string, string>();
+  if (transferredTargetIds.length > 0) {
+    const { data: xferRows } = await supabaseAdmin
+      .from("students")
+      .select("id, branch:branches!students_branch_id_branches_id_fk(name, city)")
+      .in("id", transferredTargetIds);
+    for (const row of (xferRows ?? []) as any[]) {
+      const b = row.branch as { name?: string; city?: string } | null;
+      if (!b) continue;
+      const label = useCityName ? (b.city || b.name) : b.name;
+      if (label) xferBranchByStudentId.set(row.id, label);
+    }
+  }
 
   const rows: StudentTableRow[] = [];
   for (const student of data ?? []) {
     const enrollments = student.enrollments || [];
+    const xferLabel = student.transferred_to_student_id
+      ? xferBranchByStudentId.get(student.transferred_to_student_id) ?? null
+      : null;
     if (enrollments.length === 0) {
-      rows.push(buildRow(student, null));
+      const row = buildRow(student, null);
+      row.transferredToBranchName = xferLabel;
+      rows.push(row);
     } else {
       for (const enrollment of enrollments) {
-        rows.push(buildRow(student, enrollment));
+        const row = buildRow(student, enrollment);
+        row.transferredToBranchName = xferLabel;
+        rows.push(row);
       }
     }
   }

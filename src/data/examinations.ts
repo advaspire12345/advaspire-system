@@ -83,7 +83,7 @@ export async function getExaminationsForTable(
         photo,
         date_of_birth,
         branch_id,
-        branch:branches!inner(id, name, city)
+        branch:branches!students_branch_id_branches_id_fk(id, name, city)
       ),
       enrollment:enrollments(
         id,
@@ -229,7 +229,7 @@ export async function getExaminationsForTablePaginated(
         photo,
         date_of_birth,
         branch_id,
-        branch:branches!inner(id, name, city)
+        branch:branches!students_branch_id_branches_id_fk(id, name, city)
       ),
       enrollment:enrollments(
         id,
@@ -352,7 +352,7 @@ export async function getEligibleStudentsForExam(
         photo,
         date_of_birth,
         branch_id,
-        branch:branches!inner(id, name, city)
+        branch:branches!students_branch_id_branches_id_fk(id, name, city)
       ),
       course:courses!inner(
         id,
@@ -797,7 +797,7 @@ export async function getAllStudentsForExam(
         photo,
         date_of_birth,
         branch_id,
-        branch:branches!inner(id, name, city)
+        branch:branches!students_branch_id_branches_id_fk(id, name, city)
       ),
       course:courses!inner(
         id,
