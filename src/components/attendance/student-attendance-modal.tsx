@@ -503,20 +503,27 @@ export function StudentAttendanceModal({
     label: i.name,
   }));
 
-  // Lesson options: curriculum lessons + Competition
+  // Lesson options: curriculum lessons + Competition + (Exam if student has scheduled exam)
   const lessonOptions = useMemo(() => {
     const options = curriculumLessons.map((l) => ({
       value: l.title,
       label: l.title,
     }));
-    // Add Competition option at the end
     options.push({ value: "Competition", label: "Competition" });
+    if (selectedRow?.hasExam) {
+      options.push({ value: "Exam", label: "Exam" });
+    }
     return options;
-  }, [curriculumLessons]);
+  }, [curriculumLessons, selectedRow?.hasExam]);
 
   // Mission options: depends on selected lesson
   const missionOptions = useMemo(() => {
     if (!lesson) return [];
+
+    // Exam: only one option — the level the student is sitting for
+    if (lesson === "Exam" && selectedRow?.examLevel) {
+      return [{ value: `Level ${selectedRow.examLevel}`, label: `Level ${selectedRow.examLevel}` }];
+    }
 
     // If Competition is selected, show Preparation and Showcase
     if (lesson === "Competition") {

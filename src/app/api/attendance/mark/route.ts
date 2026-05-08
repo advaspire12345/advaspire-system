@@ -489,6 +489,20 @@ export async function POST(request: NextRequest) {
             .eq('description', txDescription)
             .maybeSingle();
 
+          // Determine how much the sender's balance needs to change.
+          //   New tx:        delta = +body.adcoin   (deduct full amount)
+          //   Updated tx:    delta = body.adcoin - existingTx.amount  (deduct only the difference)
+          //   Same amount:   delta = 0              (no-op)
+          const senderDelta = existingTx ? body.adcoin - existingTx.amount : body.adcoin;
+
+          // Reject if sender lacks enough adcoin to cover the delta.
+          if (senderDelta > 0 && (user.adcoin_balance ?? 0) < senderDelta) {
+            return NextResponse.json(
+              { error: `Insufficient adcoin. You have ${user.adcoin_balance ?? 0}, need ${senderDelta}.` },
+              { status: 400 }
+            );
+          }
+
           if (!existingTx) {
             // No existing transaction — create one
             const { error: txError } = await supabaseAdmin
@@ -506,10 +520,10 @@ export async function POST(request: NextRequest) {
               console.warn('[Attendance Mark] Failed to create adcoin transaction:', txError);
             } else {
               await updateAdcoinBalance(enrollment.student_id, student.adcoin_balance + body.adcoin);
+              await updateAdcoinBalance(user.id, (user.adcoin_balance ?? 0) - body.adcoin);
             }
           } else if (existingTx.amount !== body.adcoin) {
-            // Transaction exists but amount changed — update and adjust balance
-            const diff = body.adcoin - existingTx.amount;
+            // Transaction exists but amount changed — update and adjust both balances by the diff
             const { error: updateTxError } = await supabaseAdmin
               .from('adcoin_transactions')
               .update({ amount: body.adcoin })
@@ -518,7 +532,8 @@ export async function POST(request: NextRequest) {
             if (updateTxError) {
               console.warn('[Attendance Mark] Failed to update adcoin transaction:', updateTxError);
             } else {
-              await updateAdcoinBalance(enrollment.student_id, student.adcoin_balance + diff);
+              await updateAdcoinBalance(enrollment.student_id, student.adcoin_balance + senderDelta);
+              await updateAdcoinBalance(user.id, (user.adcoin_balance ?? 0) - senderDelta);
             }
           }
           // If existingTx.amount === body.adcoin, no change needed
@@ -557,6 +572,113 @@ export async function POST(request: NextRequest) {
       console.log('[Attendance Mark] Session tracking result:', trackingResult);
       if (!trackingResult.success) {
         console.warn('[Attendance Mark] Session tracking warning:', trackingResult.message);
+      }
+
+      // Level-up exam auto-creation: insert an "eligible" exam row when the
+      // student crosses sessions_to_level_up for their current level.
+      const { maybeCreateLevelUpExam } = await import("@/data/examinations");
+      const examId = await maybeCreateLevelUpExam(body.enrollmentId);
+      if (examId) {
+        console.log('[Attendance Mark] Auto-created level-up exam:', examId);
+        revalidatePath("/examination");
+      }
+
+      // F1: payment-due notification when sessions_remaining hits 1 (per Q4).
+      // For pool enrollments: check pool.sessions_remaining instead.
+      try {
+        const { notifyStaff, resolveBranchCompanyId } = await import("@/data/notifications");
+        const { data: enr } = await supabaseAdmin
+          .from("enrollments")
+          .select("id, sessions_remaining, pool_id, student:students(id, name, branch_id)")
+          .eq("id", body.enrollmentId)
+          .single();
+        const studentInfo = (enr?.student as any) ?? null;
+
+        let triggerNotify = false;
+        let label = "";
+        if (enr?.pool_id) {
+          const { data: pool } = await supabaseAdmin
+            .from("shared_session_pools")
+            .select("sessions_remaining, name")
+            .eq("id", enr.pool_id)
+            .single();
+          if (pool && pool.sessions_remaining === 1) {
+            triggerNotify = true;
+            label = `Pool "${pool.name ?? "shared"}" has 1 session left`;
+          }
+        } else if (enr?.sessions_remaining === 1) {
+          triggerNotify = true;
+          label = `${studentInfo?.name ?? "Student"} has 1 session left — payment due soon`;
+        }
+
+        if (triggerNotify && studentInfo?.branch_id) {
+          const companyId = await resolveBranchCompanyId(studentInfo.branch_id);
+          await notifyStaff(
+            {
+              roles: ["group_admin", "company_admin", "assistant_admin"],
+              companyId,
+            },
+            {
+              type: "payment_due",
+              title: "Payment due soon",
+              body: label,
+              link: `/pending-payments`,
+              data: { enrollmentId: body.enrollmentId, studentId: studentInfo?.id },
+            },
+          );
+        }
+      } catch (notifyErr) {
+        console.warn("[Notify payment_due] failed:", notifyErr);
+      }
+
+      // F1: notify each parent linked to this student that attendance was marked.
+      try {
+        const { notifyParent } = await import("@/data/notifications");
+        const { data: enr } = await supabaseAdmin
+          .from("enrollments")
+          .select("student:students(id, name)")
+          .eq("id", body.enrollmentId)
+          .single();
+        const studentInfo = (enr?.student as any) ?? null;
+        if (studentInfo?.id) {
+          const { data: parentLinks } = await supabaseAdmin
+            .from("parent_students")
+            .select("parent_id")
+            .eq("student_id", studentInfo.id);
+          for (const link of parentLinks ?? []) {
+            await notifyParent(link.parent_id, {
+              type: "child_attendance_marked",
+              title: `${studentInfo.name} — attendance marked`,
+              body: body.lastActivity ? `Activity: ${body.lastActivity}` : `Status: ${body.status}`,
+              link: `/parent`,
+              data: {
+                studentId: studentInfo.id,
+                date: body.date,
+                status: body.status,
+                activity: body.lastActivity ?? null,
+              },
+            });
+          }
+        }
+      } catch (notifyErr) {
+        console.warn("[Notify child_attendance_marked] failed:", notifyErr);
+      }
+
+      // Exam auto-progression: if the user picked lesson="Exam" while marking present,
+      // bump the active scheduled exam to in_progress (only if it's still 'scheduled').
+      // Already-pass / already-fail rows are NOT re-touched (per spec).
+      if (body.lesson === "Exam") {
+        const { error: examUpdateError } = await supabaseAdmin
+          .from("examinations")
+          .update({ status: "in_progress", updated_at: new Date().toISOString() })
+          .eq("enrollment_id", body.enrollmentId)
+          .eq("status", "scheduled")
+          .is("deleted_at", null);
+        if (examUpdateError) {
+          console.warn("[Attendance Mark] Failed to auto-bump exam status:", examUpdateError);
+        } else {
+          revalidatePath("/examination");
+        }
       }
 
       // ALWAYS revalidate affected pages after session tracking (even if no pending payment created)

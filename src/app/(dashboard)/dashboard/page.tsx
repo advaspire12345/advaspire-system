@@ -31,7 +31,7 @@ export default async function DashboardPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.dashboard;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   // Run on-demand expiry check
   const { checkAndExpireEnrollments } = await import("@/data/enrollments");

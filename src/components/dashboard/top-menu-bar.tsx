@@ -1,9 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Coins, Search, Settings, Bell, X, Check } from "lucide-react";
 import { notify } from "@/lib/notify";
+import {
+  fetchMyNotificationsAction,
+  markNotificationReadAction,
+  markAllNotificationsReadAction,
+} from "@/app/(dashboard)/notifications/actions";
+import { formatDistanceToNow } from "date-fns";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -31,12 +37,13 @@ interface AdcoinStats {
   adcoinChange: number;
 }
 
-interface Notification {
+interface NotificationItem {
   id: string;
   title: string;
-  message: string;
-  time: string;
-  read: boolean;
+  body: string | null;
+  link: string | null;
+  read_at: string | null;
+  created_at: string;
 }
 
 export function TopMenuBar() {
@@ -45,32 +52,47 @@ export function TopMenuBar() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [adcoinStats, setAdcoinStats] = useState<AdcoinStats | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([
-    { id: "1", title: "New Student", message: "John Doe has enrolled in Math 101", time: "5m ago", read: false },
-    { id: "2", title: "Payment Received", message: "Payment of $500 confirmed", time: "1h ago", read: false },
-    { id: "3", title: "Attendance Alert", message: "3 students marked absent today", time: "2h ago", read: true },
-  ]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const supabase = createClient();
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const refreshNotifications = useCallback(async () => {
+    const result = await fetchMyNotificationsAction({ limit: 20 });
+    setNotifications(result.notifications as NotificationItem[]);
+    setUnreadCount(result.unreadCount);
+  }, []);
 
-  const markAsRead = (id: string) => {
+  useEffect(() => {
+    refreshNotifications();
+    // Poll every 60s while the menu bar is mounted so unread count stays fresh
+    const interval = setInterval(refreshNotifications, 60_000);
+    return () => clearInterval(interval);
+  }, [refreshNotifications]);
+
+  const markAsRead = async (id: string, link: string | null) => {
+    const target = notifications.find((n) => n.id === id);
     setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+      prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
     );
-    const notification = notifications.find((n) => n.id === id);
-    if (notification && !notification.read) {
-      notify.info(notification.title, notification.message);
+    if (target && !target.read_at) {
+      setUnreadCount((c) => Math.max(0, c - 1));
     }
+    await markNotificationReadAction(id);
+    if (link) router.push(link);
   };
 
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  const markAllAsRead = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
+    setUnreadCount(0);
+    await markAllNotificationsReadAction();
     notify.success("All notifications marked as read");
   };
 
-  const clearNotification = (id: string) => {
+  // X-button on notification: just mark read locally — don't actually delete
+  // (the cron purges anything older than 30 days).
+  const clearNotification = async (id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
+    await markNotificationReadAction(id);
   };
 
   useEffect(() => {
@@ -236,15 +258,15 @@ export function TopMenuBar() {
                 <DropdownMenuItem
                   key={notification.id}
                   className={`flex flex-col items-start gap-1 p-3 cursor-pointer ${
-                    !notification.read ? "bg-blue-50 dark:bg-blue-950" : ""
+                    !notification.read_at ? "bg-blue-50 dark:bg-blue-950" : ""
                   }`}
-                  onClick={() => markAsRead(notification.id)}
+                  onClick={() => markAsRead(notification.id, notification.link)}
                 >
                   <div className="flex w-full items-start justify-between">
                     <span className="font-semibold">{notification.title}</span>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        {notification.time}
+                        {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
                       </span>
                       <button
                         onClick={(e) => {
@@ -257,10 +279,12 @@ export function TopMenuBar() {
                       </button>
                     </div>
                   </div>
-                  <span className="text-sm text-muted-foreground">
-                    {notification.message}
-                  </span>
-                  {!notification.read && (
+                  {notification.body && (
+                    <span className="text-sm text-muted-foreground">
+                      {notification.body}
+                    </span>
+                  )}
+                  {!notification.read_at && (
                     <span className="mt-1 h-2 w-2 rounded-full bg-blue-500" />
                   )}
                 </DropdownMenuItem>

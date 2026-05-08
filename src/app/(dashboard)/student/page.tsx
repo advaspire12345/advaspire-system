@@ -5,7 +5,7 @@ import { StudentTable } from "@/components/student/student-table";
 import { getStudentsForTablePaginated } from "@/data/students";
 import { getAllBranches } from "@/data/branches";
 import { getUserBranchIds } from "@/data/users";
-import { getAllCourses, getAllCoursePricing, getAllCourseSlots } from "@/data/courses";
+import { getAllCoursePricing, getAllCourseSlots, getCoursesForUser } from "@/data/courses";
 import { getAllParents, getParentsByBranchIds } from "@/data/parents";
 import {
   createStudentAction,
@@ -27,7 +27,7 @@ export default async function StudentsPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.students;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   // Run on-demand expiry check before fetching data
   const { checkAndExpireEnrollments } = await import("@/data/enrollments");
@@ -61,7 +61,7 @@ export default async function StudentsPage() {
   // Fetch remaining data in parallel — parents filtered by expanded branch IDs
   const [studentsResult, coursesData, pricingData, slotsData, parentsData] = await Promise.all([
     getStudentsForTablePaginated(user.email, { offset: 0, limit: 10 }),
-    getAllCourses(),
+    getCoursesForUser(user.email),
     getAllCoursePricing(),
     getAllCourseSlots(),
     expandedBranchIds && expandedBranchIds.length > 0
@@ -69,16 +69,17 @@ export default async function StudentsPage() {
       : getAllParents(),
   ]);
 
-  // Filter branches for the dropdown based on role
-  let filteredBranches = branchesData;
+  // Filter branches for the dropdown based on role.
+  // Always exclude company-type entries — students enroll under hq/branch only.
+  let filteredBranches = branchesData.filter((b) => b.type !== "company");
   if (useCityName && rawBranchIds && rawBranchIds.length > 0) {
     if (permData!.role === "group_admin") {
-      filteredBranches = branchesData.filter(
-        (b) => b.type !== "company" && b.parent_id && expandedBranchIds!.includes(b.id)
+      filteredBranches = filteredBranches.filter(
+        (b) => b.parent_id && expandedBranchIds!.includes(b.id)
       );
     } else {
       // Branch admin/instructor: only their own branch
-      filteredBranches = branchesData.filter((b) => rawBranchIds.includes(b.id));
+      filteredBranches = filteredBranches.filter((b) => rawBranchIds.includes(b.id));
     }
   }
 

@@ -1,0 +1,15 @@
+LANDING http://localhost:3000/dashboard
+/dashboard             http://localhost:3000/dashboard
+/branches              http://localhost:3000/branches
+/trial                 http://localhost:3000/trial
+/student               http://localhost:3000/student
+/examination           http://localhost:3000/examination
+/program               http://localhost:3000/program
+/team                  http://localhost:3000/team
+/attendance            http://localhost:3000/attendance
+/attendance-log        http://localhost:3000/attendance-log
+/payment-record        http://localhost:3000/payment-record
+/pending-payments      http://localhost:3000/pending-payments
+/leaderboard           http://localhost:3000/leaderboard
+/transactions          http://localhost:3000/transactions
+/import                http://localhost:3000/import

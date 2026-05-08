@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingSelect } from "@/components/ui/floating-select";
+import { FloatingMultiSelect } from "@/components/ui/floating-multiselect";
 import { FloatingTextarea } from "@/components/ui/floating-textarea";
 import { Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ export interface TeamMemberFormData {
   role: UserRole;
   employedDate: string | null;
   status: TeamMemberStatus;
+  inChargeProgramIds: string[];
 }
 
 interface TeamModalProps {
@@ -46,6 +48,8 @@ interface TeamModalProps {
   mode: "add" | "edit" | "delete";
   record: TeamTableRow | null;
   branches: BranchOption[];
+  companies?: BranchOption[];
+  programs?: BranchOption[];
   currentUserRole?: UserRole;
   currentUserBranchId?: string;
   onAdd: (data: TeamMemberFormData) => Promise<void>;
@@ -79,6 +83,7 @@ const initialFormData: TeamMemberFormData = {
   role: "instructor",
   employedDate: null,
   status: "active",
+  inChargeProgramIds: [],
 };
 
 export function TeamModal({
@@ -87,6 +92,8 @@ export function TeamModal({
   mode,
   record,
   branches,
+  companies = [],
+  programs = [],
   currentUserRole,
   currentUserBranchId,
   onAdd,
@@ -164,6 +171,7 @@ export function TeamModal({
           role: record.role,
           employedDate: record.employedDate,
           status: record.status,
+          inChargeProgramIds: record.inChargeProgramIds ?? [],
         });
       } else if (mode === "add") {
         setFormData({
@@ -460,10 +468,10 @@ export function TeamModal({
                     }
                   />
                   <FloatingSelect
-                    label="Branch"
-                    value={formData.branchId || ""}
-                    onChange={(value) => updateField("branchId", value || null)}
-                    options={branchOptions.map((b) => ({ value: b.id, label: b.name }))}
+                    label="Role *"
+                    value={formData.role}
+                    onChange={(value) => updateField("role", value as UserRole)}
+                    options={roleOptions}
                   />
                 </>
               )}
@@ -525,12 +533,21 @@ export function TeamModal({
                 </>
               ) : (
                 <>
-                  <FloatingSelect
-                    label="Role *"
-                    value={formData.role}
-                    onChange={(value) => updateField("role", value as UserRole)}
-                    options={roleOptions}
-                  />
+                  {formData.role === "group_admin" ? (
+                    <FloatingSelect
+                      label="Company"
+                      value={formData.branchId || ""}
+                      onChange={(value) => updateField("branchId", value || null)}
+                      options={companies.map((c) => ({ value: c.id, label: c.name }))}
+                    />
+                  ) : (
+                    <FloatingSelect
+                      label="Branch"
+                      value={formData.branchId || ""}
+                      onChange={(value) => updateField("branchId", value || null)}
+                      options={branchOptions.map((b) => ({ value: b.id, label: b.name }))}
+                    />
+                  )}
                   <FloatingSelect
                     label="Status"
                     value={formData.status}
@@ -542,6 +559,20 @@ export function TeamModal({
                 </>
               )}
             </div>
+
+            {/* In-charge Programs (company_admin / assistant_admin / instructor only) */}
+            {!isReadonly &&
+              (formData.role === "company_admin" ||
+                formData.role === "assistant_admin" ||
+                formData.role === "instructor") && (
+                <FloatingMultiSelect
+                  label="In-charge Programs"
+                  value={formData.inChargeProgramIds}
+                  onChange={(ids) => updateField("inChargeProgramIds", ids)}
+                  options={programs.map((p) => ({ value: p.id, label: p.name }))}
+                  searchable
+                />
+              )}
 
             {/* Employed Date */}
             {isReadonly ? (

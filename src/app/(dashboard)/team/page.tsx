@@ -5,6 +5,8 @@ import { TeamTable } from "@/components/team/team-table";
 import { getTeamMembersForTable } from "@/data/team";
 import { getAllBranches } from "@/data/branches";
 import { getUserByAuthId, getUserBranchIds } from "@/data/users";
+import { getCoursesForUser } from "@/data/courses";
+import { supabaseAdmin } from "@/db";
 import {
   createTeamMemberAction,
   updateTeamMemberAction,
@@ -29,14 +31,39 @@ export default async function TeamPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.team;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
-  const [teamMembers, branchesData, dbUser, customRoles] = await Promise.all([
+  const [teamMembers, branchesData, dbUser, customRoles, coursesData] = await Promise.all([
     getTeamMembersForTable(user.email),
     getAllBranches(),
     getUserByAuthId(user.id),
     getCustomRolesAction(),
+    getCoursesForUser(user.email),
   ]);
+
+  // Companies the current user can assign a group_admin to. Super admin sees all
+  // companies, group_admin only their own (rare — typically you don't assign
+  // another group admin from a group admin context, but the field is here for
+  // super admin's flow).
+  const allCompaniesData = await supabaseAdmin
+    .from("branches")
+    .select("id, name, city")
+    .eq("type", "company")
+    .is("deleted_at", null)
+    .order("name");
+  let companies = (allCompaniesData.data ?? []).map((c) => ({ id: c.id, name: c.name }));
+  if (permData!.role === "group_admin" && dbUser?.branch_id) {
+    // Restrict to the group admin's own company
+    const ownCompanyId = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .eq("id", dbUser.branch_id)
+      .single();
+    const cid = ownCompanyId.data?.type === "company" ? ownCompanyId.data.id : ownCompanyId.data?.parent_id;
+    if (cid) companies = companies.filter((c) => c.id === cid);
+  }
+
+  const programs = coursesData.map((c) => ({ id: c.id, name: c.name }));
 
   // Filter branches for admin: only show own company's HQ and branches
   const useCityName = permData!.role !== "super_admin";
@@ -83,6 +110,8 @@ export default async function TeamPage() {
         <TeamTable
           initialData={teamMembers}
           branches={branches}
+          companies={companies}
+          programs={programs}
           hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           currentUserRole={permData?.role ?? null}
           currentUserBranchId={dbUser?.branch_id ?? null}

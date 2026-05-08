@@ -22,7 +22,7 @@ export async function DashboardCharts({ userEmail }: DashboardChartsProps) {
       <OverviewChart
         branches={overviewData.branches}
         attendanceData={overviewData.attendanceData}
-        engagementData={overviewData.engagementData}
+        enrollmentData={overviewData.enrollmentData}
       />
     </div>
   );

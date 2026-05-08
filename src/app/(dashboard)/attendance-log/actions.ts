@@ -1,22 +1,12 @@
 "use server";
 
 import { revalidatePath, revalidateTag } from "next/cache";
-import { updateAttendance, deleteAttendance } from "@/data/attendance";
+import { deleteAttendance } from "@/data/attendance";
 import { authorizeAction } from "@/data/permissions";
-import type { AttendanceStatus } from "@/db/schema";
+import { supabaseAdmin } from "@/db";
 
 export interface UpdateAttendanceLogData {
-  status: AttendanceStatus;
-  classType: "Physical" | "Online";
-  actualDay: string;
-  actualStartTime: string;
-  instructorName: string;
-  lastActivity: string;
-  notes: string;
-  projectPhotos: string[];
-  adcoin?: number;
-  lesson?: string;
-  mission?: string;
+  studentName: string;
 }
 
 export async function updateAttendanceLogAction(
@@ -26,25 +16,39 @@ export async function updateAttendanceLogAction(
   try {
     await authorizeAction('attendance_log', 'can_edit');
 
-    const result = await updateAttendance(attendanceId, {
-      status: data.status,
-      class_type: data.classType,
-      actual_day: data.actualDay || null,
-      actual_start_time: data.actualStartTime || null,
-      instructor_name: data.instructorName || null,
-      last_activity: data.lastActivity || null,
-      notes: data.notes || null,
-      project_photos: data.projectPhotos.length > 0 ? data.projectPhotos : null,
-      adcoin: data.adcoin ?? 0,
-      lesson: data.lesson || null,
-      mission: data.mission || null,
-    });
+    const trimmedName = data.studentName?.trim();
+    if (!trimmedName) {
+      return { success: false, error: "Student name cannot be empty" };
+    }
 
-    if (!result) {
-      return { success: false, error: "Failed to update attendance record" };
+    // Attendance history is immutable except for the student's name.
+    // Look up the attendance row → student_id, then rename the student.
+    const { data: attendance, error: lookupError } = await supabaseAdmin
+      .from("attendance")
+      .select("id, enrollment:enrollments(student_id)")
+      .eq("id", attendanceId)
+      .maybeSingle();
+
+    if (lookupError || !attendance) {
+      return { success: false, error: "Attendance record not found" };
+    }
+
+    const studentId = (attendance.enrollment as unknown as { student_id: string } | null)?.student_id;
+    if (!studentId) {
+      return { success: false, error: "Could not resolve student for this attendance record" };
+    }
+
+    const { error: renameError } = await supabaseAdmin
+      .from("students")
+      .update({ name: trimmedName })
+      .eq("id", studentId);
+
+    if (renameError) {
+      return { success: false, error: renameError.message };
     }
 
     revalidatePath("/attendance-log");
+    revalidatePath("/student");
     revalidateTag("dashboard", "max");
     return { success: true };
   } catch (error) {

@@ -564,22 +564,212 @@ export async function softDeleteExamination(examId: string): Promise<boolean> {
 }
 
 /**
- * Generate a unique certificate number
+ * After a present attendance is marked, check if the student has reached the
+ * level-up session count for their current level. If yes, and no exam already
+ * exists for that level, insert an examination row with status='eligible' and
+ * date set to the next scheduled class.
+ *
+ * Returns the created examination ID (or null if no exam was created).
  */
-export async function generateCertificateNumber(): Promise<string> {
-  const { data, error } = await supabaseAdmin.rpc("generate_certificate_number");
+export async function maybeCreateLevelUpExam(
+  enrollmentId: string
+): Promise<string | null> {
+  // Pull enrollment + course context
+  const { data: enrollment } = await supabaseAdmin
+    .from("enrollments")
+    .select(`
+      id,
+      student_id,
+      level,
+      schedule,
+      day_of_week,
+      start_time,
+      course:courses(sessions_to_level_up, number_of_levels)
+    `)
+    .eq("id", enrollmentId)
+    .single();
 
-  if (error) {
-    console.error("Error generating certificate number:", error);
-    // Fallback: generate a simple certificate number
-    const year = new Date().getFullYear();
-    const random = Math.floor(Math.random() * 99999)
-      .toString()
-      .padStart(5, "0");
-    return `CERT-${year}-${random}`;
+  if (!enrollment) return null;
+  const course = enrollment.course as unknown as {
+    sessions_to_level_up: number | null;
+    number_of_levels: number | null;
+  } | null;
+  const sessionsRequired = course?.sessions_to_level_up ?? 0;
+  if (!sessionsRequired) return null;
+
+  const currentLevel = enrollment.level ?? 1;
+  const maxLevels = course?.number_of_levels ?? 0;
+  // Already at top level — nothing to level up to
+  if (maxLevels > 0 && currentLevel >= maxLevels) return null;
+
+  // Trigger when sessions attended SINCE the most recent passed exam reach
+  // the threshold. Example with sessions_to_level_up=48:
+  //   • No prior pass: trigger at attendance #48.
+  //   • Pass at session 48 → next trigger at session 96 (48 more after pass).
+  //   • Fail at 48, retry at +2 months / ~session 56 → pass → next trigger at
+  //     session 104 (48 more after the 56-session pass).
+  const { data: lastPass } = await supabaseAdmin
+    .from("examinations")
+    .select("exam_date, updated_at")
+    .eq("enrollment_id", enrollmentId)
+    .eq("status", "pass")
+    .is("deleted_at", null)
+    .order("exam_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Use the pass exam_date as the cut-off; sessions on/after that day are
+  // considered post-pass and count toward the next level-up.
+  const sinceDate = lastPass?.exam_date ?? null;
+
+  let attendanceQuery = supabaseAdmin
+    .from("attendance")
+    .select("id", { count: "exact", head: true })
+    .eq("enrollment_id", enrollmentId)
+    .in("status", ["present", "late"]);
+
+  if (sinceDate) {
+    attendanceQuery = attendanceQuery.gt("date", sinceDate);
   }
 
-  return data;
+  const { count: attendedCount } = await attendanceQuery;
+
+  if ((attendedCount ?? 0) < sessionsRequired) return null;
+
+  // Skip if an active exam for this level already exists
+  const { count: existingExamCount } = await supabaseAdmin
+    .from("examinations")
+    .select("id", { count: "exact", head: true })
+    .eq("enrollment_id", enrollmentId)
+    .eq("exam_level", currentLevel)
+    .in("status", ["eligible", "scheduled", "in_progress", "pass"])
+    .is("deleted_at", null);
+
+  if ((existingExamCount ?? 0) > 0) return null;
+
+  // Compute the next scheduled class date for this enrollment.
+  // Schedule shape varies — try the simple { day_of_week, start_time } columns first,
+  // fall back to today + 7 days if no schedule info available.
+  const examDate = computeNextScheduledDate(
+    (enrollment as any).day_of_week,
+    (enrollment as any).schedule,
+  );
+
+  const { data: created, error } = await supabaseAdmin
+    .from("examinations")
+    .insert({
+      student_id: enrollment.student_id,
+      enrollment_id: enrollmentId,
+      exam_name: `Level ${currentLevel} → ${currentLevel + 1}`,
+      exam_level: currentLevel,
+      exam_date: examDate,
+      status: "eligible",
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("[Level-up Exam] Failed to insert exam:", error);
+    return null;
+  }
+
+  return created.id;
+}
+
+/**
+ * Pick the next future date matching the enrollment's schedule day-of-week.
+ * Falls back to today + 7 days if no schedule info available.
+ */
+function computeNextScheduledDate(
+  dayOfWeek?: string | null,
+  schedule?: unknown,
+): string {
+  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  let targetDow: number | null = null;
+
+  if (dayOfWeek) {
+    const idx = dayNames.indexOf(dayOfWeek.toLowerCase());
+    if (idx >= 0) targetDow = idx;
+  } else if (Array.isArray(schedule) && schedule.length > 0) {
+    const first = schedule[0] as { day?: string };
+    const idx = first.day ? dayNames.indexOf(first.day.toLowerCase()) : -1;
+    if (idx >= 0) targetDow = idx;
+  }
+
+  const today = new Date();
+  if (targetDow === null) {
+    today.setDate(today.getDate() + 7);
+    return today.toISOString().split("T")[0];
+  }
+
+  // Find the next occurrence of targetDow strictly after today
+  const currentDow = today.getDay();
+  let daysAhead = targetDow - currentDow;
+  if (daysAhead <= 0) daysAhead += 7;
+  const next = new Date(today);
+  next.setDate(today.getDate() + daysAhead);
+  return next.toISOString().split("T")[0];
+}
+
+/**
+ * Generate a unique certificate number in the spec format:
+ *   {programCode}-{levelGroup}-{sessions}P{YYMMDD}{random4}-{scoreLetter}
+ * Example: EV3-BGN-24P2601110868-D
+ *
+ *   programCode  = courses.code
+ *   levelGroup   = BGN (level 1) | INT (level 2-3) | ADV (level 4+)
+ *   sessions     = courses.sessions_to_level_up (e.g. "24")
+ *   YYMMDD       = today's date (completion date)
+ *   random4      = unique 4-digit suffix (collision-checked against existing cert numbers)
+ *   scoreLetter  = D (mark >= 80) | P (mark >= 50) | F (below 50)
+ */
+export async function generateCertificateNumber(examId: string): Promise<string> {
+  // Pull exam + enrollment + course in one round-trip
+  const { data: exam } = await supabaseAdmin
+    .from("examinations")
+    .select(`
+      mark,
+      exam_level,
+      enrollment_id,
+      enrollment:enrollments(
+        course:courses(code, sessions_to_level_up)
+      )
+    `)
+    .eq("id", examId)
+    .single();
+
+  const enrollmentCourse = (exam?.enrollment as any)?.course;
+  const programCode = (enrollmentCourse?.code ?? "GEN").toString().toUpperCase();
+  const sessions = enrollmentCourse?.sessions_to_level_up ?? 0;
+
+  const level = exam?.exam_level ?? 1;
+  const levelGroup = level <= 1 ? "BGN" : level <= 3 ? "INT" : "ADV";
+
+  const mark = exam?.mark ?? 0;
+  const scoreLetter = mark >= 80 ? "D" : mark >= 50 ? "P" : "F";
+
+  const now = new Date();
+  const yymmdd =
+    now.getFullYear().toString().slice(-2) +
+    (now.getMonth() + 1).toString().padStart(2, "0") +
+    now.getDate().toString().padStart(2, "0");
+
+  const middle = `${sessions}P${yymmdd}`;
+
+  // Collision-check loop — try up to 50 random suffixes before giving up.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const random4 = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
+    const candidate = `${programCode}-${levelGroup}-${middle}${random4}-${scoreLetter}`;
+    const { count } = await supabaseAdmin
+      .from("examinations")
+      .select("id", { count: "exact", head: true })
+      .eq("certificate_number", candidate);
+    if ((count ?? 0) === 0) return candidate;
+  }
+
+  // Extremely unlikely fallback — append a millisecond timestamp to guarantee uniqueness.
+  const tsSuffix = Date.now().toString().slice(-4);
+  return `${programCode}-${levelGroup}-${middle}${tsSuffix}-${scoreLetter}`;
 }
 
 // ============================================

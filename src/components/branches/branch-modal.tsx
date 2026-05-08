@@ -160,6 +160,10 @@ export function BranchModal({
         setError("Please select a company");
         return;
       }
+      if (!code.trim()) {
+        setError("Code is required");
+        return;
+      }
     }
 
     setIsSubmitting(true);

@@ -31,7 +31,17 @@ export type AdcoinTransactionType = 'earned' | 'spent' | 'transfer' | 'adjusted'
 
 export type AuditAction = 'INSERT' | 'UPDATE' | 'DELETE';
 
-export type TrialSource = 'walk_in' | 'phone' | 'online' | 'referral' | 'social_media' | 'other';
+export type TrialSource =
+  | 'walk_in'
+  | 'website'
+  | 'facebook'
+  | 'google'
+  | 'tiktok'
+  | 'xhs'
+  | 'youtube'
+  | 'instagram'
+  | 'referral'
+  | 'other';
 
 export type TrialStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'no_show' | 'converted';
 
@@ -155,6 +165,11 @@ export interface Student {
   adcoin_balance: number;
   username: string | null;
   password_hash: string | null;
+  // Branch-transfer breadcrumb. previous_branch_id is set on the NEW row so the
+  // user can revert. transferred_to_student_id is set on the OLD row so the old
+  // branch's table can render a "Transferred to {branch}" ghost row.
+  previous_branch_id: string | null;
+  transferred_to_student_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -582,6 +597,8 @@ export interface StudentInsert {
   adcoin_balance?: number;
   username?: string | null;
   password_hash?: string | null;
+  previous_branch_id?: string | null;
+  transferred_to_student_id?: string | null;
 }
 
 export interface ParentInsert {
@@ -805,6 +822,8 @@ export interface StudentUpdate {
   adcoin_balance?: number;
   username?: string | null;
   password_hash?: string | null;
+  previous_branch_id?: string | null;
+  transferred_to_student_id?: string | null;
 }
 
 export interface ParentUpdate {
@@ -1296,6 +1315,9 @@ export interface CourseExtended extends Course {
   cover_image_url: string | null;
   assessment_enabled: boolean;
   levelling_time_minutes: number | null;
+  // Bootcamp / workshop fixed-window programs only.
+  start_date: string | null;
+  end_date: string | null;
 }
 
 /**
@@ -1789,6 +1811,8 @@ export type PermissionResource =
   | 'students'
   | 'examinations'
   | 'programs'
+  | 'slots'
+  | 'vouchers'
   | 'team'
   | 'attendance'
   | 'attendance_log'
@@ -1796,6 +1820,7 @@ export type PermissionResource =
   | 'pending_payments'
   | 'leaderboard'
   | 'transactions'
+  | 'marketplace'
   | 'import';
 
 export const ALL_RESOURCES: PermissionResource[] = [
@@ -1806,6 +1831,8 @@ export const ALL_RESOURCES: PermissionResource[] = [
   'students',
   'examinations',
   'programs',
+  'slots',
+  'vouchers',
   'team',
   'attendance',
   'attendance_log',
@@ -1813,6 +1840,7 @@ export const ALL_RESOURCES: PermissionResource[] = [
   'pending_payments',
   'leaderboard',
   'transactions',
+  'marketplace',
   'import',
 ];
 
@@ -1895,4 +1923,82 @@ export interface CustomRole {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+}
+
+// ============================================
+// MARKETPLACE — Adcoin Top-Up Requests
+// ============================================
+
+export type AdcoinTopupRequestStatus = 'pending' | 'approved' | 'rejected';
+
+/** Frozen invoice snapshot saved on the request when it's approved. Mirrors
+ *  the same pattern as `payments.invoice_snapshot`. */
+export interface TopupInvoiceSnapshot {
+  invoiceNumber: string;
+  date: string;            // ISO date of approval
+  billToName: string;
+  billToAddress: string | null;
+  billToContact: string | null;
+  branch: {
+    name: string;
+    companyName: string | null;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+    bankName: string | null;
+    bankAccount: string | null;
+  } | null;
+  items: Array<{ code: string; product: string; qty: number; rate: number }>;
+  total: number;
+}
+
+export interface AdcoinTopupRequest {
+  id: string;
+  requester_id: string;
+  branch_id: string | null;
+  adcoin_amount: number;
+  rm_amount: number;
+  receipt_url: string | null;
+  status: AdcoinTopupRequestStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  approved_transaction_id: string | null;
+  invoice_number: string | null;
+  invoice_snapshot: TopupInvoiceSnapshot | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+export type NotificationType =
+  | 'student_added'
+  | 'trial_added'
+  | 'register_form_filled'
+  | 'payment_due'
+  | 'trial_this_week'
+  | 'exam_this_week'
+  | 'reattempt_weekly'
+  | 'attendance_unmarked'
+  | 'exam_status_changed'
+  // Parent-only
+  | 'child_attendance_marked'
+  | 'child_activity_logged'
+  | 'event'
+  | 'holiday';
+
+export interface Notification {
+  id: string;
+  user_id: string | null;
+  parent_id: string | null;
+  type: NotificationType | string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  data: Record<string, unknown> | null;
+  read_at: string | null;
+  created_at: string;
 }

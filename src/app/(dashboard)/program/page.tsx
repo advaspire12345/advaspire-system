@@ -2,7 +2,7 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { ProgramTable } from "@/components/program/program-table";
-import { getProgramsForTable, getAllCategories, getInstructors } from "@/data/programs";
+import { getProgramsForTable, getAllCategories, getInstructors, archiveExpiredBootcampWorkshops } from "@/data/programs";
 import { getAllBranches } from "@/data/branches";
 import {
   createProgramAction,
@@ -25,7 +25,10 @@ export default async function ProgramsPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.programs;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
+
+  // Auto-archive bootcamp/workshop programs whose end_date has passed
+  await archiveExpiredBootcampWorkshops();
 
   // Fetch all required data
   const [programs, branchesData, categoriesData, instructorsData, vouchersResult] = await Promise.all([

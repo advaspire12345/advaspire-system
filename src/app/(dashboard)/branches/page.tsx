@@ -5,7 +5,6 @@ import { BranchTable } from "@/components/branches/branch-table";
 import { getBranchData, getCompanyOptions } from "@/data/branches";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 import { getUserBranchIds } from "@/data/users";
-import { getAllCourses, getAllCourseSlots } from "@/data/courses";
 
 export default async function BranchPage() {
   const user = await getUser();
@@ -16,16 +15,14 @@ export default async function BranchPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.branches;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   // Admin users only see their assigned branches + parent companies
   const branchIds = await getUserBranchIds(user.email);
 
-  const [branchData, allCompanyOptions, coursesData, slotsData] = await Promise.all([
+  const [branchData, allCompanyOptions] = await Promise.all([
     getBranchData(branchIds ?? undefined),
     getCompanyOptions(),
-    getAllCourses(),
-    getAllCourseSlots(),
   ]);
 
   // If admin, filter company options to only their own company
@@ -61,8 +58,6 @@ export default async function BranchPage() {
           canCreateBranch={perms?.can_create ?? false}
           canEditBranch={perms?.can_edit ?? false}
           canDeleteBranch={perms?.can_delete ?? false}
-          courses={coursesData.map((c) => ({ id: c.id, name: c.name }))}
-          courseSlots={slotsData.map((s) => ({ id: s.id, courseId: s.courseId, branchId: s.branchId, day: s.day, time: s.time, duration: s.duration }))}
         />
       </div>
     </main>

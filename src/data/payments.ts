@@ -1203,11 +1203,14 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
         sessionsToAdd = pricingData.duration;
         newSessions = currentSessions + sessionsToAdd;
 
+        // Clear expires_at so the next attendance starts a fresh expiry window
+        // (per spec: starting date = first attendance after the package is renewed).
         await supabaseAdmin
           .from('enrollments')
           .update({
             sessions_remaining: newSessions,
             package_id: pricingData.id,
+            expires_at: null,
             updated_at: new Date().toISOString(),
           })
           .eq('id', enrollment.id);

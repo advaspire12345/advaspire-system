@@ -7,6 +7,7 @@ import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissi
 import { getUserBranchIds } from "@/data/users";
 import { getAllBranches } from "@/data/branches";
 import { getAllCourses } from "@/data/courses";
+import { archiveExpiredBootcampWorkshops } from "@/data/programs";
 
 export const dynamic = "force-dynamic";
 
@@ -82,8 +83,8 @@ export default async function SlotPage() {
   if (!user?.email) redirect("/login");
 
   const permData = await getCurrentUserPermissions();
-  const perms = permData?.permissions.programs;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  const perms = permData?.permissions.slots;
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   const useCityName = permData!.role !== "super_admin";
   const hideBranch = permData!.role === "company_admin" || permData!.role === "instructor";
@@ -116,8 +117,14 @@ export default async function SlotPage() {
     name: useCityName ? (b.city || b.name) : b.name,
   }));
 
+  await archiveExpiredBootcampWorkshops();
+
   const coursesData = await getAllCourses();
-  const courses = coursesData.map((c) => ({ id: c.id, name: c.name }));
+  // Slots only apply to recurring programs — bootcamps/workshops have fixed start/end dates
+  // and are scheduled directly, not via weekly slots.
+  const courses = coursesData
+    .filter((c) => c.programType !== "bootcamp" && c.programType !== "workshop")
+    .map((c) => ({ id: c.id, name: c.name }));
 
   const slots = await getSlotsForTable(user.email, useCityName);
 

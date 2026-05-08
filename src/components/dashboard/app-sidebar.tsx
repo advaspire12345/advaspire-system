@@ -10,6 +10,7 @@ import {
   ClipboardList,
   CreditCard,
   Clock,
+  Coins,
   Building2,
   Trophy,
   ArrowLeftRight,
@@ -84,13 +85,13 @@ const navigationItems: {
     title: "Slot",
     icon: Clock,
     href: "/slot",
-    resource: "programs",
+    resource: "slots",
   },
   {
     title: "Voucher",
     icon: Ticket,
     href: "/voucher",
-    resource: "programs",
+    resource: "vouchers",
   },
   {
     title: "Team",
@@ -133,6 +134,12 @@ const navigationItems: {
     icon: ArrowLeftRight,
     href: "/transactions",
     resource: "transactions",
+  },
+  {
+    title: "Marketplace",
+    icon: Coins,
+    href: "/marketplace",
+    resource: "marketplace",
   },
   {
     title: "Import",

@@ -1497,11 +1497,14 @@ export function StudentModal({
                           setFormData({
                             ...formData,
                             courseId: val,
-                            packageType: null, // Reset package type when course changes
+                            // Per spec: keep package_type, reset specific packageId
+                            // (it belongs to the old course's pricing) and re-derive.
                             packageId: null,
                             numberOfMonths: null,
                             numberOfSessions: null,
-                            scheduleEntries: [], // Reset schedule when course changes
+                            // Per spec: reset schedule and level on course change
+                            scheduleEntries: [],
+                            level: 1,
                           })
                         }
                         options={availableCourses.map((c) => ({
@@ -1509,7 +1512,6 @@ export function StudentModal({
                           label: c.name,
                         }))}
                       />
-                      {/* Level and Adcoin Balance */}
                       <FloatingSelect
                         label="Level"
                         value={formData.level?.toString() || "1"}
@@ -1521,19 +1523,6 @@ export function StudentModal({
                         }
                         options={levelOptions}
                         disabled={!formData.courseId}
-                      />
-                      <FloatingInput
-                        label="Adcoin Balance"
-                        type="number"
-                        min={0}
-                        value={formData.adcoinBalance.toString()}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 0;
-                          setFormData({
-                            ...formData,
-                            adcoinBalance: val < 0 ? 0 : val,
-                          });
-                        }}
                       />
                       {/* Enrollment Status - Edit mode only */}
                       {mode === "edit" && (
@@ -1619,53 +1608,71 @@ export function StudentModal({
                             </button>
                             );
                           })()}
-                          {hasSessionPricing && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                // If sibling has session package, restore it
-                                if (formData.shareWithSibling && siblingPackage?.packageType === "session") {
-                                  setFormData({
-                                    ...formData,
-                                    packageType: "session",
-                                    numberOfMonths: null,
-                                    numberOfSessions: siblingPackage.packageDuration,
-                                    packageId: siblingPackage.packageId,
-                                  });
-                                } else {
-                                  setFormData({
-                                    ...formData,
-                                    packageType: "session",
-                                    numberOfMonths: null,
-                                  });
-                                }
-                              }}
-                              className={cn(
-                                "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
-                                formData.packageType === "session"
-                                  ? "border-[#23D2E2] bg-[#23D2E2]/10"
-                                  : "border-border hover:border-[#23D2E2]/50",
-                              )}
-                            >
-                              <span className="text-2xl mb-2">🎫</span>
-                              <span className="font-bold">Session</span>
-                              <span className="text-xs text-muted-foreground">
-                                Pay per session
-                              </span>
-                            </button>
-                          )}
+                          {hasSessionPricing && (() => {
+                            // When shared=ON, session is the only valid type and cannot be deactivated.
+                            const sessionLockedActive = formData.shareWithSibling;
+                            return (
+                              <button
+                                type="button"
+                                disabled={sessionLockedActive}
+                                onClick={() => {
+                                  if (sessionLockedActive) return;
+                                  // If sibling has session package, restore it
+                                  if (formData.shareWithSibling && siblingPackage?.packageType === "session") {
+                                    setFormData({
+                                      ...formData,
+                                      packageType: "session",
+                                      numberOfMonths: null,
+                                      numberOfSessions: siblingPackage.packageDuration,
+                                      packageId: siblingPackage.packageId,
+                                    });
+                                  } else {
+                                    setFormData({
+                                      ...formData,
+                                      packageType: "session",
+                                      numberOfMonths: null,
+                                    });
+                                  }
+                                }}
+                                className={cn(
+                                  "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
+                                  sessionLockedActive
+                                    ? "border-[#23D2E2] bg-[#23D2E2]/10 cursor-not-allowed"
+                                    : formData.packageType === "session"
+                                      ? "border-[#23D2E2] bg-[#23D2E2]/10"
+                                      : "border-border hover:border-[#23D2E2]/50",
+                                )}
+                                title={sessionLockedActive ? "Required for shared package" : undefined}
+                              >
+                                <span className="text-2xl mb-2">🎫</span>
+                                <span className="font-bold">Session</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {sessionLockedActive ? "Required for shared" : "Pay per session"}
+                                </span>
+                              </button>
+                            );
+                          })()}
                           {/* Shared button - show when siblings exist in same course, or student is already pooled */}
                           {((siblingPoolCheck && (
                             (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
                             || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
                           ))
                             || (mode === "edit" && record?.isPooled)) && (() => {
+                            // Sc 8b: dissolution is only allowed when pool sessions are depleted (≤ 0).
+                            // Disable the toggle-off path when the current pool still has active sessions.
+                            const poolSessionsLeft = (mode === "edit" && record?.isPooled)
+                              ? (record?.sessionsRemaining ?? 0)
+                              : (siblingPoolCheck?.poolInfo?.sessionsRemaining ?? 0);
+                            const dissolutionBlocked = formData.shareWithSibling && poolSessionsLeft > 0;
                             return (
                             <button
                               type="button"
+                              disabled={dissolutionBlocked}
+                              title={dissolutionBlocked ? "Cannot unshare while pool has active sessions" : undefined}
                               onClick={() => {
-                                // Toggle shared off if already active
+                                // Toggle shared off if already active (blocked when pool has active sessions — Sc 8b)
                                 if (formData.shareWithSibling) {
+                                  if (poolSessionsLeft > 0) return;
                                   setFormData({
                                     ...formData,
                                     shareWithSibling: false,
@@ -1710,6 +1717,7 @@ export function StudentModal({
                                 formData.shareWithSibling
                                   ? "border-[#615DFA] bg-[#615DFA]/10"
                                   : "border-border hover:border-[#615DFA]/50",
+                                dissolutionBlocked && "opacity-50 cursor-not-allowed",
                               )}
                             >
                               <Users className="h-6 w-6 mb-2 text-[#615DFA]" />

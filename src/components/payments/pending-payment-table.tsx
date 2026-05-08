@@ -54,6 +54,7 @@ interface PendingPaymentTableProps {
   canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  canApprove?: boolean;
   totalCount: number;
 }
 
@@ -99,6 +100,7 @@ export function PendingPaymentTable({
   canCreate = true,
   canEdit = true,
   canDelete = true,
+  canApprove: canApproveRole = false,
   totalCount,
 }: PendingPaymentTableProps) {
   const [data, setData] = useState<PendingPaymentRow[]>(initialData);
@@ -664,8 +666,8 @@ export function PendingPaymentTable({
                             </button>
                           )}
 
-                          {/* Approve Button - always visible, disabled when conditions not met */}
-                          {canEdit && (
+                          {/* Approve Button - only visible to roles with approve rights */}
+                          {canEdit && canApproveRole && (
                             <button
                               type="button"
                               onClick={() => openModal("approve", row)}

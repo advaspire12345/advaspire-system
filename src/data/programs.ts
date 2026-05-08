@@ -17,6 +17,22 @@ export {
 // CATEGORY OPERATIONS
 // ============================================
 
+/**
+ * Sweep bootcamp/workshop programs whose end_date has passed and mark them
+ * archived. Run on-demand from page loads — same pattern as
+ * checkAndExpireEnrollments. Cheap; touches only rows that need updating.
+ */
+export async function archiveExpiredBootcampWorkshops(): Promise<void> {
+  const nowIso = new Date().toISOString();
+  await supabaseAdmin
+    .from("courses")
+    .update({ status: "archived", updated_at: nowIso })
+    .in("program_type", ["bootcamp", "workshop"])
+    .neq("status", "archived")
+    .lte("end_date", nowIso)
+    .is("deleted_at", null);
+}
+
 export async function getAllCategories(): Promise<CourseCategory[]> {
   const { data, error } = await supabaseAdmin
     .from("course_categories")
@@ -285,6 +301,9 @@ export interface CreateProgramPayload {
   youtube_url: string | null;
   assessment_enabled: boolean;
   levelling_time_minutes: number | null;
+  // Bootcamp/workshop fixed-window programs
+  start_date?: string | null;
+  end_date?: string | null;
 
   // Multi-select
   languages: string[];
@@ -354,6 +373,8 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
       youtube_url: payload.youtube_url,
       assessment_enabled: payload.assessment_enabled,
       levelling_time_minutes: payload.levelling_time_minutes,
+      start_date: payload.start_date ?? null,
+      end_date: payload.end_date ?? null,
     })
     .select("id")
     .single();
@@ -545,6 +566,8 @@ export async function updateProgram(
       youtube_url: payload.youtube_url,
       assessment_enabled: payload.assessment_enabled,
       levelling_time_minutes: payload.levelling_time_minutes,
+      start_date: payload.start_date ?? null,
+      end_date: payload.end_date ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", programId);

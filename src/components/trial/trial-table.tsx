@@ -65,11 +65,19 @@ const STATUS_STYLES: Record<string, string> = {
 
 const SOURCE_LABELS: Record<string, string> = {
   walk_in: "Walk-in",
-  phone: "Phone",
-  online: "Online",
+  website: "Website",
+  facebook: "Facebook",
+  google: "Google",
+  tiktok: "TikTok",
+  xhs: "Xiaohongshu",
+  youtube: "YouTube",
+  instagram: "Instagram",
   referral: "Referral",
-  social_media: "Social Media",
   other: "Other",
+  // Legacy values still rendered correctly if any exist in DB
+  phone: "Phone (legacy)",
+  online: "Online (legacy)",
+  social_media: "Social Media (legacy)",
 };
 
 const STATUS_LABELS: Record<string, string> = {

@@ -12,7 +12,7 @@ export default async function ImportPageRoute() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.import;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">

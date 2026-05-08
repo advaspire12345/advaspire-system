@@ -19,6 +19,7 @@ import type { TeamTableRow } from "@/data/team";
 import type { TeamMemberFormData } from "@/components/team/team-modal";
 import type { TeamMemberFormPayload } from "@/app/(dashboard)/team/actions";
 import type { PermissionResource, ResourcePermission, PermissionsMap, UserRole, CustomRole } from "@/db/schema";
+import { ALL_RESOURCES } from "@/db/schema";
 
 interface BranchOption {
   id: string;
@@ -28,6 +29,8 @@ interface BranchOption {
 interface TeamTableProps {
   initialData: TeamTableRow[];
   branches: BranchOption[];
+  companies?: BranchOption[];
+  programs?: BranchOption[];
   currentUserRole?: UserRole | null;
   currentUserBranchId?: string | null;
   hideBranch?: boolean;
@@ -93,6 +96,8 @@ const STATUS_LABELS: Record<string, string> = {
 export function TeamTable({
   initialData,
   branches,
+  companies = [],
+  programs = [],
   currentUserRole,
   currentUserBranchId,
   hideBranch,
@@ -145,6 +150,7 @@ export function TeamTable({
     role: formData.role,
     employedDate: formData.employedDate,
     status: formData.status,
+    inChargeProgramIds: formData.inChargeProgramIds ?? [],
   });
 
   const handleAdd = async (formData: TeamMemberFormData) => {
@@ -518,6 +524,8 @@ export function TeamTable({
         mode={modalMode}
         record={selectedRecord}
         branches={branches}
+        companies={companies}
+        programs={programs}
         currentUserRole={currentUserRole ?? undefined}
         currentUserBranchId={currentUserBranchId ?? undefined}
         onAdd={handleAdd}
@@ -553,8 +561,7 @@ export function TeamTable({
             if (!result) {
               // Return empty permissions as fallback
               const empty = {} as Record<PermissionResource, ResourcePermission>;
-              const resources: PermissionResource[] = ["dashboard", "companies", "branches", "trials", "students", "examinations", "programs", "team", "attendance", "attendance_log", "payment_record", "pending_payments", "leaderboard", "transactions"];
-              for (const r of resources) empty[r] = { can_view: false, can_create: false, can_edit: false, can_delete: false };
+              for (const r of ALL_RESOURCES) empty[r] = { can_view: false, can_create: false, can_edit: false, can_delete: false };
               return empty;
             }
             return result;

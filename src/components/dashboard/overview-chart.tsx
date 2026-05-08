@@ -26,7 +26,7 @@ export interface MonthlyOverviewData {
 interface OverviewChartProps {
   branches: OverviewBranch[];
   attendanceData: MonthlyOverviewData;
-  engagementData: MonthlyOverviewData;
+  enrollmentData: MonthlyOverviewData;
 }
 
 // Constants
@@ -95,7 +95,7 @@ function getMonthLabels(): MonthLabel[] {
 export function OverviewChart({
   branches,
   attendanceData,
-  engagementData,
+  enrollmentData,
 }: OverviewChartProps) {
   const [mode, setMode] = useState<Mode>("attendance");
   const [range, setRange] = useState<RangeKey>("last12");
@@ -108,7 +108,7 @@ export function OverviewChart({
 
   const now = new Date();
   const monthLabels = useMemo(() => getMonthLabels(), []);
-  const chartData = mode === "attendance" ? attendanceData : engagementData;
+  const chartData = mode === "attendance" ? attendanceData : enrollmentData;
 
   // Filter data based on range
   const visibleMonths = useMemo(() => {

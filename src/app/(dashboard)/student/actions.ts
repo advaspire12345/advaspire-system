@@ -509,6 +509,27 @@ export async function createStudentAction(
       console.log(`[TrialConvert] No phone numbers to check. parentPhone: "${payload.parentPhone}", phone: "${payload.phone}"`);
     }
 
+    // F1: notify staff of the new student. Skip the actor.
+    try {
+      const { notifyStaff, resolveBranchCompanyId } = await import("@/data/notifications");
+      const companyId = await resolveBranchCompanyId(payload.branchId);
+      await notifyStaff(
+        {
+          roles: ["group_admin", "company_admin", "assistant_admin"],
+          companyId,
+        },
+        {
+          type: "student_added",
+          title: "New student added",
+          body: `${payload.name} has been registered`,
+          link: `/student?highlight=${studentDbId}`,
+          data: { studentId: studentDbId, branchId: payload.branchId },
+        },
+      );
+    } catch (notifyErr) {
+      console.warn("[Notify student_added] failed:", notifyErr);
+    }
+
     revalidatePath("/student");
     revalidatePath("/trial");
     revalidateTag("dashboard", "max");
@@ -525,9 +546,51 @@ export async function createStudentAction(
 export async function updateStudentAction(
   studentId: string,
   payload: StudentFormPayload
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; transferredToStudentId?: string }> {
   try {
     await authorizeAction('students', 'can_edit');
+
+    // 0. Branch transfer detection — if the user changed the branch on an
+    // existing student, treat it as a transfer: clone into the new branch with
+    // a new student_id, mark the old enrollment(s) cancelled, and leave the old
+    // student record + history (attendance, payments) intact in the old branch.
+    //
+    // REVERT path: if the new branch the user picked equals this student's
+    // previous_branch_id (an accidental transfer), undo the transfer instead —
+    // but only if the new enrollment has zero attendance and zero payments.
+    {
+      const { data: existing } = await supabaseAdmin
+        .from('students')
+        .select('id, name, email, phone, photo, date_of_birth, gender, school_name, cover_photo, branch_id, level, adcoin_balance, username, password_hash, previous_branch_id, transferred_to_student_id')
+        .eq('id', studentId)
+        .single();
+
+      if (existing && payload.branchId && existing.branch_id !== payload.branchId) {
+        // Revert path: user is moving back to the branch they came from.
+        if (existing.previous_branch_id && payload.branchId === existing.previous_branch_id) {
+          const revertResult = await revertBranchTransfer(studentId);
+          if (!revertResult.success) return revertResult;
+
+          revalidatePath('/student');
+          revalidatePath('/pending-payments');
+          revalidatePath('/attendance');
+          revalidateTag('dashboard', 'max');
+          return { success: true };
+        }
+
+        const transferResult = await transferStudentToBranch(studentId, existing, payload);
+        if (!transferResult.success) return transferResult;
+
+        revalidatePath('/student');
+        revalidatePath('/pending-payments');
+        revalidatePath('/attendance');
+        revalidateTag('dashboard', 'max');
+        return {
+          success: true,
+          transferredToStudentId: transferResult.newStudentDbId,
+        };
+      }
+    }
 
     // 1. Check student email uniqueness (excluding current student)
     if (payload.email?.trim()) {
@@ -724,8 +787,13 @@ export async function updateStudentAction(
             .eq('pool_id', poolId)
             .order('joined_at', { ascending: true });
 
-          if (poolData && !poolData.deleted_at && (poolStudents ?? []).length > 0) {
-            // Active pool — dissolve it and give each student their display value
+          // Guard (Sc 8b): pool dissolution is only allowed when sessions are
+          // depleted (≤ 0). If there are active paid sessions remaining, silently
+          // skip — the UI also disables the toggle in this state.
+          if (poolData && !poolData.deleted_at && (poolStudents ?? []).length > 0 && (poolData.sessions_remaining ?? 0) > 0) {
+            console.log(`[Pool Dissolution] Skipped — pool ${poolId} still has ${poolData.sessions_remaining} active sessions.`);
+          } else if (poolData && !poolData.deleted_at && (poolStudents ?? []).length > 0) {
+            // Active pool with depleted sessions — dissolve it
             console.log(`[Pool Dissolution] Dissolving pool ${poolId} — shareWithSibling toggled off for student ${studentId}`);
 
             const allStudentIds = (poolStudents ?? []).map(ps => ps.student_id);
@@ -1283,6 +1351,14 @@ export async function deleteStudentAction(
       .delete()
       .eq('student_id', studentId);
 
+    // Hard-delete pending payments — they're unactioned and shouldn't dangle on dashboards.
+    // Paid / refunded rows stay (financial history preservation).
+    await supabaseAdmin
+      .from('payments')
+      .delete()
+      .eq('student_id', studentId)
+      .eq('status', 'pending');
+
     // 3. Soft-delete the student
     const success = await softDeleteStudent(studentId);
 
@@ -1301,4 +1377,231 @@ export async function deleteStudentAction(
       error: error instanceof Error ? error.message : "An unexpected error occurred",
     };
   }
+}
+
+/**
+ * Branch transfer: clone the student into the new branch with a fresh student_id,
+ * carry over the latest sessions_remaining + level + package + parent links + adcoin
+ * balance, and mark the old enrollment(s) cancelled. The old student record stays
+ * intact so historical attendance and payments remain readable in the old branch.
+ *
+ * Pool memberships in the old branch are dissolved (redistributed back to remaining
+ * siblings) — pools don't cross branch boundaries.
+ */
+async function transferStudentToBranch(
+  oldStudentId: string,
+  oldStudent: {
+    name: string;
+    email: string | null;
+    phone: string | null;
+    photo: string | null;
+    date_of_birth: string | null;
+    gender: Gender | null;
+    school_name: string | null;
+    cover_photo: string | null;
+    level: number;
+    adcoin_balance: number;
+    username: string | null;
+    password_hash: string | null;
+  },
+  payload: StudentFormPayload,
+): Promise<{ success: boolean; error?: string; newStudentDbId?: string }> {
+  // 1. Snapshot the active enrollment we're transferring (if any). Use the most
+  //    recent active row — students rarely have more than one active enrollment.
+  const { data: activeEnrollment } = await supabaseAdmin
+    .from('enrollments')
+    .select('id, course_id, package_id, instructor_id, schedule, level, sessions_remaining, pool_id')
+    .eq('student_id', oldStudentId)
+    .eq('status', 'active')
+    .is('deleted_at', null)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const carriedSessions = activeEnrollment?.sessions_remaining ?? 0;
+  const carriedLevel = activeEnrollment?.level ?? oldStudent.level ?? 1;
+
+  // 2. If the old enrollment was in a pool, redistribute the pool first so the
+  //    remaining siblings keep correct counts.
+  if (activeEnrollment?.pool_id) {
+    try {
+      const { redistributePoolOnInactive } = await import("@/data/pools");
+      await redistributePoolOnInactive(activeEnrollment.id, oldStudentId);
+    } catch (e) {
+      console.warn('[Branch Transfer] Pool redistribution warning:', e);
+    }
+  }
+
+  // 3. Mark old enrollment(s) cancelled (status only — no soft delete; history stays)
+  await supabaseAdmin
+    .from('enrollments')
+    .update({ status: 'cancelled', pool_id: null, updated_at: new Date().toISOString() })
+    .eq('student_id', oldStudentId)
+    .eq('status', 'active');
+
+  // 4. Read the old student's current branch to record as the revert breadcrumb
+  const { data: oldStudentRow } = await supabaseAdmin
+    .from('students')
+    .select('branch_id')
+    .eq('id', oldStudentId)
+    .single();
+  const previousBranchId = oldStudentRow?.branch_id ?? null;
+
+  // 5. Create the new student row in the target branch with a fresh student_id
+  const newDisplayId = await generateNextStudentId();
+  const newStudentInsert: StudentInsert = {
+    student_id: newDisplayId,
+    name: payload.name ?? oldStudent.name,
+    email: payload.email?.trim() || oldStudent.email,
+    phone: payload.phone || oldStudent.phone,
+    photo: payload.photoUrl || oldStudent.photo,
+    date_of_birth: payload.dateOfBirth || oldStudent.date_of_birth,
+    gender: payload.gender || oldStudent.gender,
+    school_name: payload.schoolName || oldStudent.school_name,
+    cover_photo: payload.coverPhotoUrl || oldStudent.cover_photo,
+    branch_id: payload.branchId,
+    level: carriedLevel,
+    adcoin_balance: payload.adcoinBalance ?? oldStudent.adcoin_balance ?? 0,
+    username: payload.username?.trim() || oldStudent.username,
+    password_hash: payload.portalPassword?.trim()
+      ? await hashPassword(payload.portalPassword.trim())
+      : oldStudent.password_hash,
+    previous_branch_id: previousBranchId,
+  };
+  const newStudent = await createStudent(newStudentInsert);
+  if (!newStudent) {
+    return { success: false, error: 'Failed to create student record in the new branch' };
+  }
+
+  // 4b. Tag the old row so the old branch's table can render the ghost row
+  await supabaseAdmin
+    .from('students')
+    .update({ transferred_to_student_id: newStudent.id })
+    .eq('id', oldStudentId);
+
+  // 5. Copy parent_students links so the new student row is reachable from the same parents
+  const { data: parentLinks } = await supabaseAdmin
+    .from('parent_students')
+    .select('parent_id, relationship')
+    .eq('student_id', oldStudentId);
+  if (parentLinks && parentLinks.length > 0) {
+    const newLinks = parentLinks.map((pl) => ({
+      parent_id: pl.parent_id,
+      student_id: newStudent.id,
+      relationship: pl.relationship,
+    }));
+    await supabaseAdmin.from('parent_students').insert(newLinks);
+  }
+
+  // 6. Create a new active enrollment in the target branch that carries the
+  //    sessions_remaining + level forward. Schedule is left blank; the admin
+  //    will set it on the new student's edit form afterwards.
+  if (activeEnrollment) {
+    const newEnrollment: EnrollmentInsert = {
+      student_id: newStudent.id,
+      course_id: activeEnrollment.course_id,
+      package_id: activeEnrollment.package_id,
+      instructor_id: activeEnrollment.instructor_id,
+      schedule: '[]',
+      sessions_remaining: carriedSessions,
+      status: 'active',
+      level: carriedLevel,
+    };
+    await createEnrollment(newEnrollment);
+  }
+
+  return { success: true, newStudentDbId: newStudent.id };
+}
+
+/**
+ * Revert an accidental branch transfer. Deletes the new student row + its
+ * enrollment, restores the old student's enrollment to active, and clears the
+ * transferred_to_student_id breadcrumb. Only allowed if the new enrollment has
+ * zero attendance and zero payments — otherwise unwinding would lose data.
+ */
+async function revertBranchTransfer(
+  newStudentId: string,
+): Promise<{ success: boolean; error?: string }> {
+  // 1. Look up the new student row and confirm it actually came from a transfer
+  const { data: newStudent } = await supabaseAdmin
+    .from('students')
+    .select('id, previous_branch_id')
+    .eq('id', newStudentId)
+    .single();
+
+  if (!newStudent || !newStudent.previous_branch_id) {
+    return { success: false, error: 'No previous branch on file — cannot revert.' };
+  }
+
+  // 2. Find the old student row pointing TO this one
+  const { data: oldStudent } = await supabaseAdmin
+    .from('students')
+    .select('id')
+    .eq('transferred_to_student_id', newStudentId)
+    .is('deleted_at', null)
+    .maybeSingle();
+
+  if (!oldStudent) {
+    return { success: false, error: 'Original student row not found — cannot revert.' };
+  }
+
+  // 3. Find the new student's enrollment(s) and check for any activity
+  const { data: newEnrollments } = await supabaseAdmin
+    .from('enrollments')
+    .select('id')
+    .eq('student_id', newStudentId)
+    .is('deleted_at', null);
+
+  const newEnrollmentIds = (newEnrollments ?? []).map((e) => e.id);
+
+  if (newEnrollmentIds.length > 0) {
+    const { count: attendanceCount } = await supabaseAdmin
+      .from('attendance')
+      .select('id', { count: 'exact', head: true })
+      .in('enrollment_id', newEnrollmentIds);
+
+    if ((attendanceCount ?? 0) > 0) {
+      return {
+        success: false,
+        error: 'Cannot revert — attendance has already been marked at the new branch.',
+      };
+    }
+  }
+
+  const { count: paymentCount } = await supabaseAdmin
+    .from('payments')
+    .select('id', { count: 'exact', head: true })
+    .eq('student_id', newStudentId)
+    .neq('status', 'pending');
+
+  if ((paymentCount ?? 0) > 0) {
+    return {
+      success: false,
+      error: 'Cannot revert — a payment has already been processed at the new branch.',
+    };
+  }
+
+  // 4. Clear the FK from the OLD row pointing at the NEW row FIRST — otherwise
+  //    deleting the new student would violate students_transferred_to_student_id_fkey.
+  //    This also restores the old enrollment in the same step.
+  await supabaseAdmin
+    .from('students')
+    .update({ transferred_to_student_id: null, updated_at: new Date().toISOString() })
+    .eq('id', oldStudent.id);
+
+  await supabaseAdmin
+    .from('enrollments')
+    .update({ status: 'active', updated_at: new Date().toISOString() })
+    .eq('student_id', oldStudent.id)
+    .eq('status', 'cancelled');
+
+  // 5. Now safe to delete: enrollments → pending payments → parent links → student
+  if (newEnrollmentIds.length > 0) {
+    await supabaseAdmin.from('enrollments').delete().in('id', newEnrollmentIds);
+  }
+  await supabaseAdmin.from('payments').delete().eq('student_id', newStudentId).eq('status', 'pending');
+  await supabaseAdmin.from('parent_students').delete().eq('student_id', newStudentId);
+  await supabaseAdmin.from('students').delete().eq('id', newStudentId);
+
+  return { success: true };
 }

@@ -23,7 +23,7 @@ export default async function ExaminationPage() {
 
   const permData = await getCurrentUserPermissions();
   const perms = permData?.permissions.examinations;
-  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions) : "/login");
+  if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   // Fetch data in parallel
   const [examinationsResult, eligibleStudents, allStudents, examiners, branches, courses] =

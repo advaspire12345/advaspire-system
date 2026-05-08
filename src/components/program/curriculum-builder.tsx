@@ -50,6 +50,7 @@ export interface CurriculumSection {
 interface CurriculumBuilderProps {
   sections: CurriculumSection[];
   onChange: (sections: CurriculumSection[]) => void;
+  numberOfLevels?: number;
 }
 
 function generateId() {
@@ -61,26 +62,33 @@ interface MissionFieldListProps {
   onAdd: () => void;
   onUpdate: (id: string, updates: Partial<MissionItem>) => void;
   onRemove: (id: string) => void;
+  numberOfLevels: number;
 }
 
-function MissionFieldList({ missions, onAdd, onUpdate, onRemove }: MissionFieldListProps) {
+function MissionFieldList({ missions, onAdd, onUpdate, onRemove, numberOfLevels }: MissionFieldListProps) {
+  const allLevels = Array.from({ length: numberOfLevels }, (_, i) => i + 1);
+  const canAddMore = missions.length < numberOfLevels;
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <label className="text-xs font-semibold text-muted-foreground">Missions</label>
         <span className="text-xs text-muted-foreground">{missions.length} mission(s)</span>
       </div>
-      {missions.map((mission, index) => (
+      {missions.map((mission, index) => {
+        const usedByOthers = new Set(
+          missions.filter((m) => m.id !== mission.id && m.level != null).map((m) => m.level)
+        );
+        const levelOptions = allLevels
+          .filter((lv) => !usedByOthers.has(lv))
+          .map((lv) => ({ value: lv.toString(), label: `Level ${lv}` }));
+        return (
         <div key={mission.id} className="flex items-center gap-2 bg-muted/30 rounded-lg p-2">
           <div className="flex-1 grid grid-cols-3 gap-2">
             <FloatingSelect
               label="Level"
               value={mission.level?.toString() || ""}
               onChange={(val) => onUpdate(mission.id, { level: val ? parseInt(val) : null })}
-              options={Array.from({ length: 20 }, (_, i) => ({
-                value: (i + 1).toString(),
-                label: `Level ${i + 1}`,
-              }))}
+              options={levelOptions}
             />
             <FloatingInput
               label="Mission URL"
@@ -97,8 +105,9 @@ function MissionFieldList({ missions, onAdd, onUpdate, onRemove }: MissionFieldL
             <button
               type="button"
               onClick={onAdd}
-              className="p-1 rounded-full border-2 border-[#23D2E2] transition-all duration-200 flex items-center justify-center hover:bg-[#23D2E2]/10 hover:shadow-md flex-shrink-0"
-              title="Add mission"
+              disabled={!canAddMore}
+              className="p-1 rounded-full border-2 border-[#23D2E2] transition-all duration-200 flex items-center justify-center hover:bg-[#23D2E2]/10 hover:shadow-md flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={canAddMore ? "Add mission" : "All levels added"}
             >
               <Plus size={12} className="text-[#23D2E2]" strokeWidth={5} />
             </button>
@@ -113,7 +122,8 @@ function MissionFieldList({ missions, onAdd, onUpdate, onRemove }: MissionFieldL
             </button>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -123,9 +133,10 @@ interface SortableLessonProps {
   sectionId: string;
   onUpdate: (sectionId: string, lessonId: string, updates: Partial<CurriculumLesson>) => void;
   onRemove: (sectionId: string, lessonId: string) => void;
+  numberOfLevels: number;
 }
 
-function SortableLesson({ lesson, sectionId, onUpdate, onRemove }: SortableLessonProps) {
+function SortableLesson({ lesson, sectionId, onUpdate, onRemove, numberOfLevels }: SortableLessonProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const {
@@ -221,6 +232,7 @@ function SortableLesson({ lesson, sectionId, onUpdate, onRemove }: SortableLesso
           </div>
           <MissionFieldList
             missions={lesson.missions}
+            numberOfLevels={numberOfLevels}
             onAdd={() => {
               const newMission: MissionItem = {
                 id: generateId(),
@@ -259,6 +271,7 @@ interface SortableSectionProps {
   onUpdateLesson: (sectionId: string, lessonId: string, updates: Partial<CurriculumLesson>) => void;
   onRemoveLesson: (sectionId: string, lessonId: string) => void;
   onReorderLessons: (sectionId: string, lessons: CurriculumLesson[]) => void;
+  numberOfLevels: number;
 }
 
 function SortableSection({
@@ -269,6 +282,7 @@ function SortableSection({
   onUpdateLesson,
   onRemoveLesson,
   onReorderLessons,
+  numberOfLevels,
 }: SortableSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -385,6 +399,7 @@ function SortableSection({
                     sectionId={section.id}
                     onUpdate={onUpdateLesson}
                     onRemove={onRemoveLesson}
+                    numberOfLevels={numberOfLevels}
                   />
                 ))}
               </div>
@@ -406,7 +421,7 @@ function SortableSection({
   );
 }
 
-export function CurriculumBuilder({ sections, onChange }: CurriculumBuilderProps) {
+export function CurriculumBuilder({ sections, onChange, numberOfLevels = 4 }: CurriculumBuilderProps) {
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
@@ -532,6 +547,7 @@ export function CurriculumBuilder({ sections, onChange }: CurriculumBuilderProps
                 onUpdateLesson={handleUpdateLesson}
                 onRemoveLesson={handleRemoveLesson}
                 onReorderLessons={handleReorderLessons}
+                numberOfLevels={numberOfLevels}
               />
             ))}
           </div>
