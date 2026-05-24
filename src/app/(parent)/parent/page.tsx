@@ -8,6 +8,7 @@ import {
   getParentProjectPhotos,
   getParentEvents,
 } from "@/data/parent-portal";
+import { getUpcomingSessions } from "@/data/reschedules";
 import { ParentNav } from "@/components/parent/parent-nav";
 import { updateParentProfileAction } from "@/app/(parent)/parent/profile-actions";
 import type { ParentProfileData } from "@/app/(parent)/parent/profile-actions";
@@ -37,13 +38,14 @@ export default async function ParentPortalPage() {
   const studentIds = portalData.children.map((c) => c.id);
 
   // Fetch all supplementary data in parallel
-  const [attendance, upcomingClasses, payments, photos, events] =
+  const [attendance, upcomingClasses, payments, photos, events, upcomingSessions] =
     await Promise.all([
       getParentAttendanceHistory(studentIds),
       Promise.resolve(getParentUpcomingClasses(portalData.children)),
       getParentPaymentHistory(studentIds),
       getParentProjectPhotos(studentIds),
       getParentEvents(portalData.parent.id),
+      getUpcomingSessions(studentIds),
     ]);
 
   // Compute calendar dates from upcoming classes
@@ -114,6 +116,7 @@ export default async function ParentPortalPage() {
           parentId={portalData.parent.id}
           initialEvents={events}
           upcomingClasses={upcomingClasses}
+          upcomingSessions={upcomingSessions}
         />
 
         {/* Bottom row */}

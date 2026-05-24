@@ -1,0 +1,76 @@
+name: scenario-5a-three-sibling-cancel-zero
+description: |
+  Doc scenario 5a — Cancel/Complete from 3-Sibling Pool, all 0 sessions.
+
+  Three siblings in a pool, no payment approved, all show 0 sessions.
+  Cancel one — pool stays active with the remaining 2 members, sessions
+  remain 0, the cancelled student keeps the pool_id breadcrumb.
+
+  Simulator chain:
+    1-3. Add Ali5a, Abu5a, Aminah5a (pool of 3, no payment).
+    4. cancel_enrollment Aminah5a → pool keeps 2 active members, 0 sessions.
+
+fixtures:
+  branch:
+    name: "Sim S5a Branch"
+    code: "S5AB"
+    parent: "ADS"
+  course:
+    name: "S5aCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali5a"
+      parent_name: "S5a Parent"
+      parent_email: "p5a@sim.local"
+      parent_phone: "0123450050"
+      course: "S5aCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu5a"
+      parent_email: "p5a@sim.local"
+      parent_existing: true
+      course: "S5aCourse"
+      share_with_sibling: true
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Aminah5a"
+      parent_email: "p5a@sim.local"
+      parent_existing: true
+      course: "S5aCourse"
+      share_with_sibling: true
+      date_of_birth: "2019-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: cancel_enrollment
+    with:
+      student: "Aminah5a"
+    observers: auto
+
+teardown: auto

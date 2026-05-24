@@ -1,0 +1,67 @@
+name: trial-update-date-relocates
+description: |
+  When you EDIT a trial's scheduled_date, the mark-attendance table should
+  immediately reflect the change:
+   - move date INTO current week  → trial appears on /attendance
+   - move date OUT of current week → trial disappears from /attendance
+   - trial_table on /trial reflects the new date for everyone
+
+fixtures:
+  branch:
+    name: "Sim Trial Edit Branch"
+    code: "STEB"
+    parent: "ADS"
+  course:
+    name: "TrialEditCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: ca,   role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,      in_charge: true }
+
+steps:
+  # 1. Add trial WAY in the future (out of current week) → should NOT appear on /attendance
+  - actor: ca
+    action: add_trial
+    with:
+      parent_name: "Edit Parent"
+      parent_email: "edit@sim.local"
+      parent_phone: "0123456783"
+      child_name: "TrialKidEdit"
+      child_age: 10
+      course: "TrialEditCourse"
+      scheduled_date: "TODAY+30"          # 30 days out — outside current week
+      scheduled_time: "18:30"
+      source: "google"
+    observers: auto
+    expect:
+      "*.trial_table.row_visible": true
+      "inst.attendance_table.row_visible(TrialKidEdit (Trial))": false   # NOT yet in week
+
+  # 2. Edit the trial: pull the date back to TODAY → should NOW appear on /attendance
+  - actor: ca
+    action: update_trial
+    with:
+      child_name: "TrialKidEdit"
+      scheduled_date: "TODAY"
+    observers: auto
+    expect:
+      "*.trial_table.scheduled_date": "TODAY"
+      "inst.attendance_table.row_visible(TrialKidEdit (Trial))": true   # now appears
+
+  # 3. Edit again: push the date out to NEXT WEEK → should DISAPPEAR from /attendance
+  - actor: ca
+    action: update_trial
+    with:
+      child_name: "TrialKidEdit"
+      scheduled_date: "TODAY+10"          # 10 days out — definitely next week
+    observers: auto
+    expect:
+      "inst.attendance_table.row_visible(TrialKidEdit (Trial))": false   # gone again
+      "*.trial_table.row_visible": true                                  # still on /trial
+
+teardown: auto

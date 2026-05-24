@@ -324,6 +324,16 @@ export function PendingPaymentModal({
             </p>
           )}
 
+          {mode === "approve" && record?.parentMarkedPaidAt && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Parent says paid at{" "}
+              <span className="font-semibold">
+                {format(new Date(record.parentMarkedPaidAt), "dd MMM yyyy, HH:mm")}
+              </span>
+              . Verify the uploaded payment slip below before approving.
+            </div>
+          )}
+
           <div className="space-y-5 mt-8">
             {/* Add Mode: Student Selection */}
             {isAddMode ? (
@@ -708,19 +718,19 @@ export function PendingPaymentModal({
               </div>
             )}
 
-            {/* Receipt Photo */}
+            {/* Payment Slip */}
             {isReadonly ? (
               receiptPhoto.length > 0 && (
                 <div>
                   <label className="block text-[#ADAFCA] font-bold text-xs mb-2">
-                    Receipt
+                    Payment Slip
                   </label>
                   <div className="flex gap-3 flex-wrap">
                     {receiptPhoto.map((photo, idx) => (
                       <div key={idx} className="w-12 h-12 rounded-lg overflow-hidden shadow-sm">
                         <Image
                           src={photo}
-                          alt="Receipt"
+                          alt="Payment Slip"
                           width={48}
                           height={48}
                           className="w-full h-full object-cover"
@@ -735,7 +745,7 @@ export function PendingPaymentModal({
                 value={receiptPhoto}
                 onChange={setReceiptPhoto}
                 maxFiles={1}
-                label="Receipt Photo"
+                label="Payment Slip"
               />
             )}
           </div>

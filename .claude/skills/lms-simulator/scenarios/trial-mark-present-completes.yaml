@@ -1,0 +1,62 @@
+name: trial-mark-present-completes
+description: |
+  Trial happy path:
+   1. company_admin adds a trial scheduled for today (within current week).
+   2. Verify the trial appears in the mark-attendance table for instructor.
+   3. Instructor marks Present.
+   4. Trial table status auto-flips to "Completed" (visible to every role).
+
+fixtures:
+  branch:
+    name: "Sim Trial Branch"
+    code: "STBR"
+    parent: "ADS"
+  course:
+    name: "TrialPython"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: ca,   role: company_admin,   in_charge: true }
+    - { handle: aa,   role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,      in_charge: true }
+
+steps:
+  # --- Step 1: create the trial for TODAY (so it falls in the current week) ---
+  - actor: ca
+    action: add_trial
+    with:
+      parent_name: "Trial Parent 1"
+      parent_email: "tp1@sim.local"
+      parent_phone: "0123456781"
+      child_name: "TrialKid1"
+      child_age: 8
+      course: "TrialPython"
+      scheduled_date: "TODAY"
+      scheduled_time: "17:00"
+      source: "website"
+    observers: auto
+    expect:
+      "*.trial_table.status": "Pending"
+      "inst.attendance_table.row_visible(TrialKid1 (Trial))": true   # the week-window check
+
+  # --- Step 2: instructor marks Present ---
+  - actor: inst
+    action: mark_present
+    with:
+      student: "TrialKid1 (Trial)"
+      # Test course has no curriculum, so use the always-available "Competition"
+      # / "Preparation" defaults the modal adds.
+      lesson: "Competition"
+      mission: "Preparation"
+      activity: "trial intro"
+    observers: auto
+    expect:
+      "*.trial_table.status": "Completed"
+      "*.trial_table.row_visible": true
+      "*.attendance_table.row_visible(TrialKid1 (Trial))": false   # gone after present
+
+teardown: auto

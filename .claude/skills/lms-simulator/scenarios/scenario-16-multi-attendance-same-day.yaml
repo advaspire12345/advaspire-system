@@ -1,0 +1,115 @@
+name: scenario-16-multi-attendance-same-day
+description: |
+  Doc scenario 16 — Multiple Attendance Slots on Same Day.
+
+  An instructor can record more than one attendance entry for the same
+  student on the same day, as long as the times are different. The duplicate
+  prevention rule keys on (actual_day, actual_start_time) — same day +
+  different time is allowed and creates new rows; each row deducts 1 session.
+
+  Doc invariant chain: scheduled 10:00 → 3 sessions; extra 15:00 → 2;
+  extra 17:00 → 1. The same-day same-time entry would be blocked (negative
+  case skipped — happy-path coverage only).
+
+  Simulator chain:
+    1. Add Ali — INDIVIDUAL 4-session, fixture slot Monday 10:00.
+    2. mark_offline_paid + approve → enrollment.sessions_remaining = 4.
+    3. mark_present (the regular Monday 10:00 slot) → 3 sessions, 1 row.
+    4. take_extra_attendance Monday 15:00 → 2 sessions, 2 rows.
+    5. take_extra_attendance Monday 17:00 → 1 session, 3 rows.
+
+fixtures:
+  branch:
+    name: "Sim S16 Branch"
+    code: "S16B"
+    parent: "ADS"
+  course:
+    name: "Course16"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  slots:
+    - { day: "monday", time: "10:00", duration: 60, limit: 10 }
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Add Ali.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali16"
+      parent_name: "S16 Parent"
+      parent_email: "p16@sim.local"
+      parent_phone: "0123450160"
+      course: "Course16"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Pay + approve → 4 sessions.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali16"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali16"
+    observers: auto
+
+  # 3. Mark the regular Monday 10:00 slot.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali16"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "scheduled morning session"
+    observers: auto
+    expect:
+      "*.attendance.count": 1
+      "*.enrollment.sessions_remaining": 3
+
+  # 4. Extra Monday 15:00 — different time, allowed.
+  - actor: inst
+    action: take_extra_attendance
+    with:
+      student: "Ali16"
+      course: "Course16"
+      day: "Monday"
+      time: "15:00"
+      lesson: "Lesson 1"
+      mission: "Level 2"
+      activity: "extra afternoon session"
+    observers: auto
+    expect:
+      "*.attendance.count": 2
+      "*.enrollment.sessions_remaining": 2
+
+  # 5. Extra Monday 17:00 — another different time.
+  - actor: inst
+    action: take_extra_attendance
+    with:
+      student: "Ali16"
+      course: "Course16"
+      day: "Monday"
+      time: "17:00"
+      lesson: "Lesson 2"
+      mission: "Level 1"
+      activity: "extra evening session"
+    observers: auto
+    expect:
+      "*.attendance.count": 3
+      "*.enrollment.sessions_remaining": 1
+
+teardown: auto

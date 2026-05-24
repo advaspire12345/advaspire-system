@@ -9,6 +9,7 @@ import {
   type CreateProgramPayload,
 } from "@/data/programs";
 import { authorizeAction } from "@/data/permissions";
+import { syncEventFromProgram, softDeleteEventForProgram } from "@/data/events";
 import type { ProgramFull } from "@/db/schema";
 
 export interface ProgramFormPayload {
@@ -92,7 +93,14 @@ export async function createProgramAction(
       return { success: false, error: "Failed to create program" };
     }
 
+    try {
+      await syncEventFromProgram(programId);
+    } catch (e) {
+      console.warn("[createProgramAction] syncEventFromProgram failed:", e);
+    }
+
     revalidatePath("/program");
+    revalidatePath("/events");
     return { success: true, programId };
   } catch (error) {
     console.error("Error in createProgramAction:", error);
@@ -116,7 +124,14 @@ export async function updateProgramAction(
       return { success: false, error: "Failed to update program" };
     }
 
+    try {
+      await syncEventFromProgram(programId);
+    } catch (e) {
+      console.warn("[updateProgramAction] syncEventFromProgram failed:", e);
+    }
+
     revalidatePath("/program");
+    revalidatePath("/events");
     return { success: true };
   } catch (error) {
     console.error("Error in updateProgramAction:", error);
@@ -139,7 +154,14 @@ export async function deleteProgramAction(
       return { success: false, error: "Failed to delete program" };
     }
 
+    try {
+      await softDeleteEventForProgram(programId);
+    } catch (e) {
+      console.warn("[deleteProgramAction] softDeleteEventForProgram failed:", e);
+    }
+
     revalidatePath("/program");
+    revalidatePath("/events");
     return { success: true };
   } catch (error) {
     console.error("Error in deleteProgramAction:", error);

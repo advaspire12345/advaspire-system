@@ -1,0 +1,121 @@
+name: scenario-3-pool-absorption-2-sibling
+description: |
+  Doc scenario 3 — Pool Creation, 2 Siblings with Session Absorption.
+
+  Two siblings each have individual enrollments with different session
+  balances. When pooled, each one's individual sessions_remaining is
+  absorbed into pool.sessions_remaining and the enrollment's count zeros
+  out. Display = floor(pool / count) + position bonus.
+
+  Doc invariant: Ali(8) + Abu(4) → pool.sessions_remaining = 12.
+  Per-student display = floor(12 / 2) = 6 each.
+
+  Mechanically identical to scenario 8 — just different numbers — but the
+  doc considers this a separate worked example since it spells out the
+  step-by-step "first joins, second joins" narrative.
+
+  Simulator chain:
+    1. Add Abu — new parent, INDIVIDUAL 4-session.
+    2. Pay + approve Abu → enrollment.sessions_remaining = 4.
+    3. Add Ali — same parent, INDIVIDUAL via force_individual=true.
+    4. Pay + approve Ali → enrollment.sessions_remaining = 4.
+    5. stamp_sessions_remaining Ali to 8.
+    6. switch_to_shared Ali → pool created, both absorbed → pool=12,
+       each enrollment.sessions_remaining = 0.
+
+fixtures:
+  branch:
+    name: "Sim S3 Branch"
+    code: "S3B1"
+    parent: "ADS"
+  course:
+    name: "Course3"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Abu — first sibling, individual, 4-session.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu3"
+      parent_name: "S3 Parent"
+      parent_email: "p3@sim.local"
+      parent_phone: "0123450031"
+      course: "Course3"
+      package: "4-session"
+      date_of_birth: "2016-02-10"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Pay + approve Abu → sessions_remaining = 4.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Abu3"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Abu3"
+    observers: auto
+
+  # 3. Ali — same parent, INDIVIDUAL via force_individual=true.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali3"
+      parent_email: "p3@sim.local"
+      parent_existing: true
+      course: "Course3"
+      package: "4-session"
+      force_individual: true
+      date_of_birth: "2014-03-05"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 4. Pay + approve Ali → sessions_remaining = 4.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali3"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali3"
+    observers: auto
+
+  # 5. Stamp Ali to 8 (simulates partial-use of a larger package).
+  - actor: aa
+    action: stamp_sessions_remaining
+    with:
+      student: "Ali3"
+      value: 8
+    observers: auto
+
+  # 6. Switch Ali to shared — pool created absorbing both → 12 sessions.
+  - actor: aa
+    action: switch_to_shared
+    with:
+      student: "Ali3"
+    observers: auto
+    expect:
+      # Ali(8) + Abu(4) absorbed → pool.sessions_remaining = 12.
+      "*.pool.sessions_remaining": 12
+      "*.pool.active_students": 2
+      "*.enrollment.sessions_remaining": 0
+
+teardown: auto

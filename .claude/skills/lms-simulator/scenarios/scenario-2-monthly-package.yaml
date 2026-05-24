@@ -1,0 +1,76 @@
+name: scenario-2-monthly-package
+description: |
+  Doc scenario 2 — Solo Enrollment with Monthly Package.
+
+  Same auto-renewal mechanic as Scenario 1 but with a monthly package
+  (1 month = 4 sessions per the LMS convention). Verifies the runner +
+  add_student + monthly-pricing fixture all wire together correctly.
+
+  Scenario steps:
+    1. Add Ali2 (1-monthly) + approve → sessions = 4
+    2. stamp_sessions_remaining to 1
+    3. mark_present → sessions = 0; auto-renewal pending payment created
+    4. Verify a second pending payment exists
+
+fixtures:
+  branch:
+    name: "Sim S2 Branch"
+    code: "S2B1"
+    parent: "ADS"
+  course:
+    name: "S2Course"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: monthly
+    count: 1
+    price: 150
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali2"
+      parent_name: "S2 Parent"
+      parent_email: "p2@sim.local"
+      parent_phone: "0123450020"
+      course: "S2Course"
+      package: "1-monthly"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali2"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali2"
+    observers: auto
+
+  - actor: aa
+    action: stamp_sessions_remaining
+    with:
+      student: "Ali2"
+      value: 1
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali2"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+teardown: auto

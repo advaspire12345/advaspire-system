@@ -16,11 +16,18 @@ export async function POST(request: NextRequest) {
 
     let success = 0;
     let failed = 0;
+    let skipped = 0;
     const errors: string[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const rowIndex = i + 1;
+
+      // Skip template example rows
+      if ((row.student_id ?? "").trim().toUpperCase().startsWith("EXAMPLE")) {
+        skipped++;
+        continue;
+      }
 
       try {
         // Validate required fields
@@ -41,11 +48,12 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // 1. Find student by student_id
+        // 1. Find student by student_id — case-insensitive so legacy IDs
+        // like "Adv24001" still match "ADV24001" in the DB.
         const { data: student } = await supabaseAdmin
           .from("students")
           .select("id, adcoin_balance")
-          .eq("student_id", row.student_id.trim())
+          .ilike("student_id", row.student_id.trim())
           .maybeSingle();
 
         if (!student) {
@@ -74,19 +82,71 @@ export async function POST(request: NextRequest) {
           : 0;
         const adcoin = isNaN(adcoinValue) ? 0 : adcoinValue;
 
-        // 4. Insert attendance record
+        // 4. Insert attendance record.
+        //   - `activity` CSV column → `last_activity` DB column (the field
+        //     labelled "Activity Completed" in the mark-attendance modal).
+        //   - `time` CSV column → `actual_start_time` (HH:MM 24-hour).
+        //   - `notes` stays as notes.
+        // Normalise time to HH:MM:SS so it matches the postgres `time` type.
+        let actualStartTime: string | null = null;
+        const rawTime = row.time?.trim();
+        if (rawTime) {
+          const m = rawTime.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+          if (!m) {
+            throw new Error(`time "${rawTime}" is invalid — use HH:MM (24-hour)`);
+          }
+          actualStartTime = `${String(m[1]).padStart(2, "0")}:${m[2]}:${m[3] ?? "00"}`;
+        }
+
+        // `absence_reason` is the new column name. Accept legacy `notes` too
+        // so any CSVs built before the rename keep working. Either value goes
+        // into the DB's `notes` column (which the absent flow reads as the
+        // "Reason" field in the UI).
+        const absenceReason = row.absence_reason?.trim() || row.notes?.trim() || null;
+
+        // Dedup: skip if an attendance row already exists for this
+        // (enrollment, date, time). Same student + same date + same time =
+        // duplicate. Same date with DIFFERENT time = a separate valid session
+        // (multi-slot same-day attendance), so create it.
+        const date = row.date.trim();
+        let dupQuery = supabaseAdmin
+          .from("attendance")
+          .select("id")
+          .eq("enrollment_id", enrollment.id)
+          .eq("date", date);
+        dupQuery = actualStartTime
+          ? dupQuery.eq("actual_start_time", actualStartTime)
+          : dupQuery.is("actual_start_time", null);
+        const { data: existingAtt } = await dupQuery.limit(1).maybeSingle();
+        if (existingAtt) {
+          skipped++;
+          continue;
+        }
+
         const { error: attendanceError } = await supabaseAdmin
           .from("attendance")
           .insert({
             enrollment_id: enrollment.id,
-            date: row.date.trim(),
+            date,
+            actual_start_time: actualStartTime,
             status,
-            class_type: row.class_type?.trim() || null,
+            // class_type is CHECK-constrained to exactly "Physical" or
+            // "Online" (Title case). Normalise so any casing the user types
+            // ends up matching — "physical"/"PHYSICAL"/"Physical" all → "Physical".
+            class_type: (() => {
+              const raw = row.class_type?.trim();
+              if (!raw) return null;
+              const lower = raw.toLowerCase();
+              if (lower === "physical") return "Physical";
+              if (lower === "online") return "Online";
+              return null;
+            })(),
             instructor_name: row.instructor_name?.trim() || null,
             lesson: row.lesson?.trim() || null,
             mission: row.mission?.trim() || null,
+            last_activity: row.activity?.trim() || null,
             adcoin,
-            notes: row.notes?.trim() || null,
+            notes: absenceReason,
           });
 
         if (attendanceError) {
@@ -116,7 +176,7 @@ export async function POST(request: NextRequest) {
 
     revalidatePath("/attendance-log");
 
-    return NextResponse.json({ success, failed, errors });
+    return NextResponse.json({ success, failed, skipped, errors });
   } catch (error) {
     console.error("Import attendance error:", error);
     return NextResponse.json(

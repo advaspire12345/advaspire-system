@@ -764,7 +764,7 @@ export async function getTransactionsForDisplay(userEmail: string): Promise<Tran
       photo,
       branch_id,
       adcoin_balance,
-      branch:branches(id, name, city)
+      branch:branches!students_branch_id_branches_id_fk(id, name, city)
     `)
     .in('id', idsArray);
 
@@ -954,7 +954,7 @@ export async function getTransactionsForDisplayPaginated(
       photo,
       branch_id,
       adcoin_balance,
-      branch:branches(id, name, city)
+      branch:branches!students_branch_id_branches_id_fk(id, name, city)
     `)
     .in('id', idsArray);
 

@@ -57,7 +57,7 @@ export async function getAttendanceFull(attendanceId: string): Promise<Attendanc
         *,
         student:students(
           *,
-          branch:branches(*)
+          branch:branches!students_branch_id_branches_id_fk(*)
         ),
         course:courses(*),
         package:course_pricing(*)
@@ -116,7 +116,7 @@ export async function getAttendanceByDate(date: string, branchId?: string): Prom
         *,
         student:students!inner(
           *,
-          branch:branches(*)
+          branch:branches!students_branch_id_branches_id_fk(*)
         ),
         course:courses(*),
         package:course_pricing(*)
@@ -152,7 +152,7 @@ export async function getAttendanceByDateRange(
         *,
         student:students!inner(
           *,
-          branch:branches(*)
+          branch:branches!students_branch_id_branches_id_fk(*)
         ),
         course:courses(*),
         package:course_pricing(*)
@@ -188,7 +188,7 @@ export async function getRecentAttendance(
         *,
         student:students!inner(
           *,
-          branch:branches(*)
+          branch:branches!students_branch_id_branches_id_fk(*)
         ),
         course:courses(*),
         package:course_pricing(*)
@@ -822,7 +822,7 @@ export async function getEnrollmentsForAttendance(
       photo,
       branch_id,
       deleted_at,
-      branch:branches!inner(id, name, city)
+      branch:branches!students_branch_id_branches_id_fk(id, name, city)
     ),
     course:courses!inner(id, name),
     package:course_pricing(description),
@@ -1419,7 +1419,7 @@ export async function getEnrollmentsForAttendancePaginated(
       photo,
       branch_id,
       deleted_at,
-      branch:branches!inner(id, name, city)
+      branch:branches!students_branch_id_branches_id_fk(id, name, city)
     ),
     course:courses!inner(id, name),
     package:course_pricing(description),
@@ -2038,7 +2038,7 @@ export async function getAllStudentsForManualAttendance(
         photo,
         branch_id,
         deleted_at,
-        branch:branches!inner(id, name, city)
+        branch:branches!students_branch_id_branches_id_fk(id, name, city)
       ),
       course:courses!inner(id, name),
       package:course_pricing(description)
@@ -3036,7 +3036,7 @@ export async function getAttendanceLog(
           photo,
           branch_id,
           deleted_at,
-          branch:branches!inner(id, name, city)
+          branch:branches!students_branch_id_branches_id_fk(id, name, city)
         ),
         course:courses!inner(id, name),
         package:course_pricing(description)
@@ -3171,7 +3171,13 @@ export async function getAttendanceLog(
       createdAt: record.created_at,
       enrollmentId: enrollment.id,
       sessionsRemaining: logSessionsRemaining,
-      dayOfWeek: record.actual_day ?? enrollment.day_of_week,
+      // Only project the displayed date when actual_day is explicitly set
+      // (meaning the student attended on a non-scheduled day). Falling back
+      // to enrollment.day_of_week would force the display to ALWAYS snap to
+      // the slot's weekly day — wrong for imported / migrated rows whose
+      // dates may not align with the slot (e.g. make-up sessions, holiday
+      // make-ups, historical data from a different schedule).
+      dayOfWeek: record.actual_day,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
       lesson: record.lesson,
@@ -3352,7 +3358,7 @@ export async function getAttendanceLogPaginated(
           photo,
           branch_id,
           deleted_at,
-          branch:branches!inner(id, name, city)
+          branch:branches!students_branch_id_branches_id_fk(id, name, city)
         ),
         course:courses!inner(id, name),
         package:course_pricing(description)
@@ -3497,7 +3503,13 @@ export async function getAttendanceLogPaginated(
       createdAt: record.created_at,
       enrollmentId: enrollment.id,
       sessionsRemaining: logSessionsRemaining,
-      dayOfWeek: record.actual_day ?? enrollment.day_of_week,
+      // Only project the displayed date when actual_day is explicitly set
+      // (meaning the student attended on a non-scheduled day). Falling back
+      // to enrollment.day_of_week would force the display to ALWAYS snap to
+      // the slot's weekly day — wrong for imported / migrated rows whose
+      // dates may not align with the slot (e.g. make-up sessions, holiday
+      // make-ups, historical data from a different schedule).
+      dayOfWeek: record.actual_day,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
       lesson: record.lesson,

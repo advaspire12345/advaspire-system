@@ -14,6 +14,78 @@ import type {
 // READ OPERATIONS
 // ============================================
 
+// Group multiple enrollments for the same course into one virtual enrollment
+// with a merged schedule. The /student table shows one row per (student,
+// program) so multi-slot enrollments (e.g. Lego EV3 Sat 14:00 + Lego EV3
+// Sat 16:00 under the same student) collapse to a single display row whose
+// schedule reads "Sat 14:00, Sat 16:00". Other fields come from the earliest
+// enrollment in the group (which is also the one that owns the pool_students
+// row when the enrollments are pooled).
+type AnyEnrollment = {
+  id: string;
+  course_id: string | null;
+  day_of_week: string | null;
+  start_time: string | null;
+  schedule: string | null;
+  created_at?: string;
+  [k: string]: unknown;
+};
+function groupEnrollmentsByCourse<E extends AnyEnrollment>(enrollments: E[]): E[] {
+  if (enrollments.length <= 1) return enrollments;
+  const buckets = new Map<string, E[]>();
+  for (const e of enrollments) {
+    const key = e.course_id ?? `__no_course__${e.id}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(e);
+  }
+  const out: E[] = [];
+  for (const group of buckets.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    // Sort by created_at so we pick the EARLIEST enrollment as the primary.
+    group.sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+    const slots: { day: string; time: string }[] = [];
+    for (const e of group) {
+      // Prefer the modern `schedule` JSON if present.
+      if (e.schedule) {
+        try {
+          const parsed = JSON.parse(e.schedule);
+          if (Array.isArray(parsed)) {
+            for (const ent of parsed as { day?: string; time?: string }[]) {
+              if (ent?.day) slots.push({ day: ent.day, time: ent.time ?? "" });
+            }
+            continue;
+          }
+        } catch {
+          // fall through to legacy
+        }
+      }
+      if (e.day_of_week) {
+        let days: string[];
+        try {
+          const parsed = JSON.parse(e.day_of_week);
+          days = Array.isArray(parsed) ? parsed : [e.day_of_week];
+        } catch {
+          days = e.day_of_week.split(",").map((d) => d.trim());
+        }
+        for (const d of days) {
+          if (d) slots.push({ day: d, time: e.start_time ?? "" });
+        }
+      }
+    }
+    // Build virtual enrollment from the earliest one, overriding schedule.
+    const primary: E = { ...group[0] };
+    primary.schedule = JSON.stringify(slots);
+    primary.day_of_week = null;
+    primary.start_time = null;
+    out.push(primary);
+  }
+  return out;
+}
+
+
 export async function getStudentById(studentId: string): Promise<Student | null> {
   const { data, error } = await supabaseAdmin
     .from('students')
@@ -684,6 +756,7 @@ export async function getStudentsForTable(
       branch:branches!students_branch_id_branches_id_fk(name, city),
       enrollments(
         id,
+        course_id,
         status,
         enrolled_at,
         sessions_remaining,
@@ -698,6 +771,7 @@ export async function getStudentsForTable(
         level,
         adcoin_balance,
         expires_at,
+        created_at,
         course:courses(id, name),
         package:course_pricing(id, package_type, duration),
         pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
@@ -1082,15 +1156,15 @@ export async function getStudentsForTable(
     };
   };
 
-  // Process results - one row per enrollment (or one row for students with no enrollments)
+  // Process results - one row per (student, program). Multi-slot enrollments
+  // for the same program are grouped into a single display row with combined
+  // schedule via groupEnrollmentsByCourse().
   const rows: StudentTableRow[] = [];
   for (const student of data ?? []) {
-    const enrollments = student.enrollments || [];
+    const enrollments = groupEnrollmentsByCourse(student.enrollments || []);
     if (enrollments.length === 0) {
-      // Student with no enrollments - still show one row
       rows.push(buildRow(student, null));
     } else {
-      // One row per enrollment
       for (const enrollment of enrollments) {
         rows.push(buildRow(student, enrollment));
       }
@@ -1175,6 +1249,7 @@ export async function getStudentsForTablePaginated(
       branch:branches!students_branch_id_branches_id_fk(name, city),
       enrollments(
         id,
+        course_id,
         status,
         enrolled_at,
         sessions_remaining,
@@ -1189,6 +1264,7 @@ export async function getStudentsForTablePaginated(
         level,
         adcoin_balance,
         expires_at,
+        created_at,
         course:courses(id, name),
         package:course_pricing(id, package_type, duration),
         pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
@@ -1540,7 +1616,8 @@ export async function getStudentsForTablePaginated(
 
   const rows: StudentTableRow[] = [];
   for (const student of data ?? []) {
-    const enrollments = student.enrollments || [];
+    // Same grouping as the main /student list: one row per (student, program).
+    const enrollments = groupEnrollmentsByCourse(student.enrollments || []);
     const xferLabel = student.transferred_to_student_id
       ? xferBranchByStudentId.get(student.transferred_to_student_id) ?? null
       : null;

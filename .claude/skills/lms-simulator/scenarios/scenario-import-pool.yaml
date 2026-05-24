@@ -1,0 +1,86 @@
+name: scenario-import-pool
+description: |
+  End-to-end test of the new "share_with_sibling" column in the Students CSV
+  import. Verifies the server's two-pass row processing (individuals first,
+  shared rows second) correctly creates a pool joining the two siblings.
+
+  Doc invariant:
+    - After import: a shared_session_pool exists for (parent, course)
+    - Both Ali and Abu are in pool_students for that pool
+    - Each enrollment.pool_id points to the new pool
+    - pool.sessions_remaining = 0 (no payment yet)
+
+  Simulator chain:
+    1. Upload a CSV with two rows for the same parent+course:
+       - Ali (share_with_sibling blank — individual)
+       - Abu (share_with_sibling=true — should join pool)
+    2. The two-pass server logic processes Ali first (individual enrollment)
+       then Abu (looks up Ali, creates pool with both, soft-deletes Ali's
+       individual status).
+    3. Verify pool state via the simulator's pool.* expectations.
+
+fixtures:
+  branch:
+    name: "Sim Imp Branch"
+    code: "SIMP"
+    parent: "ADS"
+  course:
+    name: "ImportCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: sa, role: super_admin, in_charge: true }
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: sa
+    action: import_students_csv
+    with:
+      # `student` is read by the runner's expect resolver as the searchText
+      # for DB lookups (pool / enrollment fields key on the student). Set it
+      # to whichever imported student's state you want to verify; here it's
+      # the shared sibling, AbuImp.
+      student: "AbuImp"
+      rows:
+        - student_name: "AliImp"
+          date_of_birth: "2015-01-01"
+          gender: "male"
+          school_name: "Sim School"
+          parent_name: "Imp Parent"
+          parent_email: "imp.parent@sim.local"
+          parent_phone: "0123450001"
+          package_type: "session"
+          package_duration: "4"
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: "0"
+          share_with_sibling: ""
+        - student_name: "AbuImp"
+          date_of_birth: "2017-01-01"
+          gender: "male"
+          school_name: "Sim School"
+          parent_name: "Imp Parent"
+          parent_email: "imp.parent@sim.local"
+          parent_phone: "0123450001"
+          package_type: "session"
+          package_duration: "4"
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: "0"
+          share_with_sibling: "true"
+    observers: auto
+    expect:
+      # Both siblings end up in the same pool. The runner's lookup uses the
+      # student name on the expect step (via observer searchText), which is
+      # the LAST imported student — AbuImp. So we check AbuImp's pool state.
+      "*.pool.active_students": 2
+      "*.enrollment.pool_id_set": true
+
+teardown: auto

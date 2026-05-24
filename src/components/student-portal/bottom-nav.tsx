@@ -1,6 +1,6 @@
 "use client";
 
-export type TabId = "home" | "transfer" | "ranking" | "portfolio" | "shop" | "missions";
+export type TabId = "home" | "transfer" | "ranking" | "portfolio" | "shop" | "missions" | "events";
 
 interface BottomNavProps {
   activeTab: TabId;
@@ -14,6 +14,7 @@ const leftTabs: { id: TabId; label: string }[] = [
 const rightTabs: { id: TabId; label: string }[] = [
   { id: "transfer", label: "TRANS" },
   { id: "ranking", label: "RANK" },
+  { id: "events", label: "EVENTS" },
   { id: "shop", label: "SHOP" },
   { id: "portfolio", label: "PORT" },
   { id: "missions", label: "QUEST" },
@@ -51,6 +52,14 @@ const tabIcons: Record<TabId, React.ReactNode> = {
   missions: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full">
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </svg>
+  ),
+  events: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full">
+      <rect x="3" y="4" width="18" height="18" rx="2"/>
+      <line x1="16" y1="2" x2="16" y2="6"/>
+      <line x1="8" y1="2" x2="8" y2="6"/>
+      <line x1="3" y1="10" x2="21" y2="10"/>
     </svg>
   ),
 };

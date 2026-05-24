@@ -1,0 +1,63 @@
+name: scenario-6a-two-sibling-cancel-zero
+description: |
+  Doc scenario 6a — Cancel/Complete from 2-Sibling Pool, both 0 sessions.
+
+  Two siblings in a pool, no payment approved, both show 0 sessions.
+  Cancel one — pool auto-dissolves; remaining sibling becomes individual
+  with 0 sessions (mirrors 6b but with 0 sessions instead of 4).
+
+  Simulator chain:
+    1-2. Add Ali6a, Abu6a (pool of 2, no payment).
+    3. cancel_enrollment Abu6a → pool dissolves; Ali6a individual with 0.
+
+fixtures:
+  branch:
+    name: "Sim S6a Branch"
+    code: "S6AB"
+    parent: "ADS"
+  course:
+    name: "S6aCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali6a"
+      parent_name: "S6a Parent"
+      parent_email: "p6a@sim.local"
+      parent_phone: "0123450060"
+      course: "S6aCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu6a"
+      parent_email: "p6a@sim.local"
+      parent_existing: true
+      course: "S6aCourse"
+      share_with_sibling: true
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: cancel_enrollment
+    with:
+      student: "Abu6a"
+    observers: auto
+
+teardown: auto

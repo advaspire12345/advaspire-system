@@ -1,6 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import { format } from "date-fns";
-import { Receipt } from "lucide-react";
+import { Receipt, Download, CreditCard } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PaymentPayModal } from "@/components/parent/payment-pay-modal";
+import { ReceiptPreviewModal } from "@/components/payments/receipt-preview-modal";
 import type { ParentPaymentRecord } from "@/data/parent-portal";
 
 interface PaymentListProps {
@@ -19,6 +24,9 @@ const statusConfig: Record<
 };
 
 export function PaymentList({ payments }: PaymentListProps) {
+  const [payTarget, setPayTarget] = useState<ParentPaymentRecord | null>(null);
+  const [receiptTarget, setReceiptTarget] = useState<ParentPaymentRecord | null>(null);
+
   return (
     <div className="rounded-xl bg-white p-4 shadow-[0_0_40px_rgba(94,92,154,0.06)]">
       <div className="flex items-center gap-2 mb-3">
@@ -37,6 +45,9 @@ export function PaymentList({ payments }: PaymentListProps) {
           {payments.map((payment) => {
             const config =
               statusConfig[payment.status] ?? statusConfig.pending;
+            const isPending = payment.status === "pending";
+            const canDownloadReceipt =
+              payment.status === "paid" && !!payment.invoiceSnapshot;
 
             return (
               <div
@@ -55,6 +66,11 @@ export function PaymentList({ payments }: PaymentListProps) {
                   </p>
                   <p className="text-xs text-[#8f91ac] truncate">
                     {payment.childName}
+                    {isPending && payment.parentMarkedPaidAt && (
+                      <span className="ml-1 text-amber-600">
+                        · Slip uploaded — awaiting staff
+                      </span>
+                    )}
                   </p>
                 </div>
 
@@ -63,14 +79,77 @@ export function PaymentList({ payments }: PaymentListProps) {
                   RM {payment.amount.toFixed(2)}
                 </span>
 
-                {/* Status badge */}
-                <Badge className={`text-[10px] ${config.className}`}>
-                  {config.label}
-                </Badge>
+                {/* Status badge or action */}
+                {isPending ? (
+                  <button
+                    type="button"
+                    onClick={() => setPayTarget(payment)}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#23D2E2] px-3 py-1 text-[10px] font-bold text-white hover:bg-[#18a9b8]"
+                  >
+                    <CreditCard className="h-3 w-3" />
+                    Pay Now
+                  </button>
+                ) : canDownloadReceipt ? (
+                  <button
+                    type="button"
+                    onClick={() => setReceiptTarget(payment)}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#3e3f5e] px-3 py-1 text-[10px] font-bold text-white hover:bg-[#2f3048]"
+                  >
+                    <Download className="h-3 w-3" />
+                    Receipt
+                  </button>
+                ) : (
+                  <Badge className={`text-[10px] ${config.className}`}>
+                    {config.label}
+                  </Badge>
+                )}
               </div>
             );
           })}
         </div>
+      )}
+
+      {payTarget && (
+        <PaymentPayModal
+          open={!!payTarget}
+          onClose={() => setPayTarget(null)}
+          payment={{
+            id: payTarget.id,
+            amount: payTarget.amount,
+            studentName: payTarget.childName,
+            description: payTarget.courseName,
+          }}
+        />
+      )}
+
+      {receiptTarget && receiptTarget.invoiceSnapshot && (
+        <ReceiptPreviewModal
+          open={!!receiptTarget}
+          onOpenChange={(open) => !open && setReceiptTarget(null)}
+          billToName={receiptTarget.invoiceSnapshot.billToName}
+          billToAddress={receiptTarget.invoiceSnapshot.billToAddress ?? undefined}
+          billToContact={receiptTarget.invoiceSnapshot.billToContact ?? undefined}
+          date={receiptTarget.paidAt ? new Date(receiptTarget.paidAt) : new Date()}
+          receiptNo={
+            receiptTarget.invoiceNumber ??
+            `RCP-${receiptTarget.id.slice(0, 8).toUpperCase()}`
+          }
+          invoiceNo={
+            receiptTarget.invoiceNumber ??
+            `INV-${receiptTarget.id.slice(0, 8).toUpperCase()}`
+          }
+          items={receiptTarget.invoiceSnapshot.items}
+          total={receiptTarget.invoiceSnapshot.total}
+          branch={{
+            name: receiptTarget.invoiceSnapshot.branchName,
+            companyName: receiptTarget.invoiceSnapshot.branchCompanyName,
+            address: receiptTarget.invoiceSnapshot.branchAddress,
+            phone: receiptTarget.invoiceSnapshot.branchPhone,
+            email: receiptTarget.invoiceSnapshot.branchEmail,
+            bankName: receiptTarget.invoiceSnapshot.branchBankName,
+            bankAccount: receiptTarget.invoiceSnapshot.branchBankAccount,
+          }}
+        />
       )}
     </div>
   );

@@ -35,7 +35,7 @@ export async function getPaymentWithStudent(paymentId: string): Promise<PaymentW
       *,
       student:students(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       )
     `)
     .eq('id', paymentId)
@@ -74,7 +74,7 @@ export async function getPaymentsByStatus(
       *,
       student:students!inner(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       )
     `)
     .eq('status', status)
@@ -101,7 +101,7 @@ export async function getPaymentsByBranchId(branchId: string): Promise<PaymentWi
       *,
       student:students!inner(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       )
     `)
     .eq('students.branch_id', branchId)
@@ -126,7 +126,7 @@ export async function getPaymentsByDateRange(
       *,
       student:students!inner(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       )
     `)
     .gte('created_at', startDate)
@@ -157,7 +157,7 @@ export async function getRecentPayments(
       *,
       student:students!inner(
         *,
-        branch:branches(*)
+        branch:branches!students_branch_id_branches_id_fk(*)
       )
     `)
     .order('created_at', { ascending: false })
@@ -402,6 +402,7 @@ export interface PendingPaymentRow {
   receiptPhoto: string | null;
   createdAt: string;
   paidAt: string | null;
+  parentMarkedPaidAt: string | null;
   // Shared package info
   isSharedPackage: boolean;
   poolId: string | null;
@@ -459,6 +460,7 @@ export async function getPendingPaymentsForTable(
       receipt_photo,
       created_at,
       paid_at,
+      parent_marked_paid_at,
       course_id,
       package_id,
       pool_id,
@@ -468,7 +470,7 @@ export async function getPendingPaymentsForTable(
         name,
         phone,
         branch_id,
-        branch:branches!inner(id, name, city),
+        branch:branches!students_branch_id_branches_id_fk(id, name, city),
         parent_students(
           parent:parents(id, name, phone)
         )
@@ -517,10 +519,13 @@ export async function getPendingPaymentsForTable(
     .is('deleted_at', null);
 
   const pricingMap = new Map<string, { packageType: string; duration: number }>();
+  // Look up by package_id (direct, definitive — used when the payment has
+  // package_id set, e.g. from the imports or modern manual flows).
+  const pricingByIdMap = new Map<string, { packageType: string; duration: number }>();
   for (const p of allPricing ?? []) {
-    // Key by course_id + price for matching
     const key = `${p.course_id}-${p.price}`;
     pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
+    pricingByIdMap.set(p.id as string, { packageType: p.package_type, duration: p.duration });
   }
 
   // Get all pool IDs from payments that have pool_id
@@ -597,9 +602,21 @@ export async function getPendingPaymentsForTable(
     // Get parent info (first parent if multiple)
     const parentInfo = student.parent_students?.[0]?.parent;
 
-    // Look up package from course_pricing by course_id and amount
+    // Look up package — prefer the direct package_id (set by imports and
+    // newer manual flows). Fall back to (course_id, amount) only for legacy
+    // payments that don't have package_id; this is brittle because partial /
+    // adjusted payments won't match a price in course_pricing.
     let packageName: string | null = null;
-    if (courseId) {
+    const paymentPackageId = (payment as unknown as { package_id: string | null }).package_id;
+    if (paymentPackageId) {
+      const pricing = pricingByIdMap.get(paymentPackageId);
+      if (pricing) {
+        const typeLabel = pricing.packageType === 'monthly' ? 'Month' : 'Session';
+        const plural = pricing.duration > 1 ? 's' : '';
+        packageName = `${pricing.duration} ${typeLabel}${plural}`;
+      }
+    }
+    if (!packageName && courseId) {
       const key = `${courseId}-${payment.amount}`;
       const pricing = pricingMap.get(key);
       if (pricing) {
@@ -635,6 +652,7 @@ export async function getPendingPaymentsForTable(
       receiptPhoto: payment.receipt_photo,
       createdAt: payment.created_at,
       paidAt: payment.paid_at,
+      parentMarkedPaidAt: (payment as unknown as { parent_marked_paid_at: string | null }).parent_marked_paid_at ?? null,
       // Shared package info
       isSharedPackage: isSharedPackage || !!poolId,
       poolId,
@@ -713,6 +731,7 @@ export async function getPendingPaymentsForTablePaginated(
       receipt_photo,
       created_at,
       paid_at,
+      parent_marked_paid_at,
       course_id,
       package_id,
       pool_id,
@@ -722,7 +741,7 @@ export async function getPendingPaymentsForTablePaginated(
         name,
         phone,
         branch_id,
-        branch:branches!inner(id, name, city),
+        branch:branches!students_branch_id_branches_id_fk(id, name, city),
         parent_students(
           parent:parents(id, name, phone)
         )
@@ -751,9 +770,11 @@ export async function getPendingPaymentsForTablePaginated(
     .is('deleted_at', null);
 
   const pricingMap = new Map<string, { packageType: string; duration: number }>();
+  const pricingByIdMap = new Map<string, { packageType: string; duration: number }>();
   for (const p of allPricing ?? []) {
     const key = `${p.course_id}-${p.price}`;
     pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
+    pricingByIdMap.set(p.id as string, { packageType: p.package_type, duration: p.duration });
   }
 
   // Get all pool IDs from payments that have pool_id
@@ -825,8 +846,18 @@ export async function getPendingPaymentsForTablePaginated(
 
     const parentInfo = student.parent_students?.[0]?.parent;
 
+    // Prefer direct package_id lookup; legacy (course, amount) is a fallback.
     let packageName: string | null = null;
-    if (courseId) {
+    const paymentPackageId2 = (payment as unknown as { package_id: string | null }).package_id;
+    if (paymentPackageId2) {
+      const pricing = pricingByIdMap.get(paymentPackageId2);
+      if (pricing) {
+        const typeLabel = pricing.packageType === 'monthly' ? 'Month' : 'Session';
+        const plural = pricing.duration > 1 ? 's' : '';
+        packageName = `${pricing.duration} ${typeLabel}${plural}`;
+      }
+    }
+    if (!packageName && courseId) {
       const key = `${courseId}-${payment.amount}`;
       const pricing = pricingMap.get(key);
       if (pricing) {
@@ -860,6 +891,7 @@ export async function getPendingPaymentsForTablePaginated(
       receiptPhoto: payment.receipt_photo,
       createdAt: payment.created_at,
       paidAt: payment.paid_at,
+      parentMarkedPaidAt: (payment as unknown as { parent_marked_paid_at: string | null }).parent_marked_paid_at ?? null,
       isSharedPackage: isSharedPackage || !!poolId,
       poolId,
       sharedStudentNames,
@@ -884,7 +916,7 @@ export async function createInvoiceSnapshot(paymentId: string): Promise<InvoiceS
       id, amount, course_id, package_id, pool_id, is_shared_package,
       student:students!inner(
         id, name, branch_id,
-        branch:branches!inner(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
+        branch:branches!students_branch_id_branches_id_fk(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
         parent_students(parent:parents(id, name, address, postcode, city))
       ),
       course:courses(name, code)
@@ -1149,29 +1181,33 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
       }
     }
 
-    // Get the enrollment - first try matching course_id
-    let enrollment: { id: string; sessions_remaining: number; package_id: string | null; course_id: string | null } | null = null;
+    // Get the enrollment - first try matching course_id. Include both
+    // 'active' and 'expired' so paying for an expired enrollment restores
+    // it (doc scenario 7 — Restoration After Expiry).
+    let enrollment: { id: string; sessions_remaining: number; package_id: string | null; course_id: string | null; status: string } | null = null;
 
     if (payment.course_id) {
       const { data: enrollmentData } = await supabaseAdmin
         .from('enrollments')
-        .select('id, sessions_remaining, package_id, course_id')
+        .select('id, sessions_remaining, package_id, course_id, status')
         .eq('student_id', payment.student_id)
         .eq('course_id', payment.course_id)
-        .eq('status', 'active')
+        .in('status', ['active', 'expired'])
         .is('deleted_at', null)
+        .order('status', { ascending: true })  // 'active' sorts before 'expired'
+        .limit(1)
         .maybeSingle();
 
       enrollment = enrollmentData;
     }
 
-    // If no enrollment found for payment's course, find any active enrollment for this student
+    // If no enrollment found for payment's course, find any active/expired enrollment for this student
     if (!enrollment) {
       const { data: anyEnrollment } = await supabaseAdmin
         .from('enrollments')
-        .select('id, sessions_remaining, package_id, course_id')
+        .select('id, sessions_remaining, package_id, course_id, status')
         .eq('student_id', payment.student_id)
-        .eq('status', 'active')
+        .in('status', ['active', 'expired'])
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -1205,12 +1241,15 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
 
         // Clear expires_at so the next attendance starts a fresh expiry window
         // (per spec: starting date = first attendance after the package is renewed).
+        // If the enrollment is currently 'expired', also flip it back to
+        // 'active' — paying restores access (doc scenario 7).
         await supabaseAdmin
           .from('enrollments')
           .update({
             sessions_remaining: newSessions,
             package_id: pricingData.id,
             expires_at: null,
+            status: 'active',
             updated_at: new Date().toISOString(),
           })
           .eq('id', enrollment.id);
@@ -1480,6 +1519,7 @@ export interface PaymentRecordRow {
   paidAt: string | null;
   receiptPhoto: string | null;
   invoiceNumber: string | null;
+  receiptNumber: string | null;
   // Shared package info
   isSharedPackage: boolean;
   poolId: string | null;
@@ -1533,6 +1573,7 @@ export async function getPaymentRecordsForTable(
       paid_at,
       receipt_photo,
       invoice_number,
+      receipt_number,
       invoice_snapshot,
       course_id,
       package_id,
@@ -1542,7 +1583,7 @@ export async function getPaymentRecordsForTable(
         id,
         name,
         branch_id,
-        branch:branches!inner(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
+        branch:branches!students_branch_id_branches_id_fk(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
         parent_students(
           parent:parents(id, name, address, postcode, city)
         )
@@ -1601,10 +1642,13 @@ export async function getPaymentRecordsForTable(
     .is('deleted_at', null);
 
   const pricingMap = new Map<string, { packageType: string; duration: number }>();
+  // Look up by package_id (direct, definitive — used when the payment has
+  // package_id set, e.g. from the imports or modern manual flows).
+  const pricingByIdMap = new Map<string, { packageType: string; duration: number }>();
   for (const p of allPricing ?? []) {
-    // Key by course_id + price for matching
     const key = `${p.course_id}-${p.price}`;
     pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
+    pricingByIdMap.set(p.id as string, { packageType: p.package_type, duration: p.duration });
   }
 
   // Get all pool IDs from payments that have pool_id
@@ -1665,11 +1709,22 @@ export async function getPaymentRecordsForTable(
     const parentCity = parentInfo?.city ?? null;
     const courseCode = course?.code ?? null;
 
-    // Look up package from course_pricing by course_id and amount
+    // Prefer direct package_id lookup; legacy (course, amount) is fallback.
     let packageName: string | null = null;
     let packageDuration: number | null = null;
     let packageType: "monthly" | "session" | null = null;
-    if (courseId) {
+    const paymentPackageId3 = (payment as unknown as { package_id: string | null }).package_id;
+    if (paymentPackageId3) {
+      const pricing = pricingByIdMap.get(paymentPackageId3);
+      if (pricing) {
+        const typeLabel = pricing.packageType === 'monthly' ? 'Month' : 'Session';
+        const plural = pricing.duration > 1 ? 's' : '';
+        packageName = `${pricing.duration} ${typeLabel}${plural}`;
+        packageDuration = pricing.duration;
+        packageType = pricing.packageType as "monthly" | "session";
+      }
+    }
+    if (!packageName && courseId) {
       const key = `${courseId}-${payment.amount}`;
       const pricing = pricingMap.get(key);
       if (pricing) {
@@ -1712,6 +1767,7 @@ export async function getPaymentRecordsForTable(
       paidAt: payment.paid_at,
       receiptPhoto: payment.receipt_photo,
       invoiceNumber: payment.invoice_number,
+      receiptNumber: (payment as unknown as { receipt_number: string | null }).receipt_number ?? null,
       // Shared package info
       isSharedPackage: isSharedPackage || !!poolId,
       poolId,
@@ -1792,6 +1848,7 @@ export async function getPaymentRecordsForTablePaginated(
       paid_at,
       receipt_photo,
       invoice_number,
+      receipt_number,
       invoice_snapshot,
       course_id,
       package_id,
@@ -1801,7 +1858,7 @@ export async function getPaymentRecordsForTablePaginated(
         id,
         name,
         branch_id,
-        branch:branches!inner(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
+        branch:branches!students_branch_id_branches_id_fk(id, name, city, parent_id, address, phone, email, bank_name, bank_account),
         parent_students(
           parent:parents(id, name, address, postcode, city)
         )
@@ -1859,9 +1916,11 @@ export async function getPaymentRecordsForTablePaginated(
     .is('deleted_at', null);
 
   const pricingMap = new Map<string, { packageType: string; duration: number }>();
+  const pricingByIdMap = new Map<string, { packageType: string; duration: number }>();
   for (const p of allPricing ?? []) {
     const key = `${p.course_id}-${p.price}`;
     pricingMap.set(key, { packageType: p.package_type, duration: p.duration });
+    pricingByIdMap.set(p.id as string, { packageType: p.package_type, duration: p.duration });
   }
 
   // Get all pool IDs from payments that have pool_id
@@ -1922,7 +1981,18 @@ export async function getPaymentRecordsForTablePaginated(
     let packageName: string | null = null;
     let packageDuration: number | null = null;
     let packageType: "monthly" | "session" | null = null;
-    if (courseId) {
+    const paymentPackageId4 = (payment as unknown as { package_id: string | null }).package_id;
+    if (paymentPackageId4) {
+      const pricing = pricingByIdMap.get(paymentPackageId4);
+      if (pricing) {
+        const typeLabel = pricing.packageType === 'monthly' ? 'Month' : 'Session';
+        const plural = pricing.duration > 1 ? 's' : '';
+        packageName = `${pricing.duration} ${typeLabel}${plural}`;
+        packageDuration = pricing.duration;
+        packageType = pricing.packageType as "monthly" | "session";
+      }
+    }
+    if (!packageName && courseId) {
       const key = `${courseId}-${payment.amount}`;
       const pricing = pricingMap.get(key);
       if (pricing) {
@@ -1964,6 +2034,7 @@ export async function getPaymentRecordsForTablePaginated(
       paidAt: payment.paid_at,
       receiptPhoto: payment.receipt_photo,
       invoiceNumber: payment.invoice_number,
+      receiptNumber: (payment as unknown as { receipt_number: string | null }).receipt_number ?? null,
       isSharedPackage: isSharedPackage || !!poolId,
       poolId,
       sharedStudentNames,
@@ -2224,3 +2295,67 @@ export async function createEnrollmentRenewalPayment(enrollmentId: string): Prom
 
   return payment;
 }
+
+// ============================================
+// BILLPLZ-PAID HELPER
+// ============================================
+
+/**
+ * Mark a payment as paid via Billplz and run all the standard side-effects
+ * (sessions allocation, voucher application, invoice snapshot freeze, renewal
+ * auto-create). Called from the Billplz webhook handler.
+ *
+ * Idempotent: if the payment is already `paid_at`, returns the existing row
+ * without re-running side-effects. Always safe to retry.
+ */
+export async function markBillplzPaid(
+  paymentId: string,
+  data: {
+    billplzBillId: string;
+    billplzTransactionId: string | null;
+    paidAt: string; // ISO timestamp from Billplz
+  },
+): Promise<{ ok: true; alreadyPaid: boolean } | { ok: false; reason: string }> {
+  const existing = await getPaymentById(paymentId);
+  if (!existing) return { ok: false, reason: "payment_not_found" };
+
+  // Idempotency: if already paid, just sync the Billplz fields and return.
+  if (existing.paid_at) {
+    if (!existing.billplz_bill_id) {
+      await supabaseAdmin
+        .from("payments")
+        .update({
+          billplz_bill_id: data.billplzBillId,
+          billplz_transaction_id: data.billplzTransactionId,
+        })
+        .eq("id", paymentId);
+    }
+    return { ok: true, alreadyPaid: true };
+  }
+
+  // Stamp Billplz metadata + payment_method BEFORE running approvePayment so
+  // the snapshot capture can read these too.
+  await supabaseAdmin
+    .from("payments")
+    .update({
+      billplz_bill_id: data.billplzBillId,
+      billplz_transaction_id: data.billplzTransactionId,
+      payment_method: "billplz",
+    })
+    .eq("id", paymentId);
+
+  // Reuses all existing side-effects: voucher auto-apply, sessions allocation
+  // (individual or pool), invoice snapshot freeze, renewal payment auto-create.
+  const result = await approvePayment(paymentId);
+  if (!result) return { ok: false, reason: "approve_payment_failed" };
+
+  // approvePayment uses new Date().toISOString() for paid_at. Overwrite with
+  // Billplz's paid_at so the timestamp matches the actual payment moment.
+  await supabaseAdmin
+    .from("payments")
+    .update({ paid_at: data.paidAt })
+    .eq("id", paymentId);
+
+  return { ok: true, alreadyPaid: false };
+}
+

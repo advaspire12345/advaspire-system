@@ -1,0 +1,88 @@
+name: student-payment-then-sessions-update
+description: |
+  The full UI/DB drift scenario.
+  1. assistant_admin creates a student (12-session package = 12 sessions paid for).
+  2. instructor marks the student present BEFORE the pending payment is approved
+     → sessions_remaining goes to -1 in the DB.
+     Verify BOTH the student-table cell AND the mark-present modal show -1
+     (the killer drift bug-catcher).
+  3. company_admin approves the pending payment.
+     → sessions_remaining should become 11 (12 paid − 1 already used).
+     Verify EVERY role's student-table period_active AND mark-present-modal
+     sessions_remaining match — across pages and across users.
+
+fixtures:
+  branch:
+    name: "Sim Pay Branch"
+    code: "SPYB"
+    parent: "ADS"
+  course:
+    name: "PayPython"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: aa,   role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,      in_charge: true }
+    - { handle: ca,   role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "PaySimStu1"
+      parent_name: "Pay Parent 1"
+      parent_email: "pp1@sim.local"
+      parent_phone: "0123456789"
+      course: "PayPython"
+      package: "12-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+    expect:
+      "*.student_table.period_active": 0           # no payment yet
+      "*.pending_payments_table.row_visible": true
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "PaySimStu1"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+    expect:
+      # The killer drift checks — DOM in two surfaces, DB ground truth, all -1.
+      "*.attendance_table.sessions_remaining": -1
+      "*.mark_present_modal.sessions_remaining": -1
+      "*.student_table.period_active": -1
+      "db.enrollments.sessions_remaining": -1
+
+  # Offline payment flow — until Billplz is wired, the parent's "paid via
+  # bank transfer + slip uploaded" state is stamped directly via DB so the
+  # approve button enables. Models the same end state as the real offline
+  # path without dragging file-upload through the UI.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "PaySimStu1"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "PaySimStu1"
+    observers: auto
+    expect:
+      # 12 paid − 1 used = 11 should appear EVERYWHERE.
+      "*.student_table.period_active": 11
+      "*.attendance_table.sessions_remaining": 11
+      "*.mark_present_modal.sessions_remaining": 11
+      "*.student_table.payment_settled": 600
+      "db.enrollments.sessions_remaining": 11
+
+teardown: auto

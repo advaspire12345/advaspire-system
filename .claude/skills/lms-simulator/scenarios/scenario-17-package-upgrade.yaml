@@ -1,0 +1,73 @@
+name: scenario-17-package-upgrade
+description: |
+  Doc scenario 17 — package upgrade via payment edit.
+
+  A student is enrolled in a 4-session package; the auto-created pending payment
+  references that 4-session package_id. Admin opens the pending payment, swaps
+  it to the 12-session package, marks the parent slip received, and approves.
+  After approval the student's enrollment should carry the new (12-session)
+  package — the student table reads the latest paid payment's package_id.
+
+  Verifies: pending-payment edit persists `package_id`, approvePayment writes
+  the new package_id, and downstream reads (enrollment sessions_remaining,
+  student-table package column) reflect the upgrade.
+
+fixtures:
+  branch:
+    name: "Sim Upgrade Branch"
+    code: "SUPB"
+    parent: "ADS"
+  course:
+    name: "UpgradeCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricings:
+    # First entry is is_default — assigned to enrollment at student-create.
+    - { type: session, count: 4,  price: 220 }
+    - { type: session, count: 12, price: 627 }
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Jacky"
+      parent_name: "Jacky Parent"
+      parent_email: "jacky@sim.local"
+      parent_phone: "0123456788"
+      course: "UpgradeCourse"
+      package: "4-session"
+      date_of_birth: "2014-06-12"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+    expect:
+      # Fresh student — no payment paid yet, no sessions.
+      "*.pending_payments_table.row_visible": true
+
+  - actor: ca
+    action: edit_pending_payment
+    with:
+      student: "Jacky"
+      new_package: "12 Sessions"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Jacky"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Jacky"
+    observers: auto
+    expect:
+      # 12 sessions credited, none used yet.
+      "*.student_table.period_active": 12
+      "*.student_table.payment_settled": 627
+
+teardown: auto

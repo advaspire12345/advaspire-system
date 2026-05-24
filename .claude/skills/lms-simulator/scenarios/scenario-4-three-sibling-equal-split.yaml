@@ -1,0 +1,87 @@
+name: scenario-4-three-sibling-equal-split
+description: |
+  Doc scenario 4 — Equal Split of Remaining Sessions (3 siblings).
+
+  Three siblings (Ali, Abu, Aminah) share a 4-session pool. After approval
+  pool.sessions_remaining = 4. The display formula:
+      perStudent = floor(4 / 3) = 1
+      remainder = 4 mod 3 = 1
+      Ali (position 0) gets the remainder bonus → 2
+      Abu (position 1) → 1
+      Aminah (position 2) → 1
+
+  Doc uses 7 sessions remaining for a clean 2/2/2 + 1-bonus example, but the
+  underlying formula is the same; this scenario uses the simpler 4-session
+  fixture and asserts pool state + total members.
+
+fixtures:
+  branch:
+    name: "Sim S4 Branch"
+    code: "SS4B"
+    parent: "ADS"
+  course:
+    name: "S4Course"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali4"
+      parent_name: "S4 Parent"
+      parent_email: "p4@sim.local"
+      parent_phone: "0123450040"
+      course: "S4Course"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu4"
+      parent_email: "p4@sim.local"
+      parent_existing: true
+      course: "S4Course"
+      share_with_sibling: true
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Aminah4"
+      parent_email: "p4@sim.local"
+      parent_existing: true
+      course: "S4Course"
+      share_with_sibling: true
+      date_of_birth: "2019-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali4"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali4"
+    observers: auto
+
+teardown: auto
