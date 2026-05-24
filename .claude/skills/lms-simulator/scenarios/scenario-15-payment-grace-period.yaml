@@ -1,0 +1,72 @@
+name: scenario-15-payment-grace-period
+description: |
+  Doc scenario 15 — Payment Record Immutability (1-Week Grace Period).
+
+  Within 1 week of paid_at, admin can edit student names, sibling names,
+  course, package, items (invoice snapshot is recreated on each edit).
+  After 1 week the record locks: edit/delete buttons show "Locked" and the
+  server should reject any update.
+
+  Phase A already flagged that the server-side guard is missing — only the
+  UI shows the Locked state (payment-record-table.tsx:689). This scenario
+  verifies the UI lock fires when paid_at is backdated, and serves as a
+  reminder that the server-side enforcement is still TODO.
+
+  Simulator chain:
+    1. Add Ali (4-session) + approve → payment status=paid, paid_at=today
+    2. backdate_payment Ali → paid_at = 8 days ago
+    3. Open /payment-record as ca — DOM should show "Locked" for that row
+       (verified by inspecting the screenshot / running against the page)
+
+fixtures:
+  branch:
+    name: "Sim S15 Branch"
+    code: "S15B"
+    parent: "ADS"
+  course:
+    name: "S15Course"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali15"
+      parent_name: "S15 Parent"
+      parent_email: "p15@sim.local"
+      parent_phone: "0123450150"
+      course: "S15Course"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali15"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali15"
+    observers: auto
+
+  - actor: ca
+    action: backdate_payment
+    with:
+      student: "Ali15"
+      days_ago: 8
+    observers: auto
+
+teardown: auto

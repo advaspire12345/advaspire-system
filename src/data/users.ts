@@ -215,8 +215,27 @@ export async function getUserBranchIds(email: string): Promise<string[] | null> 
     const branchIds = await getAdminBranchIds(user.id);
     // If admin has branches assigned, return them
     if (branchIds.length > 0) return branchIds;
-    // Fall back to own branch_id
-    if (user.branch_id) return [user.branch_id];
+    // Fall back to own branch_id. For group_admin, branch_id often points to a
+    // company row — expand to its child branches/hq rows so downstream queries
+    // against students/enrollments/etc. (which key on branch ids, not company)
+    // still match.
+    if (user.branch_id) {
+      const { supabaseAdmin } = await import("@/db");
+      const { data: row } = await supabaseAdmin
+        .from("branches")
+        .select("type")
+        .eq("id", user.branch_id)
+        .maybeSingle();
+      if (row?.type === "company") {
+        const { data: children } = await supabaseAdmin
+          .from("branches")
+          .select("id")
+          .eq("parent_id", user.branch_id)
+          .is("deleted_at", null);
+        return (children ?? []).map((c) => c.id as string);
+      }
+      return [user.branch_id];
+    }
     // No branches at all — treat like super_admin (see everything)
     return null;
   }
@@ -502,7 +521,7 @@ export async function getTransferParticipants(userEmail?: string): Promise<Trans
       photo,
       branch_id,
       adcoin_balance,
-      branch:branches(id, name)
+      branch:branches!students_branch_id_branches_id_fk(id, name)
     `)
     .is('deleted_at', null)
     .order('name');

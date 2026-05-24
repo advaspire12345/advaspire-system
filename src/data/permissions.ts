@@ -59,7 +59,7 @@ const ALL_RESOURCE_KEYS: PermissionResource[] = [
   "dashboard", "companies", "branches", "trials", "students", "examinations",
   "programs", "slots", "vouchers", "team", "attendance", "attendance_log",
   "payment_record", "pending_payments", "leaderboard", "transactions",
-  "marketplace", "import",
+  "marketplace", "import", "events",
 ];
 
 // ============================================
@@ -93,6 +93,7 @@ const GROUP_ADMIN_DEFAULTS: PermissionsMap = {
   transactions: NO_ACCESS,
   marketplace: VIEW_ONLY, // sees the topup-request table; no actions (super_admin only approves)
   import: VIEW_CREATE, // view = download templates, create = upload CSV
+  events: FULL_ACCESS,
 };
 
 const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
@@ -114,6 +115,7 @@ const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
   transactions: VIEW_CREATE,
   marketplace: VIEW_CREATE, // can browse + create top-up requests
   import: NO_ACCESS,
+  events: FULL_ACCESS,
 };
 
 const ASSISTANT_ADMIN_DEFAULTS: PermissionsMap = {
@@ -135,6 +137,7 @@ const ASSISTANT_ADMIN_DEFAULTS: PermissionsMap = {
   transactions: VIEW_CREATE,
   marketplace: NO_ACCESS,
   import: NO_ACCESS,
+  events: { can_view: true, can_create: true, can_edit: true, can_delete: true },
 };
 
 const INSTRUCTOR_DEFAULTS: PermissionsMap = {
@@ -156,6 +159,7 @@ const INSTRUCTOR_DEFAULTS: PermissionsMap = {
   transactions: VIEW_CREATE,
   marketplace: NO_ACCESS,
   import: NO_ACCESS,
+  events: { can_view: true, can_create: true, can_edit: true, can_delete: false },
 };
 
 /** Hardcoded fallback when DB has no role_permissions rows */
@@ -689,6 +693,7 @@ export const RESOURCE_LABELS: Record<PermissionResource, string> = {
   transactions: "Transactions",
   marketplace: "Marketplace",
   import: "Import",
+  events: "Events",
 };
 
 // ============================================

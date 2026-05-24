@@ -21,6 +21,7 @@ import {
   Award,
   Ticket,
   Upload,
+  CalendarDays,
 } from "lucide-react";
 import {
   Sidebar,
@@ -146,6 +147,12 @@ const navigationItems: {
     icon: Upload,
     href: "/import",
     resource: "import",
+  },
+  {
+    title: "Events",
+    icon: CalendarDays,
+    href: "/events",
+    resource: "events",
   },
 ];
 

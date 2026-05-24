@@ -101,6 +101,24 @@ export async function notifyParent(
   return true;
 }
 
+/** Notify company admins about a new event awaiting approval. */
+export async function notifyEventApprovers(
+  companyId: string,
+  eventId: string,
+  eventTitle: string,
+): Promise<number> {
+  return notifyStaff(
+    { roles: ["company_admin", "group_admin", "super_admin"], companyId },
+    {
+      type: "event_approval_request",
+      title: "Event needs approval",
+      body: `An assistant admin submitted "${eventTitle}" for approval.`,
+      link: `/events?pending=${eventId}`,
+      data: { eventId },
+    },
+  );
+}
+
 /** Helper: resolve the company_id for a given branch_id (walks parent if needed). */
 export async function resolveBranchCompanyId(branchId: string | null): Promise<string | null> {
   if (!branchId) return null;

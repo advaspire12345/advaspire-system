@@ -34,6 +34,7 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   transactions: "Transactions",
   marketplace: "Marketplace",
   import: "Import",
+  events: "Events",
 };
 
 interface RoleTab {

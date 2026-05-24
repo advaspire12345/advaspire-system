@@ -1,0 +1,119 @@
+name: scenario-8c-individual-to-shared-negative
+description: |
+  Doc scenario 8c — Individual to Shared with Negative Sessions.
+
+  Ali is enrolled individually. He's marked present before paying, so
+  enrollment.sessions_remaining goes negative. Admin then converts Ali to
+  share a pool with sibling Abu. The negative debt is absorbed into the
+  pool (never lost). After a paid renewal, the new sessions are added on
+  top of the negative balance.
+
+  KNOWN ISSUE: the switch_to_shared step currently runs without errors and
+  the form state shows shareWithSibling=true at submit time, but the
+  server-side pool-creation branch in src/app/(dashboard)/student/actions.ts:907
+  does not fire. The manual UI equivalent (Edit Ali → Enrollment → click
+  Shared → click Save Student) creates the pool correctly, so the divergence
+  is somewhere in how the modal's form serialises shareWithSibling under
+  agent-browser-driven clicks. Tracked for follow-up; the chain runs green
+  but the pool-creation assertion at the end will not match doc 6b until
+  this is resolved.
+
+  Simulator chain:
+    1. Add Abu first  (4-session, new parent, INDIVIDUAL).
+    2. Add Ali second (same parent, INDIVIDUAL via force_individual=true,
+       since the modal auto-toggles Shared on sibling detection).
+    3. Mark Ali present — Ali enr.sessions_remaining = -1 (no payment yet).
+    4. switch_to_shared Ali → pool created with both, Ali's -1 absorbed
+       into pool.sessions_remaining.
+    5. mark_offline_paid + approve the pool's pending payment (4 sessions).
+    6. Pool ends at -1 + 4 = 3.
+
+fixtures:
+  branch:
+    name: "Sim 8c Branch"
+    code: "S8CB"
+    parent: "ADS"
+  course:
+    name: "Course8c"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Abu — added first, individual.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu8c"
+      parent_name: "8c Parent"
+      parent_email: "p8c@sim.local"
+      parent_phone: "0123450080"
+      course: "Course8c"
+      package: "4-session"
+      date_of_birth: "2016-02-10"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Ali — same parent, individual (force_individual avoids auto-shared).
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali8c"
+      parent_email: "p8c@sim.local"
+      parent_existing: true
+      course: "Course8c"
+      package: "4-session"
+      force_individual: true
+      date_of_birth: "2014-03-05"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 3. Ali attends WITHOUT paying — sessions go negative.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali8c"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # 4. Switch Ali to shared — Ali's -1 debt absorbs into the new pool.
+  - actor: aa
+    action: switch_to_shared
+    with:
+      student: "Ali8c"
+    observers: auto
+
+  # 5. Pool payment → mark offline-paid (slip uploaded).
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali8c"
+    observers: auto
+
+  # 6. Approve — pool absorbs +4 on top of the -1 deficit → 3.
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali8c"
+    observers: auto
+
+teardown: auto
+
+# RESOLVED (2026-05-15): switch_to_shared was failing intermittently because
+# of intermediate eval calls (polling + state-verify) in the critical window
+# around the Shared and Save Student clicks. Each agent-browser eval is a
+# CDP round-trip that React interleaves with its commit cycle, leaving the
+# Save button's onClick closure with stale formData. Fix: flat sleeps only —
+# no probes/verifications between Shared click and Save click. Pool creation
+# now reliably matches doc 8c.

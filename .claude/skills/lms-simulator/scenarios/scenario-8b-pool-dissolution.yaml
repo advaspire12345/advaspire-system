@@ -1,0 +1,88 @@
+name: scenario-8b-pool-dissolution
+description: |
+  Doc scenario 8b — Pool Dissolution: Shared to Individual.
+
+  Two siblings share a pool with 0 sessions (no approved payment yet — the
+  doc's "newly enrolled, not paid" branch of when dissolution is allowed).
+  Admin opens one sibling's edit modal and clicks Shared to toggle it OFF.
+  The server dissolves the ENTIRE pool: both siblings become individual,
+  pool.deleted_at is set, and each gets their own pending payment.
+
+  Note: dissolutionBlocked guard in the modal requires
+  pool.sessions_remaining <= 0. We hit that by never approving the pool's
+  initial pending payment, leaving the pool at 0 sessions.
+
+  Simulator chain:
+    1. Add Abu — new parent, INDIVIDUAL 4-session (creates Abu's pending
+       payment).
+    2. Add Ali — same parent, share_with_sibling=true → pool created with
+       both members, pool.sessions_remaining=0, pool-level pending payment.
+       (Do NOT approve.)
+    3. switch_to_individual Ali → pool dissolves. Both enrollments
+       detached from pool. Each gets their own individual pending payment.
+
+  Expected after step 3:
+    - Both enrollments: pool_id is null (server clears it on dissolve)
+    - Pool: deleted_at set
+    - Each student has a pending payment
+
+fixtures:
+  branch:
+    name: "Sim S8b Branch"
+    code: "S8BB"
+    parent: "ADS"
+  course:
+    name: "Course8b"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Abu — first sibling, individual, 4-session.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu8b"
+      parent_name: "S8b Parent"
+      parent_email: "p8b@sim.local"
+      parent_phone: "0123450082"
+      course: "Course8b"
+      package: "4-session"
+      date_of_birth: "2016-02-10"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Ali — same parent, share_with_sibling=true → pool created.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali8b"
+      parent_email: "p8b@sim.local"
+      parent_existing: true
+      course: "Course8b"
+      share_with_sibling: true
+      date_of_birth: "2014-03-05"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 3. Dissolve pool by unselecting Shared on Ali.
+  - actor: aa
+    action: switch_to_individual
+    with:
+      student: "Ali8b"
+    observers: auto
+    expect:
+      # Both enrollments detached from pool, pool soft-deleted.
+      "*.enrollment.pool_id_set": false
+      "*.pending_payments_table.row_visible": true
+
+teardown: auto

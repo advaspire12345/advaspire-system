@@ -1,0 +1,121 @@
+name: scenario-7-restoration-after-expiry
+description: |
+  Doc scenario 7 — Restoration After Expiry.
+
+  Ali's enrollment is expired (status='expired') due to non-payment. Admin
+  restores the enrollment by creating a new pending payment for the same
+  student/course, then approving it. After approval the enrollment becomes
+  active again with new sessions credited.
+
+  Doc invariants:
+    - After expire_enrollment: enrollment.status='expired', sessions_remaining=0
+    - After add_payment_for_student + approve: sessions_remaining=4 (new
+      package count), status flips back to 'active'.
+
+  Simulator chain:
+    1. Add Ali — INDIVIDUAL 4-session, new parent.
+    2. mark_offline_paid + approve → sessions = 4.
+    3. mark_present once (sets expires_at on first attendance).
+    4. expire_enrollment → DB stamp expires_at yesterday + on-demand sweep
+       flips status to 'expired' and sessions to 0.
+    5. add_payment_for_student (admin via /pending-payments Add Payment
+       modal) → new pending payment created.
+    6. mark_offline_paid + approve_pending_payment → sessions = 4, status
+       back to 'active'.
+
+fixtures:
+  branch:
+    name: "Sim S7 Branch"
+    code: "S7B1"
+    parent: "ADS"
+  course:
+    name: "Course7"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Add Ali — individual, 4-session.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali7"
+      parent_name: "S7 Parent"
+      parent_email: "p7@sim.local"
+      parent_phone: "0123450070"
+      course: "Course7"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Pay + approve initial payment → sessions=4.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali7"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali7"
+    observers: auto
+
+  # 3. One attendance — anchors expires_at.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali7"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # 4. Expire enrollment (DB-stamp + on-demand sweep).
+  - actor: aa
+    action: expire_enrollment
+    with:
+      student: "Ali7"
+      days_ago: 1
+    observers: auto
+
+  # 5. Admin creates a new pending payment via /pending-payments UI.
+  - actor: aa
+    action: add_payment_for_student
+    with:
+      student: "Ali7"
+      course: "Course7"
+      package: "4 Sessions"
+    observers: auto
+    expect:
+      "*.pending_payments_table.row_visible": true
+
+  # 6. Pay + approve restoration payment → sessions=4 again, active.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali7"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali7"
+    observers: auto
+    expect:
+      # After approving the second package, sessions are credited fresh.
+      # (sessions=4 minus the 1 attendance from earlier doesn't apply — the
+      # expired enrollment had its sessions zeroed before approval, so
+      # approving adds the full new-package count.)
+      "*.enrollment.sessions_remaining": 4
+
+teardown: auto

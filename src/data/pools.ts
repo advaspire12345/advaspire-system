@@ -234,20 +234,9 @@ export async function addStudentToPool(
   studentId: string,
   enrollmentId: string
 ): Promise<PoolStudent | null> {
-  // First check if already in pool
-  const { data: existing } = await supabaseAdmin
-    .from('pool_students')
-    .select('id')
-    .eq('pool_id', poolId)
-    .eq('student_id', studentId)
-    .maybeSingle();
-
-  if (existing) {
-    console.log('Student already in pool');
-    return existing as PoolStudent;
-  }
-
-  // Read student's current sessions_remaining
+  // Read the incoming enrollment's leftover sessions — these get absorbed
+  // into the pool regardless of whether this is the student's first
+  // enrollment in the pool or an additional one.
   const { data: enrollment } = await supabaseAdmin
     .from('enrollments')
     .select('sessions_remaining')
@@ -271,11 +260,29 @@ export async function addStudentToPool(
         .eq('id', poolId);
     }
   }
-  // Reset enrollment to 0 — all sessions now tracked in pool
+
+  // Link THIS enrollment to the pool (regardless of whether the student is
+  // already in the pool via another enrollment). Reset its sessions to 0 —
+  // all session bookkeeping happens at the pool level from now on.
   await supabaseAdmin
     .from('enrollments')
-    .update({ sessions_remaining: 0 })
+    .update({ sessions_remaining: 0, pool_id: poolId })
     .eq('id', enrollmentId);
+
+  // pool_students has one row per (pool, student). If the student is already
+  // in the pool (via a different enrollment), don't insert a duplicate; just
+  // return that existing row. This supports a student with multiple weekly
+  // slots in the same course pool.
+  const { data: existing } = await supabaseAdmin
+    .from('pool_students')
+    .select('*')
+    .eq('pool_id', poolId)
+    .eq('student_id', studentId)
+    .maybeSingle();
+
+  if (existing) {
+    return existing as PoolStudent;
+  }
 
   const insertData: PoolStudentInsert = {
     pool_id: poolId,
@@ -293,12 +300,6 @@ export async function addStudentToPool(
     console.error('Error adding student to pool:', error);
     return null;
   }
-
-  // Update the enrollment to reference the pool
-  await supabaseAdmin
-    .from('enrollments')
-    .update({ pool_id: poolId })
-    .eq('id', enrollmentId);
 
   return data;
 }

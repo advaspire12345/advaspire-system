@@ -11,6 +11,7 @@ import { PortfolioTab } from "@/components/student-portal/portfolio-tab";
 import { ShopTab } from "@/components/student-portal/shop-tab";
 import { ComingSoonTab } from "@/components/student-portal/coming-soon-tab";
 import { MissionsTab } from "@/components/student-portal/missions-tab";
+import { EventsTab } from "@/components/student-portal/events-tab";
 
 interface StudentProfile {
   id: string;
@@ -105,6 +106,8 @@ export default function StudentPortalLayout({
             }}
           />
         );
+      case "events":
+        return <EventsTab studentId={student.id} />;
     }
   };
 
@@ -191,6 +194,7 @@ export default function StudentPortalLayout({
                 {activeTab === "transfer" && "TRANSFER"}
                 {activeTab === "ranking" && "RANKING"}
                 {activeTab === "portfolio" && "PORTFOLIO"}
+                {activeTab === "events" && "EVENTS"}
               </span>
             </div>
 

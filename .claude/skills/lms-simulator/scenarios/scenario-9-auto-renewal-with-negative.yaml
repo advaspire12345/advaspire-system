@@ -1,0 +1,105 @@
+name: scenario-9-auto-renewal-with-negative
+description: |
+  Doc scenario 9 — Auto-Renewal with Sessions Going Negative.
+
+  Extends scenario 1 to the negative-then-approve path. Sessions can dip
+  below zero when the student attends after the package is depleted; the
+  auto-renewal payment is created at sessions=0 (or earlier), and when
+  approved, the new package count is added ON TOP of the (possibly
+  negative) current balance.
+
+  Doc invariant: -1 + 4 = 3 after approval.
+
+  Simulator chain:
+    1. Add Ali — INDIVIDUAL 4-session, new parent.
+    2. mark_offline_paid + approve → enrollment.sessions_remaining = 4.
+    3. stamp_sessions_remaining Ali to 0 (skip the 4 attends).
+    4. mark_present Ali → -1, auto-renewal fires (pending payment created).
+    5. mark_offline_paid + approve the auto-renewal pending →
+       enrollment.sessions_remaining = -1 + 4 = 3.
+
+fixtures:
+  branch:
+    name: "Sim S9 Branch"
+    code: "S9B1"
+    parent: "ADS"
+  course:
+    name: "Course9"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Add Ali — individual, 4-session.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali9"
+      parent_name: "S9 Parent"
+      parent_email: "p9@sim.local"
+      parent_phone: "0123450090"
+      course: "Course9"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Pay + approve first payment → sessions_remaining = 4.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali9"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali9"
+    observers: auto
+
+  # 3. Skip 4 attends by stamping to 0.
+  - actor: aa
+    action: stamp_sessions_remaining
+    with:
+      student: "Ali9"
+      value: 0
+    observers: auto
+
+  # 4. Mark present once more — drops to -1; auto-renewal pending fires.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali9"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+    expect:
+      "*.enrollment.sessions_remaining": -1
+      "*.pending_payments_table.row_visible": true
+
+  # 5. Pay + approve the renewal → -1 + 4 = 3.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali9"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali9"
+    observers: auto
+    expect:
+      # The new package's sessions stack on top of the negative balance.
+      "*.enrollment.sessions_remaining": 3
+
+teardown: auto

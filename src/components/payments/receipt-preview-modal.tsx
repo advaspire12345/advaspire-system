@@ -40,6 +40,9 @@ interface ReceiptPreviewModalProps {
   items: ReceiptItem[];
   total: number;
   branch?: BranchInfo;
+  /** "receipt" (default) → big "RECEIPT" title.
+   *  "invoice" → big "INVOICE" title. Same data, different label. */
+  kind?: "receipt" | "invoice";
 }
 
 function formatDisplayDate(date: Date): string {
@@ -58,7 +61,10 @@ export function ReceiptPreviewModal({
   items,
   total,
   branch,
+  kind = "receipt",
 }: ReceiptPreviewModalProps) {
+  const titleLabel = kind === "invoice" ? "INVOICE" : "RECEIPT";
+  const dialogTitle = kind === "invoice" ? "Invoice Preview" : "Receipt Preview";
   // Use branch info or defaults
   const companyName = branch?.companyName || "ADVASPIRE SDN BHD";
   const companyAddress = branch?.address || "32A-3, Jalan Ecohill 1/3C, Setia Ecohill\n43500 Semenyih, Selangor";
@@ -122,7 +128,7 @@ export function ReceiptPreviewModal({
         <div className="p-6 pb-0 flex flex-row items-center justify-between">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold">
-              Receipt Preview
+              {dialogTitle}
             </DialogTitle>
           </DialogHeader>
           <div className="flex items-center gap-2">
@@ -174,10 +180,10 @@ export function ReceiptPreviewModal({
                 </div>
               </div>
 
-              {/* Right: bigger RECEIPT text */}
+              {/* Right: big RECEIPT or INVOICE title (driven by `kind`) */}
               <div className="text-right flex flex-col items-end justify-center">
                 <div className="text-5xl font-extrabold uppercase tracking-wide">
-                  RECEIPT
+                  {titleLabel}
                 </div>
               </div>
             </div>

@@ -1,0 +1,93 @@
+name: scenario-4b-pool-deficit
+description: |
+  Doc scenario 4b — Pool in Deficit, per-student tracking.
+
+  Two siblings (Ali, Abu) share a pool with no payment yet. When Abu attends,
+  the pool goes negative. The display rule:
+      perStudent = floor(pool.total / count) + positionBonus - my_attendance
+  means only the student who actually attended shows negative; the other stays
+  at 0.
+
+  After a payment is approved on the pool, the formula switches back to
+  equal-split (pool.sessions_remaining / count) + remainder distribution.
+
+  Simulator chain:
+    1. add Ali (4-session enrollment, new parent)
+    2. add Abu with same parent + share_with_sibling=true → pool created
+    3. mark_present Abu → pool.sessions_remaining = -1
+    4. mark_offline_paid + approve → pool absorbs 4 paid sessions, now = 3
+    5. verify final pool state
+
+fixtures:
+  branch:
+    name: "Sim Pool Branch"
+    code: "SPOL"
+    parent: "ADS"
+  course:
+    name: "PoolCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Ali — new student, new parent, 4-session package.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali"
+      parent_name: "PoolParent"
+      parent_email: "poolparent@sim.local"
+      parent_phone: "0123450001"
+      course: "PoolCourse"
+      package: "4-session"
+      date_of_birth: "2015-04-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Abu — same parent (parent_existing), shared package — pool created.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu"
+      parent_email: "poolparent@sim.local"
+      parent_existing: true
+      course: "PoolCourse"
+      share_with_sibling: true
+      date_of_birth: "2017-08-15"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 3. Abu attends — pool goes to -1 (the only attender absorbs the deficit).
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Abu"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # 4. Pool's pending payment marked offline-paid by admin.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Abu"
+    observers: auto
+
+  # 5. Approve — pool absorbs 4 paid sessions on top of the -1 deficit → 3.
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Abu"
+    observers: auto
+
+teardown: auto

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/db";
 import { getParentByAuthId, getParentChildren } from "@/data/parents";
+import { getEventsForCaller } from "@/data/events";
 import type {
   Parent,
   Student,
@@ -77,6 +78,11 @@ export interface ParentPaymentRecord {
   amount: number;
   status: PaymentStatus;
   childName: string;
+  studentId: string;
+  paidAt: string | null;
+  parentMarkedPaidAt: string | null;
+  invoiceNumber: string | null;
+  invoiceSnapshot: import("@/db/schema").InvoiceSnapshot | null;
 }
 
 // ============================================
@@ -495,7 +501,11 @@ export async function getParentPaymentHistory(
       amount,
       status,
       paid_at,
+      parent_marked_paid_at,
       created_at,
+      student_id,
+      invoice_number,
+      invoice_snapshot,
       student:students!inner(name),
       course:courses(name)
     `
@@ -517,6 +527,11 @@ export async function getParentPaymentHistory(
       amount: p.amount,
       status: p.status as PaymentStatus,
       childName: p.student?.name ?? "Unknown",
+      studentId: p.student_id,
+      paidAt: p.paid_at ?? null,
+      parentMarkedPaidAt: p.parent_marked_paid_at ?? null,
+      invoiceNumber: p.invoice_number ?? null,
+      invoiceSnapshot: p.invoice_snapshot ?? null,
     })) ?? []
   );
 }
@@ -582,34 +597,28 @@ export interface ParentEvent {
   startTime: string;
   endTime: string | null;
   color: string;
+  scope: "self" | "branch" | "company" | "global";
+  eventType: "activity" | "competition" | "own_schedule" | "holiday";
+  isOwn: boolean;
 }
 
 export async function getParentEvents(
   parentId: string
 ): Promise<ParentEvent[]> {
-  const { data, error } = await supabaseAdmin
-    .from("parent_events")
-    .select("*")
-    .eq("parent_id", parentId)
-    .order("date", { ascending: true });
-
-  if (error) {
-    console.error("Error fetching parent events:", error);
-    return [];
-  }
-
-  return (
-    data?.map((e: any) => ({
-      id: e.id,
-      parentId: e.parent_id,
-      title: e.title,
-      date: e.date,
-      endDate: e.end_date ?? null,
-      startTime: e.start_time,
-      endTime: e.end_time,
-      color: e.color ?? "#615DFA",
-    })) ?? []
-  );
+  const events = await getEventsForCaller({ kind: "parent", parentId });
+  return events.map((e) => ({
+    id: e.id,
+    parentId: e.created_by_parent_id ?? parentId,
+    title: e.title,
+    date: e.date,
+    endDate: e.end_date ?? null,
+    startTime: (e.start_time ?? "").slice(0, 5) || "00:00",
+    endTime: e.end_time ? e.end_time.slice(0, 5) : null,
+    color: e.color || "#615DFA",
+    scope: e.scope,
+    eventType: e.event_type,
+    isOwn: e.created_by_parent_id === parentId,
+  }));
 }
 
 // ============================================

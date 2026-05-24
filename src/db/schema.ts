@@ -25,7 +25,7 @@ export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'cancel
 
 export type PaymentType = 'registration' | 'monthly' | 'package' | 'other';
 
-export type PaymentMethod = 'cash' | 'credit_card' | 'bank_transfer' | 'promptpay' | 'other';
+export type PaymentMethod = 'cash' | 'credit_card' | 'bank_transfer' | 'promptpay' | 'billplz' | 'other';
 
 export type AdcoinTransactionType = 'earned' | 'spent' | 'transfer' | 'adjusted' | 'refunded' | 'mission_reward' | 'teacher_award' | 'item_purchase';
 
@@ -306,6 +306,7 @@ export interface Payment {
   status: PaymentStatus;
   payment_method: PaymentMethod | null;
   invoice_number: string | null;
+  receipt_number: string | null;
   due_date: string | null;
   paid_at: string | null;
   is_shared_package: boolean;
@@ -316,6 +317,13 @@ export interface Payment {
   voucher_id: string | null;
   discount_amount: number | null;
   invoice_snapshot: InvoiceSnapshot | null;
+  // Billplz online-payment fields. Null for cash/offline payments.
+  billplz_bill_id: string | null;
+  billplz_url: string | null;
+  billplz_transaction_id: string | null;
+  // Set when the parent self-uploaded a payment slip claiming offline payment.
+  // Staff still need to click Approve — this is a "parent says paid" signal only.
+  parent_marked_paid_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -683,6 +691,7 @@ export interface PaymentInsert {
   status?: PaymentStatus;
   payment_method?: PaymentMethod | null;
   invoice_number?: string | null;
+  receipt_number?: string | null;
   due_date?: string | null;
   paid_at?: string | null;
   is_shared_package?: boolean;
@@ -693,6 +702,10 @@ export interface PaymentInsert {
   voucher_id?: string | null;
   discount_amount?: number | null;
   invoice_snapshot?: InvoiceSnapshot | null;
+  billplz_bill_id?: string | null;
+  billplz_url?: string | null;
+  billplz_transaction_id?: string | null;
+  parent_marked_paid_at?: string | null;
 }
 
 export interface AdcoinTransactionInsert {
@@ -900,6 +913,10 @@ export interface PaymentUpdate {
   voucher_id?: string | null;
   discount_amount?: number | null;
   invoice_snapshot?: InvoiceSnapshot | null;
+  billplz_bill_id?: string | null;
+  billplz_url?: string | null;
+  billplz_transaction_id?: string | null;
+  parent_marked_paid_at?: string | null;
 }
 
 export interface ItemUpdate {
@@ -1821,7 +1838,8 @@ export type PermissionResource =
   | 'leaderboard'
   | 'transactions'
   | 'marketplace'
-  | 'import';
+  | 'import'
+  | 'events';
 
 export const ALL_RESOURCES: PermissionResource[] = [
   'dashboard',
@@ -1842,6 +1860,7 @@ export const ALL_RESOURCES: PermissionResource[] = [
   'transactions',
   'marketplace',
   'import',
+  'events',
 ];
 
 export interface ResourcePermission {
@@ -1988,7 +2007,11 @@ export type NotificationType =
   | 'child_attendance_marked'
   | 'child_activity_logged'
   | 'event'
-  | 'holiday';
+  | 'holiday'
+  // Event approval workflow
+  | 'event_approval_request'
+  | 'event_approved'
+  | 'event_rejected';
 
 export interface Notification {
   id: string;
@@ -2001,4 +2024,151 @@ export interface Notification {
   data: Record<string, unknown> | null;
   read_at: string | null;
   created_at: string;
+}
+
+// ============================================
+// Events
+// ============================================
+
+export type EventType = 'activity' | 'competition' | 'own_schedule' | 'holiday';
+export type EventScope = 'self' | 'branch' | 'company' | 'global';
+export type EventAudience = 'everyone' | 'staff_only';
+export type EventStatus = 'pending' | 'published' | 'rejected';
+
+export interface Event {
+  id: string;
+  title: string;
+  description: string | null;
+  event_type: EventType;
+  scope: EventScope;
+  audience: EventAudience;
+
+  date: string;       // 'YYYY-MM-DD'
+  end_date: string | null;
+  start_time: string | null; // 'HH:MM:SS'
+  end_time: string | null;
+  color: string;
+
+  created_by_user_id: string | null;
+  created_by_parent_id: string | null;
+  created_by_student_id: string | null;
+
+  branch_id: string | null;
+  company_id: string | null;
+
+  status: EventStatus;
+  approved_by_user_id: string | null;
+  approved_at: string | null;
+  rejected_reason: string | null;
+
+  source_course_id: string | null;
+
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface EventInsert {
+  id?: string;
+  title: string;
+  description?: string | null;
+  event_type: EventType;
+  scope: EventScope;
+  audience?: EventAudience;
+
+  date: string;
+  end_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  color?: string;
+
+  created_by_user_id?: string | null;
+  created_by_parent_id?: string | null;
+  created_by_student_id?: string | null;
+
+  branch_id?: string | null;
+  company_id?: string | null;
+
+  status?: EventStatus;
+  approved_by_user_id?: string | null;
+  approved_at?: string | null;
+  rejected_reason?: string | null;
+
+  source_course_id?: string | null;
+}
+
+export interface EventUpdate {
+  title?: string;
+  description?: string | null;
+  event_type?: EventType;
+  scope?: EventScope;
+  audience?: EventAudience;
+  date?: string;
+  end_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  color?: string;
+  branch_id?: string | null;
+  company_id?: string | null;
+  status?: EventStatus;
+  approved_by_user_id?: string | null;
+  approved_at?: string | null;
+  rejected_reason?: string | null;
+  source_course_id?: string | null;
+  deleted_at?: string | null;
+  updated_at?: string;
+}
+
+// ============================================
+// Session Reschedules
+// ============================================
+
+export interface SessionReschedule {
+  id: string;
+  enrollment_id: string;
+  student_id: string;
+  course_id: string;
+
+  original_date: string;      // 'YYYY-MM-DD'
+  original_slot_day: string;  // e.g. 'monday'
+  original_slot_time: string; // 'HH:MM:SS'
+
+  new_slot_id: string;
+  new_date: string;
+  new_slot_day: string;
+  new_slot_time: string;
+
+  origin_event_id: string | null;
+  target_event_id: string | null;
+
+  initiated_by_parent_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionRescheduleInsert {
+  id?: string;
+  enrollment_id: string;
+  student_id: string;
+  course_id: string;
+  original_date: string;
+  original_slot_day: string;
+  original_slot_time: string;
+  new_slot_id: string;
+  new_date: string;
+  new_slot_day: string;
+  new_slot_time: string;
+  origin_event_id?: string | null;
+  target_event_id?: string | null;
+  initiated_by_parent_id: string;
+}
+
+export interface SessionRescheduleUpdate {
+  new_slot_id?: string;
+  new_date?: string;
+  new_slot_day?: string;
+  new_slot_time?: string;
+  origin_event_id?: string | null;
+  target_event_id?: string | null;
+  updated_at?: string;
 }

@@ -7,6 +7,7 @@ import {
   Plus,
   X,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,9 @@ import { cn } from "@/lib/utils";
 import { getDefaultClassNames, type DayButton } from "react-day-picker";
 import type { ParentEvent } from "@/data/parent-portal";
 import type { UpcomingClass } from "@/data/parent-portal";
+import type { UpcomingSession } from "@/data/reschedules";
+import { RescheduleModal } from "@/components/parent/reschedule-modal";
+import { useRouter } from "next/navigation";
 
 interface ParentCalendarProps {
   scheduledDates: Date[];
@@ -22,6 +26,7 @@ interface ParentCalendarProps {
   parentId: string;
   initialEvents: ParentEvent[];
   upcomingClasses?: UpcomingClass[];
+  upcomingSessions?: UpcomingSession[];
 }
 
 const eventColors = [
@@ -51,12 +56,15 @@ export function ParentCalendar({
   parentId,
   initialEvents,
   upcomingClasses = [],
+  upcomingSessions = [],
 }: ParentCalendarProps) {
+  const router = useRouter();
   const [events, setEvents] = useState<ParentEvent[]>(initialEvents);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedEndDate, setSelectedEndDate] = useState<Date | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [rescheduleTarget, setRescheduleTarget] = useState<UpcomingSession | null>(null);
 
   // Drag state — use refs for imperative tracking (avoids stale closures in mouseup)
   // plus useState to trigger re-renders for highlighting
@@ -222,21 +230,36 @@ export function ParentCalendar({
       const endDateStr = selectedEndDate
         ? format(selectedEndDate, "yyyy-MM-dd")
         : null;
-      const res = await fetch("/api/parent/events", {
+      const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title.trim(),
+          event_type: "own_schedule",
+          scope: "self",
           date: dateStr,
-          endDate: endDateStr,
-          startTime,
-          endTime: endTime || null,
+          end_date: endDateStr,
+          start_time: startTime ? `${startTime}:00` : null,
+          end_time: endTime ? `${endTime}:00` : null,
           color,
         }),
       });
 
       if (res.ok) {
-        const newEvent = await res.json();
+        const { event } = await res.json();
+        const newEvent: ParentEvent = {
+          id: event.id,
+          parentId: event.created_by_parent_id ?? parentId,
+          title: event.title,
+          date: event.date,
+          endDate: event.end_date ?? null,
+          startTime: (event.start_time ?? "").slice(0, 5) || "00:00",
+          endTime: event.end_time ? event.end_time.slice(0, 5) : null,
+          color: event.color ?? "#615DFA",
+          scope: event.scope,
+          eventType: event.event_type,
+          isOwn: true,
+        };
         setEvents((prev) => [...prev, newEvent]);
         setShowAddModal(false);
       }
@@ -249,7 +272,7 @@ export function ParentCalendar({
 
   const handleDelete = async (eventId: string) => {
     try {
-      const res = await fetch(`/api/parent/events?id=${eventId}`, {
+      const res = await fetch(`/api/events?id=${eventId}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -580,20 +603,41 @@ export function ParentCalendar({
             color: string;
             type: "class" | "event";
             eventId?: string;
+            isOwn?: boolean;
+            session?: UpcomingSession;
           }[] = [];
 
-          // Add scheduled classes
-          for (const cls of upcomingClasses) {
-            if (cls.date >= todayStr) {
-              combined.push({
-                key: `class-${cls.date}-${cls.childName}`,
-                date: cls.date,
-                endDate: null,
-                title: cls.courseName,
-                subtitle: `${cls.childName} · ${cls.startTime}${cls.endTime ? ` - ${cls.endTime}` : ""}`,
-                color: "#23D2E2",
-                type: "class",
-              });
+          // Prefer richer upcomingSessions (carries enrollment id for reschedule); fall back to upcomingClasses.
+          if (upcomingSessions.length > 0) {
+            for (const s of upcomingSessions) {
+              if (s.currentDate >= todayStr) {
+                combined.push({
+                  key: `session-${s.enrollmentId}-${s.originalDate}`,
+                  date: s.currentDate,
+                  endDate: null,
+                  title: s.courseName,
+                  subtitle: `${s.studentName} · ${s.currentSlotTime.slice(0, 5)}${
+                    s.currentEndTime ? ` - ${s.currentEndTime.slice(0, 5)}` : ""
+                  }${s.rescheduled ? " · rescheduled" : ""}`,
+                  color: s.rescheduled ? "#615DFA" : "#23D2E2",
+                  type: "class",
+                  session: s,
+                });
+              }
+            }
+          } else {
+            for (const cls of upcomingClasses) {
+              if (cls.date >= todayStr) {
+                combined.push({
+                  key: `class-${cls.date}-${cls.childName}`,
+                  date: cls.date,
+                  endDate: null,
+                  title: cls.courseName,
+                  subtitle: `${cls.childName} · ${cls.startTime}${cls.endTime ? ` - ${cls.endTime}` : ""}`,
+                  color: "#23D2E2",
+                  type: "class",
+                });
+              }
             }
           }
 
@@ -610,6 +654,7 @@ export function ParentCalendar({
                 color: ev.color,
                 type: "event",
                 eventId: ev.id,
+                isOwn: ev.isOwn,
               });
             }
           }
@@ -649,12 +694,32 @@ export function ParentCalendar({
                         {dateLabel} &middot; {item.subtitle}
                       </p>
                     </div>
-                    {item.type === "event" && item.eventId && (
+                    {item.type === "event" && item.eventId && item.isOwn && (
                       <button
                         onClick={() => handleDelete(item.eventId!)}
                         className="opacity-0 group-hover:opacity-100 p-1 rounded text-[#8f91ac] hover:text-red-500 hover:bg-red-50 transition-all"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {item.type === "class" && item.session && (
+                      <button
+                        type="button"
+                        onClick={() => setRescheduleTarget(item.session!)}
+                        disabled={!item.session.canReschedule}
+                        title={
+                          item.session.canReschedule
+                            ? "Reschedule this session"
+                            : "Must be at least 24h in advance"
+                        }
+                        className={cn(
+                          "p-1 rounded transition-all",
+                          item.session.canReschedule
+                            ? "text-[#615DFA] hover:bg-[#615DFA]/10 opacity-0 group-hover:opacity-100"
+                            : "text-[#cfcfd9] cursor-not-allowed opacity-0 group-hover:opacity-50",
+                        )}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
                       </button>
                     )}
                   </div>
@@ -720,12 +785,18 @@ export function ParentCalendar({
                         {ev.endTime ? ` - ${ev.endTime.slice(0, 5)}` : ""}
                       </p>
                     </div>
-                    <button
-                      onClick={() => handleDelete(ev.id)}
-                      className="p-1 rounded text-[#8f91ac] hover:text-red-500 hover:bg-red-50 transition-all"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {ev.isOwn ? (
+                      <button
+                        onClick={() => handleDelete(ev.id)}
+                        className="p-1 rounded text-[#8f91ac] hover:text-red-500 hover:bg-red-50 transition-all"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600">
+                        {ev.scope === "global" ? "Global" : ev.scope === "company" ? "Company" : ev.scope === "branch" ? "Branch" : ""}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -804,6 +875,13 @@ export function ParentCalendar({
           </div>
         </div>
       )}
+
+      <RescheduleModal
+        open={!!rescheduleTarget}
+        session={rescheduleTarget}
+        onClose={() => setRescheduleTarget(null)}
+        onSuccess={() => router.refresh()}
+      />
     </>
   );
 }

@@ -148,6 +148,14 @@ export function TrialModal({
   }, [open, record, mode]);
 
   const handleSubmit = async () => {
+    // [SIM-DEBUG] Temporary: log every field at submit time so the simulator
+    // can identify which one is empty when the form silently rejects. Remove
+    // once trial-mark-present-completes is green.
+    // eslint-disable-next-line no-console
+    console.log("[SIM-DEBUG] trial submit", {
+      parentName, parentPhone, parentEmail, childName, childAge,
+      branchId, courseId, source, scheduledDate, scheduledTime, message, status,
+    });
     // Validation
     if (!parentName.trim()) {
       setError("Please enter parent name");

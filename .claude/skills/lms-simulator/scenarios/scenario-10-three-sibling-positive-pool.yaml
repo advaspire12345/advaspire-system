@@ -1,0 +1,116 @@
+name: scenario-10-three-sibling-positive-pool
+description: |
+  Doc scenario 10 — 3 Siblings Sharing a Pool, Hybrid Display.
+
+  Three siblings (Ali, Abu, Aminah) share a 12-session pool. After payment
+  approval pool.sessions_remaining = 12 and the display rule is the
+  positive-pool path:
+      perStudent = floor(pool.sessions_remaining / count) + positionBonus
+  Each sibling sees the SAME value (4 each here). Any one sibling attending
+  decreases pool.sessions_remaining by 1 — and thus ALL siblings' display
+  drops.
+
+  We can only drive mark_present once per student per week (the /attendance
+  UI hides rows after the weekly slot is marked, by design), so this
+  scenario verifies the core invariants without walking the full 8-attend
+  table from the doc:
+    - 12-session pool created with 3 active members.
+    - One sibling's attendance deducts 1 from pool.sessions_remaining, not
+      from any individual enrollment.
+    - All three enrollment.sessions_remaining stay at 0 (pool-tracked).
+
+fixtures:
+  branch:
+    name: "Sim S10 Branch"
+    code: "S10B"
+    parent: "ADS"
+  course:
+    name: "Course10"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Ali — first sibling, individual.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali10"
+      parent_name: "S10 Parent"
+      parent_email: "p10@sim.local"
+      parent_phone: "0123450100"
+      course: "Course10"
+      package: "12-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Abu — same parent, shared → pool created.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu10"
+      parent_email: "p10@sim.local"
+      parent_existing: true
+      course: "Course10"
+      share_with_sibling: true
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 3. Aminah — same parent, shared → joins existing pool.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Aminah10"
+      parent_email: "p10@sim.local"
+      parent_existing: true
+      course: "Course10"
+      share_with_sibling: true
+      date_of_birth: "2019-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  # 4. Pay + approve the pool's pending payment → pool.sessions_remaining = 12.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali10"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali10"
+    observers: auto
+    expect:
+      "*.pool.sessions_remaining": 12
+      "*.pool.active_students": 3
+      "*.enrollment.sessions_remaining": 0
+
+  # 5. One sibling attends — pool ticks down by 1.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Abu10"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+    expect:
+      "*.pool.sessions_remaining": 11
+      "*.pool.active_students": 3
+      # All three enrollments still stay at 0 — the decrement lives on the pool.
+      "*.enrollment.sessions_remaining": 0
+
+teardown: auto

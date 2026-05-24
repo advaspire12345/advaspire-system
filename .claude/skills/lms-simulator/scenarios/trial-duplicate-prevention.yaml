@@ -1,0 +1,59 @@
+name: trial-duplicate-prevention
+description: |
+  No two trials may share the same (parent_phone + program + branch). The
+  second add attempt with the same triple must be blocked at save.
+
+fixtures:
+  branch:
+    name: "Sim Trial Dup Branch"
+    code: "STDP"
+    parent: "ADS"
+  course:
+    name: "TrialDupCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: ca, role: company_admin, in_charge: true }
+
+steps:
+  # First trial with a particular phone + program + branch — should succeed.
+  - actor: ca
+    action: add_trial
+    with:
+      parent_name: "Dup Parent 1"
+      parent_email: "dup1@sim.local"
+      parent_phone: "0199999999"
+      child_name: "TrialKidDup1"
+      child_age: 8
+      course: "TrialDupCourse"
+      scheduled_date: "TODAY"
+      scheduled_time: "17:00"
+      source: "google"
+    observers: auto
+    expect:
+      "*.trial_table.row_visible(TrialKidDup1)": true
+
+  # Second trial with the SAME phone + program + branch (different child name) — should be blocked.
+  - actor: ca
+    action: add_trial
+    with:
+      parent_name: "Dup Parent 1"
+      parent_email: "dup1b@sim.local"
+      parent_phone: "0199999999"           # same phone
+      child_name: "TrialKidDup2"
+      child_age: 9
+      course: "TrialDupCourse"             # same program
+      scheduled_date: "TODAY"
+      scheduled_time: "18:30"
+      source: "google"
+    expect_failure: true
+    observers: auto
+    expect:
+      "*.trial_table.row_visible(TrialKidDup2)": false
+      "ca.toast.duplicate_warning": true
+
+teardown: auto

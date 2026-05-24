@@ -257,6 +257,7 @@ export function PendingPaymentTable({
           receiptPhoto: formData.receiptPhoto,
           createdAt: new Date().toISOString(),
           paidAt: formData.paidAt,
+          parentMarkedPaidAt: null,
           isSharedPackage: isShared,
           poolId: formData.poolId ?? null,
           sharedStudentNames: sharedNames,

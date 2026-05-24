@@ -67,8 +67,11 @@ const columns = [
   { key: "price", label: "Price", width: "90px", align: "right" as const },
   { key: "payMethod", label: "Pay Method", width: "100px" },
   { key: "paidOn", label: "Paid On", width: "100px" },
-  { key: "receipt", label: "Receipt", width: "70px", align: "center" as const },
+  // "Payment Slip" = parent-uploaded proof of payment (formerly mislabeled "Receipt").
+  { key: "paymentSlip", label: "Payment Slip", width: "90px", align: "center" as const },
   { key: "invoice", label: "Invoice", width: "100px", align: "center" as const },
+  // "Receipt" = system-generated, rendered from invoice_snapshot (NEW column).
+  { key: "receipt", label: "Receipt", width: "100px", align: "center" as const },
   { key: "actions", label: "Actions", width: "100px", align: "center" as const },
 ];
 
@@ -176,11 +179,13 @@ export function PaymentRecordTable({
     null
   );
 
-  // Receipt preview modal state (for invoice)
+  // Receipt/Invoice preview modal — the same component renders both, with
+  // the `receiptModalKind` distinguishing which big title to show inside.
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [receiptRecord, setReceiptRecord] = useState<PaymentRecordRow | null>(
     null
   );
+  const [receiptModalKind, setReceiptModalKind] = useState<"receipt" | "invoice">("receipt");
 
   // Image preview modal state (for receipt photo)
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
@@ -269,9 +274,11 @@ export function PaymentRecordTable({
     setModalOpen(true);
   };
 
-  // Open receipt preview modal (for invoice)
-  const openReceiptModal = (record: PaymentRecordRow) => {
+  // Open the receipt/invoice preview modal. Pass kind="invoice" or "receipt"
+  // to control the big title text and dialog header.
+  const openReceiptModal = (record: PaymentRecordRow, kind: "receipt" | "invoice" = "receipt") => {
     setReceiptRecord(record);
+    setReceiptModalKind(kind);
     setReceiptModalOpen(true);
   };
 
@@ -612,7 +619,7 @@ export function PaymentRecordTable({
                         {formatDate(row.paidAt)}
                       </td>
 
-                      {/* Receipt */}
+                      {/* Payment Slip — parent-uploaded proof image */}
                       <td
                         className="px-4 py-3 text-center"
                         style={{ width: columns[8].width }}
@@ -625,7 +632,7 @@ export function PaymentRecordTable({
                           >
                             <Image
                               src={row.receiptPhoto}
-                              alt="Receipt"
+                              alt="Payment Slip"
                               width={32}
                               height={32}
                               className="h-8 w-8 object-cover rounded cursor-pointer hover:ring-2 hover:ring-[#23D2E2] transition"
@@ -643,7 +650,7 @@ export function PaymentRecordTable({
                       >
                         <button
                           type="button"
-                          onClick={() => openReceiptModal(row)}
+                          onClick={() => openReceiptModal(row, "invoice")}
                           className="inline-flex items-center gap-1 rounded-lg border border-muted-foreground/30 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-transparent hover:bg-[#23D2E2] hover:text-white"
                           title="Download Invoice"
                         >
@@ -652,8 +659,36 @@ export function PaymentRecordTable({
                         </button>
                       </td>
 
+                      {/* Receipt - system-generated, downloads PDF rendered from invoice_snapshot */}
+                      <td
+                        className="px-4 py-3 text-center"
+                        style={{ width: columns[10].width }}
+                      >
+                        {row.paidAt ? (
+                          <button
+                            type="button"
+                            onClick={() => openReceiptModal(row, "receipt")}
+                            className="inline-flex items-center gap-1 rounded-lg border border-muted-foreground/30 px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:border-transparent hover:bg-[#23D2E2] hover:text-white"
+                            title="Download Receipt"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span>Receipt</span>
+                          </button>
+                        ) : (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center gap-1 rounded-lg border border-muted-foreground/20 px-3 py-1.5 text-xs font-medium text-muted-foreground/40 cursor-not-allowed">
+                                <Download className="h-3.5 w-3.5" />
+                                <span>Receipt</span>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent><p>Available after payment is approved</p></TooltipContent>
+                          </Tooltip>
+                        )}
+                      </td>
+
                       {/* Actions */}
-                      <td className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")} style={{ width: columns[10].width }}>
+                      <td className={cn("px-4 py-3", !canEdit && !canDelete && "hidden")} style={{ width: columns[11].width }}>
                         {(() => {
                           const isLocked = row.paidAt && (Date.now() - new Date(row.paidAt).getTime() > 7 * 24 * 60 * 60 * 1000);
                           if (isLocked) {
@@ -747,8 +782,8 @@ export function PaymentRecordTable({
               billToAddress={snap.billToAddress ?? undefined}
               billToContact={snap.billToContact ?? undefined}
               date={receiptRecord.paidAt ? new Date(receiptRecord.paidAt) : new Date()}
-              receiptNo={receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
-              invoiceNo={receiptRecord.invoiceNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+              receiptNo={receiptRecord.receiptNumber ?? receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+              invoiceNo={receiptRecord.invoiceNumber ?? receiptRecord.receiptNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
               items={snap.items}
               total={snap.total}
               branch={{
@@ -760,6 +795,7 @@ export function PaymentRecordTable({
                 bankName: snap.branchBankName,
                 bankAccount: snap.branchBankAccount,
               }}
+              kind={receiptModalKind}
             />
           );
         }
@@ -779,8 +815,8 @@ export function PaymentRecordTable({
             })()}
             billToContact={undefined}
             date={receiptRecord.paidAt ? new Date(receiptRecord.paidAt) : new Date()}
-            receiptNo={receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
-            invoiceNo={receiptRecord.invoiceNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+            receiptNo={receiptRecord.receiptNumber ?? receiptRecord.invoiceNumber ?? `RCP-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
+            invoiceNo={receiptRecord.invoiceNumber ?? receiptRecord.receiptNumber ?? `INV-${receiptRecord.id.slice(0, 8).toUpperCase()}`}
             items={(() => {
               const items: { code: string; product: string; qty: number; rate: number }[] = [];
               const packageCode = receiptRecord.courseCode ?? receiptRecord.packageId?.slice(0, 8).toUpperCase() ?? "PKG";
@@ -821,6 +857,7 @@ export function PaymentRecordTable({
               bankName: receiptRecord.branchBankName,
               bankAccount: receiptRecord.branchBankAccount,
             }}
+            kind={receiptModalKind}
           />
         );
       })()}

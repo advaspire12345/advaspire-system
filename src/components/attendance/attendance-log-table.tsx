@@ -699,12 +699,19 @@ export function AttendanceLogTable({
                         {formatDate(row.date, row.dayOfWeek)}
                       </td>
 
-                      {/* Day */}
+                      {/* Day — prefer the explicit actual_day if set (a
+                          make-up class on a non-scheduled day), else derive
+                          from the attendance date itself so the column always
+                          has something to show. */}
                       <td
                         className="px-4 py-3"
                         style={{ width: columns[6].width }}
                       >
-                        {row.dayOfWeek ?? "-"}
+                        {row.dayOfWeek ?? (
+                          row.date
+                            ? new Date(row.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" }).toLowerCase()
+                            : "-"
+                        )}
                       </td>
 
                       {/* Time */}

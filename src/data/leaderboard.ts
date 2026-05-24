@@ -70,7 +70,7 @@ export async function getLeaderboardData(userEmail?: string): Promise<Leaderboar
       photo,
       branch_id,
       adcoin_balance,
-      branch:branches(id, name, city),
+      branch:branches!students_branch_id_branches_id_fk(id, name, city),
       enrollments(
         level,
         course:courses(name)
@@ -235,7 +235,7 @@ export async function getLeaderboardDataPaginated(
       photo,
       branch_id,
       adcoin_balance,
-      branch:branches(id, name, city),
+      branch:branches!students_branch_id_branches_id_fk(id, name, city),
       enrollments(
         level,
         course:courses(name)
