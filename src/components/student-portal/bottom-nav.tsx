@@ -81,6 +81,7 @@ function NavButton({
 
   return (
     <button
+      data-tour={`student-nav-${tab.id}`}
       onClick={() => onTabChange(tab.id)}
       className={`relative transition-all active:scale-95 flex-shrink-0 w-[48px] sm:w-[clamp(80px,13vw,120px)] ${isActive ? "animate-bounce-slow" : ""}`}
     >

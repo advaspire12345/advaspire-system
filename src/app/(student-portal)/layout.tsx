@@ -128,6 +128,7 @@ export default function StudentPortalLayout({
         adcoinBalance={student.adcoinBalance}
         photo={student.photo}
         onLogout={handleLogout}
+        userId={student.id}
       />
 
       {/* Main content area */}

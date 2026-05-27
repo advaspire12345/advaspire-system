@@ -2,10 +2,7 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { AttendanceTable } from "@/components/attendance/attendance-table";
-import {
-  getEnrollmentsForAttendancePaginated,
-  getAllStudentsForManualAttendance,
-} from "@/data/attendance";
+import { getEnrollmentsForAttendancePaginated } from "@/data/attendance";
 import { getAllInstructorsForAttendance, getInstructorsByBranchForAttendance, getUserByEmail } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
@@ -43,10 +40,11 @@ export default async function AttendancePage() {
   const { checkAndExpireEnrollments } = await import("@/data/enrollments");
   await checkAndExpireEnrollments();
 
-  // Fetch data in parallel
-  const [enrollmentsResult, allStudentsForManual, instructors] = await Promise.all([
+  // Fetch data in parallel — manual-attendance search is now lazy (see
+  // /api/attendance/student-search), so we no longer pre-load every active
+  // enrollment on page open.
+  const [enrollmentsResult, instructors] = await Promise.all([
     getEnrollmentsForAttendancePaginated(user.email, { offset: 0, limit: 10 }),
-    getAllStudentsForManualAttendance(user.email),
     getInstructors(),
   ]);
 
@@ -63,7 +61,6 @@ export default async function AttendancePage() {
         <AttendanceTable
           initialData={enrollmentsResult.rows}
           totalCount={enrollmentsResult.totalCount}
-          allStudentsForManualAdd={allStudentsForManual}
           instructors={instructors}
           hideBranch={role === "company_admin" || role === "instructor"}
           canCreate={perms?.can_create}

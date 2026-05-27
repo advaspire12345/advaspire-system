@@ -1,11 +1,19 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { useOnboardingTrigger } from "@/hooks/use-onboarding-trigger";
+import { TourOverlay } from "@/components/help/tour-overlay";
+import { HelpDialog } from "@/components/help/help-dialog";
+import { TOUR_STEPS } from "@/data/onboarding-tour";
+
 interface TopBarProps {
   name: string;
   level: number;
   adcoinBalance: number;
   photo: string | null;
   onLogout: () => void;
+  /** Supabase auth user id — drives the per-user help-onboarding storage key. */
+  userId?: string | null;
 }
 
 /* Coin icon — golden circle with "AC" + white/black border */
@@ -71,7 +79,21 @@ function Counter({
   );
 }
 
-export function TopBar({ level, adcoinBalance, onLogout }: TopBarProps) {
+export function TopBar({ level, adcoinBalance, onLogout, userId = null }: TopBarProps) {
+  const [tourActive, setTourActive] = useState(false);
+  const [helpDialogOpen, setHelpDialogOpen] = useState(false);
+  const { shouldPulse, shouldAutoOpen, markSeen, resetAutoOpen } = useOnboardingTrigger(userId);
+
+  useEffect(() => {
+    if (shouldAutoOpen && !tourActive) setTourActive(true);
+  }, [shouldAutoOpen, tourActive]);
+
+  const finishTour = () => {
+    setTourActive(false);
+    if (shouldAutoOpen) markSeen();
+    else resetAutoOpen();
+  };
+
   return (
     <header
       className="relative z-50 w-full"
@@ -89,7 +111,7 @@ export function TopBar({ level, adcoinBalance, onLogout }: TopBarProps) {
         style={{ paddingLeft: "3%", paddingRight: "3%", zIndex: 70 }}
       >
         {/* Left: Counters — sits in the main flat area */}
-        <div className="flex items-center gap-3 sm:gap-24">
+        <div className="flex items-center gap-3 sm:gap-24" data-tour="student-coin">
           <Counter icon={<CoinIcon />} value={adcoinBalance} />
           <Counter icon={<StarIcon />} value={level} />
         </div>
@@ -104,6 +126,21 @@ export function TopBar({ level, adcoinBalance, onLogout }: TopBarProps) {
             <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 sm:w-6 sm:h-6" style={{ filter: "drop-shadow(0 0 2px rgba(255,255,255,0.5))" }}>
               <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
               <path d="M13.73 21a2 2 0 01-3.46 0" />
+            </svg>
+          </button>
+          {/* Help button — clicks open the instruction-list dialog. The tour
+              only fires automatically on the user's 1st/2nd login (see hook). */}
+          <button
+            data-tour="help-button"
+            onClick={() => setHelpDialogOpen(true)}
+            className={`relative w-11 h-11 sm:w-16 sm:h-16 flex-shrink-0 hover:brightness-110 transition-all active:scale-95 rounded-full ${shouldPulse ? "ring-2 ring-[#23D2E2] ring-offset-2 animate-pulse" : ""}`}
+            title="Help"
+          >
+            <img src="/portal/btn-red-sm.svg" alt="help" className="w-full h-full object-contain" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 sm:w-6 sm:h-6" style={{ filter: "drop-shadow(0 0 2px rgba(255,255,255,0.5))" }}>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
           </button>
           {/* Logout button */}
@@ -159,6 +196,18 @@ export function TopBar({ level, adcoinBalance, onLogout }: TopBarProps) {
           <animate attributeName="stroke-dashoffset" values="-762;-1895;120;-762" keyTimes="0;0.562;0.563;1" dur="2.5s" repeatCount="indefinite" />
         </path>
       </svg>
+      <TourOverlay
+        steps={TOUR_STEPS.student}
+        active={tourActive}
+        onComplete={finishTour}
+        onSkip={finishTour}
+      />
+      <HelpDialog
+        role="student"
+        open={helpDialogOpen}
+        onOpenChange={setHelpDialogOpen}
+        onRetakeTour={() => setTourActive(true)}
+      />
     </header>
   );
 }

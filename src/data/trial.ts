@@ -27,6 +27,98 @@ export interface TrialRow {
 // READ OPERATIONS
 // ============================================
 
+export interface PaginatedTrials {
+  rows: TrialRow[];
+  total: number;
+}
+
+export async function getTrialsForTablePaginated(
+  userEmail: string,
+  opts: { offset: number; limit: number },
+): Promise<PaginatedTrials> {
+  const { offset, limit } = opts;
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  let query = supabaseAdmin
+    .from("trials")
+    .select(
+      `
+      id,
+      parent_name,
+      parent_phone,
+      parent_email,
+      child_name,
+      child_age,
+      branch_id,
+      course_id,
+      source,
+      scheduled_date,
+      scheduled_time,
+      message,
+      status,
+      branch:branches(id, name, city),
+      course:courses(id, name)
+    `,
+      { count: "exact" },
+    )
+    .is("deleted_at", null)
+    .order("scheduled_date", { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (branchIds) query = query.in("branch_id", branchIds);
+  const { data, error, count } = await query;
+  if (error) {
+    console.error("Error fetching trials (paginated):", error);
+    return { rows: [], total: 0 };
+  }
+  const rows = (data ?? []).map((trial) => {
+    const branch = trial.branch as unknown as { id: string; name: string; city: string | null } | null;
+    const course = trial.course as unknown as { id: string; name: string } | null;
+    return {
+      id: trial.id,
+      parentName: trial.parent_name,
+      parentPhone: trial.parent_phone,
+      parentEmail: trial.parent_email,
+      childName: trial.child_name,
+      childAge: trial.child_age,
+      branchId: trial.branch_id,
+      branchName: useCityName ? (branch?.city || branch?.name) ?? "Unknown" : branch?.name ?? "Unknown",
+      courseId: trial.course_id,
+      courseName: course?.name ?? null,
+      source: trial.source,
+      scheduledDate: trial.scheduled_date,
+      scheduledTime: trial.scheduled_time,
+      message: trial.message,
+      status: trial.status,
+    };
+  });
+  return { rows, total: count ?? 0 };
+}
+
 export async function getTrialsForTable(userEmail: string): Promise<TrialRow[]> {
   // Get user's branch access — resolve company IDs to child HQ/branch IDs
   const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");

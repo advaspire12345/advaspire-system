@@ -76,10 +76,20 @@ function groupEnrollmentsByCourse<E extends AnyEnrollment>(enrollments: E[]): E[
       }
     }
     // Build virtual enrollment from the earliest one, overriding schedule.
+    // Also merge attendance arrays from every enrollment in the group so the
+    // "Attend" column on /student sums correctly across slots (otherwise a
+    // student whose attendance rows landed on the second-slot enrollment
+    // would show 0 on the primary's display).
     const primary: E = { ...group[0] };
     primary.schedule = JSON.stringify(slots);
     primary.day_of_week = null;
     primary.start_time = null;
+    const mergedAttendance: unknown[] = [];
+    for (const e of group) {
+      const att = (e as unknown as { attendance?: unknown[] }).attendance;
+      if (Array.isArray(att)) mergedAttendance.push(...att);
+    }
+    (primary as unknown as { attendance: unknown[] }).attendance = mergedAttendance;
     out.push(primary);
   }
   return out;
@@ -696,6 +706,97 @@ export interface StudentTableRow {
   transferredToBranchName: string | null;
 }
 
+type PoolCaches = {
+  poolPaymentCache: Map<string, { totalPaid: number; totalSessions: number }>;
+  poolPaymentCacheRaw: Map<string, Array<{ amount: number; status: string; course_id: string | null; package_id: string | null; pool_id: string | null; paid_at: string | null }>>;
+  poolJoinDateCache: Map<string, Map<string, string>>;
+  poolSiblingCountCache: Map<string, number>;
+  poolStudentNamesCache: Map<string, Map<string, string>>;
+};
+
+// Batches all per-pool lookups in three queries instead of one-per-pool.
+// Each pool needs: (a) member list w/ join dates + names from pool_students,
+// (b) course_id from shared_session_pools, (c) totals from paid pool payments.
+async function loadPoolCaches(
+  allPoolIds: Set<string>,
+  getSessionsForPayment: (packageId: string | null) => number,
+): Promise<PoolCaches> {
+  const poolPaymentCache: PoolCaches['poolPaymentCache'] = new Map();
+  const poolPaymentCacheRaw: PoolCaches['poolPaymentCacheRaw'] = new Map();
+  const poolJoinDateCache: PoolCaches['poolJoinDateCache'] = new Map();
+  const poolSiblingCountCache: PoolCaches['poolSiblingCountCache'] = new Map();
+  const poolStudentNamesCache: PoolCaches['poolStudentNamesCache'] = new Map();
+
+  if (allPoolIds.size === 0) {
+    return { poolPaymentCache, poolPaymentCacheRaw, poolJoinDateCache, poolSiblingCountCache, poolStudentNamesCache };
+  }
+
+  const poolIdArr = Array.from(allPoolIds);
+
+  const { data: links } = await supabaseAdmin
+    .from('pool_students')
+    .select('pool_id, student_id, joined_at, student:students(name)')
+    .in('pool_id', poolIdArr);
+
+  const { data: pools } = await supabaseAdmin
+    .from('shared_session_pools')
+    .select('id, course_id')
+    .in('id', poolIdArr);
+  const poolCourse = new Map<string, string>();
+  for (const p of (pools ?? []) as { id: string; course_id: string }[]) {
+    poolCourse.set(p.id, p.course_id);
+  }
+
+  const linksByPool = new Map<string, Array<{ student_id: string; joined_at: string | null; student: { name: string } | null }>>();
+  for (const link of (links ?? []) as unknown as Array<{ pool_id: string; student_id: string; joined_at: string | null; student: { name: string } | null }>) {
+    if (!linksByPool.has(link.pool_id)) linksByPool.set(link.pool_id, []);
+    linksByPool.get(link.pool_id)!.push({ student_id: link.student_id, joined_at: link.joined_at, student: link.student });
+  }
+  for (const poolId of poolIdArr) {
+    const poolLinks = linksByPool.get(poolId) ?? [];
+    const joinDates = new Map<string, string>();
+    const studentNames = new Map<string, string>();
+    for (const ps of poolLinks) {
+      if (ps.joined_at) joinDates.set(ps.student_id, ps.joined_at);
+      if (ps.student?.name) studentNames.set(ps.student_id, ps.student.name);
+    }
+    poolJoinDateCache.set(poolId, joinDates);
+    poolSiblingCountCache.set(poolId, poolLinks.length);
+    poolStudentNamesCache.set(poolId, studentNames);
+  }
+
+  const { data: payments } = await supabaseAdmin
+    .from('payments')
+    .select('amount, package_id, paid_at, course_id, pool_id')
+    .in('pool_id', poolIdArr)
+    .eq('status', 'paid');
+  const paymentsByPool = new Map<string, Array<{ amount: number; package_id: string | null; paid_at: string | null; course_id: string | null; pool_id: string | null }>>();
+  for (const p of (payments ?? []) as Array<{ amount: number; package_id: string | null; paid_at: string | null; course_id: string | null; pool_id: string | null }>) {
+    if (!p.pool_id) continue;
+    const expectedCourse = poolCourse.get(p.pool_id);
+    if (!expectedCourse || p.course_id !== expectedCourse) continue;
+    if (!paymentsByPool.has(p.pool_id)) paymentsByPool.set(p.pool_id, []);
+    paymentsByPool.get(p.pool_id)!.push(p);
+  }
+  for (const poolId of poolIdArr) {
+    if (!poolCourse.has(poolId)) continue;
+    const poolPayments = paymentsByPool.get(poolId) ?? [];
+    const totalPaid = poolPayments.reduce((s, p) => s + Number(p.amount), 0);
+    const totalSessions = poolPayments.reduce((s, p) => s + getSessionsForPayment(p.package_id), 0);
+    poolPaymentCache.set(poolId, { totalPaid, totalSessions });
+    poolPaymentCacheRaw.set(poolId, poolPayments.map(p => ({
+      amount: Number(p.amount),
+      status: 'paid',
+      course_id: p.course_id,
+      package_id: p.package_id,
+      pool_id: poolId,
+      paid_at: p.paid_at,
+    })));
+  }
+
+  return { poolPaymentCache, poolPaymentCacheRaw, poolJoinDateCache, poolSiblingCountCache, poolStudentNamesCache };
+}
+
 /**
  * Optimized query for student table view
  * Uses valid Supabase query syntax matching actual database schema
@@ -825,73 +926,21 @@ export async function getStudentsForTable(
     return pkg.package_type === 'monthly' ? pkg.duration * 4 : pkg.duration;
   };
 
-  // Pre-fetch pool payment data and join dates so ALL siblings in a pool share the total
-  const poolPaymentCache = new Map<string, { totalPaid: number; totalSessions: number }>();
-  // Raw pool payments for latest package lookup (includes package_id and paid_at)
-  const poolPaymentCacheRaw = new Map<string, Array<{ amount: number; status: string; course_id: string | null; package_id: string | null; pool_id: string | null; paid_at: string | null }>>();
-  // Map: poolId -> studentId -> joined_at date string
-  const poolJoinDateCache = new Map<string, Map<string, string>>();
-  // Map: poolId -> actual number of students in the pool
-  const poolSiblingCountCache = new Map<string, number>();
-  // Map: poolId -> studentId -> student name (for pool siblings display)
-  const poolStudentNamesCache = new Map<string, Map<string, string>>();
+  // Pre-fetch pool payment data and join dates so ALL siblings in a pool share the total.
+  // Batched via loadPoolCaches — 3 queries total instead of one-per-pool.
   const allPoolIds = new Set<string>();
   for (const student of data ?? []) {
     for (const enrollment of (student as any).enrollments || []) {
       if (enrollment.pool_id) allPoolIds.add(enrollment.pool_id);
     }
   }
-  if (allPoolIds.size > 0) {
-    for (const poolId of allPoolIds) {
-      // Get all students in this pool with join dates and names
-      const { data: poolStudentLinks } = await supabaseAdmin
-        .from('pool_students')
-        .select('student_id, joined_at, student:students(name)')
-        .eq('pool_id', poolId);
-
-      // Cache join dates per student, sibling count, and student names
-      const joinDates = new Map<string, string>();
-      const studentNames = new Map<string, string>();
-      for (const ps of poolStudentLinks ?? []) {
-        if (ps.joined_at) joinDates.set(ps.student_id, ps.joined_at);
-        const studentData = ps.student as unknown as { name: string } | null;
-        if (studentData?.name) studentNames.set(ps.student_id, studentData.name);
-      }
-      poolJoinDateCache.set(poolId, joinDates);
-      poolSiblingCountCache.set(poolId, (poolStudentLinks ?? []).length);
-      poolStudentNamesCache.set(poolId, studentNames);
-      // Get the pool's course_id
-      const { data: poolData } = await supabaseAdmin
-        .from('shared_session_pools')
-        .select('course_id')
-        .eq('id', poolId)
-        .single();
-      if (!poolStudentLinks?.length || !poolData) continue;
-      const studentIds = poolStudentLinks.map(ps => ps.student_id);
-      // Sum only shared pool payments (with pool_id set) from ALL siblings
-      const { data: poolPayments } = await supabaseAdmin
-        .from('payments')
-        .select('amount, package_id, paid_at, course_id')
-        .in('student_id', studentIds)
-        .eq('course_id', poolData.course_id)
-        .eq('pool_id', poolId)
-        .eq('status', 'paid');
-      const totalPaid = (poolPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
-      const totalSessions = (poolPayments ?? []).reduce((sum, p) => {
-        return sum + getSessionsForPayment(p.package_id);
-      }, 0);
-      poolPaymentCache.set(poolId, { totalPaid, totalSessions });
-      // Store raw payment data for latest package lookup
-      poolPaymentCacheRaw.set(poolId, (poolPayments ?? []).map(p => ({
-        amount: Number(p.amount),
-        status: 'paid',
-        course_id: p.course_id,
-        package_id: p.package_id,
-        pool_id: poolId,
-        paid_at: p.paid_at,
-      })));
-    }
-  }
+  const {
+    poolPaymentCache,
+    poolPaymentCacheRaw,
+    poolJoinDateCache,
+    poolSiblingCountCache,
+    poolStudentNamesCache,
+  } = await loadPoolCaches(allPoolIds, getSessionsForPayment);
 
   // Helper to build a row from a student + single enrollment
   const buildRow = (student: any, enrollment: any | null): StudentTableRow => {
@@ -1126,7 +1175,11 @@ export async function getStudentsForTable(
       expiredDate: enrollment?.expires_at || null,
       enrollmentStatus: enrollment?.status || null,
       level: enrollment?.level ?? student.level ?? 1,
-      adcoinBalance: enrollment?.adcoin_balance ?? student.adcoin_balance ?? 0,
+      // Total adcoin lives on the student row — it's the running balance
+      // across attendance awards, transfers received, and mission rewards.
+      // The per-enrollment adcoin_balance is a separate concept (per-class
+      // bookkeeping) and should NOT mask the student's total on /student.
+      adcoinBalance: student.adcoin_balance ?? 0,
       sessionsRemaining,
       periodStart,
       periodEnd,
@@ -1320,64 +1373,20 @@ export async function getStudentsForTablePaginated(
     return pkg.package_type === 'monthly' ? pkg.duration * 4 : pkg.duration;
   };
 
-  // Pre-fetch pool payment data (same logic as getStudentsForTable)
-  const poolPaymentCache = new Map<string, { totalPaid: number; totalSessions: number }>();
-  const poolPaymentCacheRaw = new Map<string, Array<{ amount: number; status: string; course_id: string | null; package_id: string | null; pool_id: string | null; paid_at: string | null }>>();
-  const poolJoinDateCache = new Map<string, Map<string, string>>();
-  const poolSiblingCountCache = new Map<string, number>();
-  const poolStudentNamesCache = new Map<string, Map<string, string>>();
+  // Pre-fetch pool payment data via the batched helper (same caches as getStudentsForTable).
   const allPoolIds = new Set<string>();
   for (const student of data ?? []) {
     for (const enrollment of (student as any).enrollments || []) {
       if (enrollment.pool_id) allPoolIds.add(enrollment.pool_id);
     }
   }
-  if (allPoolIds.size > 0) {
-    for (const poolId of allPoolIds) {
-      const { data: poolStudentLinks } = await supabaseAdmin
-        .from('pool_students')
-        .select('student_id, joined_at, student:students(name)')
-        .eq('pool_id', poolId);
-
-      const joinDates = new Map<string, string>();
-      const studentNames = new Map<string, string>();
-      for (const ps of poolStudentLinks ?? []) {
-        if (ps.joined_at) joinDates.set(ps.student_id, ps.joined_at);
-        const studentData = ps.student as unknown as { name: string } | null;
-        if (studentData?.name) studentNames.set(ps.student_id, studentData.name);
-      }
-      poolJoinDateCache.set(poolId, joinDates);
-      poolSiblingCountCache.set(poolId, (poolStudentLinks ?? []).length);
-      poolStudentNamesCache.set(poolId, studentNames);
-      const { data: poolData } = await supabaseAdmin
-        .from('shared_session_pools')
-        .select('course_id')
-        .eq('id', poolId)
-        .single();
-      if (!poolStudentLinks?.length || !poolData) continue;
-      const studentIds = poolStudentLinks.map(ps => ps.student_id);
-      const { data: poolPayments } = await supabaseAdmin
-        .from('payments')
-        .select('amount, package_id, paid_at, course_id')
-        .in('student_id', studentIds)
-        .eq('course_id', poolData.course_id)
-        .eq('pool_id', poolId)
-        .eq('status', 'paid');
-      const totalPaid = (poolPayments ?? []).reduce((sum, p) => sum + Number(p.amount), 0);
-      const totalSessions = (poolPayments ?? []).reduce((sum, p) => {
-        return sum + getSessionsForPayment(p.package_id);
-      }, 0);
-      poolPaymentCache.set(poolId, { totalPaid, totalSessions });
-      poolPaymentCacheRaw.set(poolId, (poolPayments ?? []).map(p => ({
-        amount: Number(p.amount),
-        status: 'paid',
-        course_id: p.course_id,
-        package_id: p.package_id,
-        pool_id: poolId,
-        paid_at: p.paid_at,
-      })));
-    }
-  }
+  const {
+    poolPaymentCache,
+    poolPaymentCacheRaw,
+    poolJoinDateCache,
+    poolSiblingCountCache,
+    poolStudentNamesCache,
+  } = await loadPoolCaches(allPoolIds, getSessionsForPayment);
 
   // Reuse the same buildRow logic as getStudentsForTable
   const buildRow = (student: any, enrollment: any | null): StudentTableRow => {
@@ -1568,7 +1577,11 @@ export async function getStudentsForTablePaginated(
       expiredDate: enrollment?.expires_at || null,
       enrollmentStatus: enrollment?.status || null,
       level: enrollment?.level ?? student.level ?? 1,
-      adcoinBalance: enrollment?.adcoin_balance ?? student.adcoin_balance ?? 0,
+      // Total adcoin lives on the student row — it's the running balance
+      // across attendance awards, transfers received, and mission rewards.
+      // The per-enrollment adcoin_balance is a separate concept (per-class
+      // bookkeeping) and should NOT mask the student's total on /student.
+      adcoinBalance: student.adcoin_balance ?? 0,
       sessionsRemaining,
       periodStart,
       periodEnd,

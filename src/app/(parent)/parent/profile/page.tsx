@@ -40,7 +40,7 @@ export default async function ParentProfilePage() {
 
   return (
     <>
-      <ParentNav parentName={parent.name} />
+      <ParentNav parentName={parent.name} userId={user.id} />
 
       <main className="mx-auto max-w-5xl px-4 py-6 space-y-6">
         <ParentProfileForm

@@ -67,6 +67,153 @@ export async function createCategory(categoryData: CourseCategoryInsert): Promis
 // PROGRAM TABLE VIEW
 // ============================================
 
+export interface PaginatedPrograms {
+  rows: ProgramTableRow[];
+  total: number;
+}
+
+export async function getProgramsForTablePaginated(
+  userEmail: string,
+  opts: { offset: number; limit: number },
+): Promise<PaginatedPrograms> {
+  const { offset, limit } = opts;
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  const { data: programs, error, count } = await supabaseAdmin
+    .from("courses")
+    .select(`
+      id,
+      name,
+      code,
+      short_description,
+      category_id,
+      number_of_levels,
+      sessions_to_level_up,
+      program_type,
+      status,
+      cover_image_url,
+      assessment_enabled,
+      levelling_time_minutes,
+      course_categories(name),
+      course_branches(branch_id, branches(id, name, city)),
+      course_sections(
+        id,
+        course_lessons(id)
+      ),
+      course_pricing(*)
+    `, { count: "exact" })
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    console.error("Error fetching programs (paginated):", error);
+    return { rows: [], total: 0 };
+  }
+
+  const rows = await assembleProgramRows(programs ?? [], useCityName);
+  return { rows, total: count ?? 0 };
+}
+
+// Shared post-processing for both the legacy non-paginated fetcher and the
+// new paginated one: looks up enrollment counts + slot counts and maps rows.
+async function assembleProgramRows(
+  programs: any[],
+  useCityName: boolean,
+): Promise<ProgramTableRow[]> {
+  const courseIds = programs.map((p) => p.id);
+  if (courseIds.length === 0) return [];
+
+  const { data: enrollmentCounts } = await supabaseAdmin
+    .from("enrollments")
+    .select("course_id")
+    .in("course_id", courseIds)
+    .is("deleted_at", null);
+  const enrollmentCountMap = new Map<string, number>();
+  enrollmentCounts?.forEach((e) => {
+    enrollmentCountMap.set(e.course_id, (enrollmentCountMap.get(e.course_id) || 0) + 1);
+  });
+
+  const { data: slotsData } = await supabaseAdmin
+    .from("course_slots")
+    .select("course_id, branch_id, branches(name, city)")
+    .in("course_id", courseIds)
+    .is("deleted_at", null);
+
+  const slotCountsMap = new Map<string, { branch_name: string; count: number }[]>();
+  (slotsData ?? []).forEach((slot: any) => {
+    const courseId = slot.course_id;
+    const branchName = useCityName
+      ? (slot.branches?.city || slot.branches?.name || "Unknown")
+      : (slot.branches?.name || "Unknown");
+    if (!slotCountsMap.has(courseId)) slotCountsMap.set(courseId, []);
+    const courseSlots = slotCountsMap.get(courseId)!;
+    const existing = courseSlots.find((s) => s.branch_name === branchName);
+    if (existing) existing.count++;
+    else courseSlots.push({ branch_name: branchName, count: 1 });
+  });
+
+  return programs.map((program: any) => {
+    const branchNames = program.course_branches
+      ?.map((cb: any) => useCityName ? (cb.branches?.city || cb.branches?.name) : cb.branches?.name)
+      .filter(Boolean) ?? [];
+    const lessonCount = program.course_sections?.reduce(
+      (sum: number, section: any) => sum + (section.course_lessons?.length ?? 0),
+      0
+    ) ?? 0;
+    const activePricing = (program.course_pricing ?? []).filter((p: any) => !p.deleted_at);
+    const monthlyPackageCount = activePricing.filter((p: any) => p.package_type === "monthly").length;
+    const sessionPackageCount = activePricing.filter((p: any) => p.package_type === "session").length;
+
+    return {
+      id: program.id,
+      name: program.name,
+      code: program.code || null,
+      short_description: program.short_description,
+      category_id: program.category_id,
+      category_name: program.course_categories?.name || null,
+      number_of_levels: program.number_of_levels,
+      sessions_to_level_up: program.sessions_to_level_up,
+      program_type: program.program_type,
+      status: program.status || "active",
+      cover_image_url: program.cover_image_url,
+      assessment_enabled: program.assessment_enabled || false,
+      levelling_time_minutes: program.levelling_time_minutes,
+      enrolled_count: enrollmentCountMap.get(program.id) || 0,
+      lesson_count: lessonCount,
+      branch_names: branchNames,
+      monthly_package_count: monthlyPackageCount,
+      session_package_count: sessionPackageCount,
+      slot_counts: slotCountsMap.get(program.id) || [],
+    };
+  });
+}
+
 export async function getProgramsForTable(userEmail: string): Promise<ProgramTableRow[]> {
   const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
   let branchIds = await getUserBranchIds(userEmail);

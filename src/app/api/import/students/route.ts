@@ -289,6 +289,18 @@ export async function POST(request: NextRequest) {
           parentId = newParent.id as string;
         }
 
+        // Parse `level` once — used on both student insert and enrollment
+        // insert. Blank defaults to 1 (beginner).
+        const levelRaw = row.level?.trim();
+        let level = 1;
+        if (levelRaw) {
+          const parsed = parseInt(levelRaw, 10);
+          if (isNaN(parsed) || parsed < 1) {
+            throw new Error(`level "${levelRaw}" must be a positive integer`);
+          }
+          level = parsed;
+        }
+
         // 2. Lookup-or-create the student. The dedup key here is
         // (name, branch, linked parent) — same student in the SAME CSV /
         // a re-uploaded one reuses the existing record so multiple enrollment
@@ -340,7 +352,7 @@ export async function POST(request: NextRequest) {
                 gender: row.gender?.trim().toLowerCase() || null,
                 school_name: row.school_name?.trim() || null,
                 branch_id: branchId,
-                level: 1,
+                level,
                 adcoin_balance: 0,
               })
               .select("id")
@@ -381,7 +393,7 @@ export async function POST(request: NextRequest) {
                 gender: row.gender?.trim().toLowerCase() || null,
                 school_name: row.school_name?.trim() || null,
                 branch_id: branchId,
-                level: 1,
+                level,
                 adcoin_balance: 0,
               })
               .select("id")
@@ -518,6 +530,7 @@ export async function POST(request: NextRequest) {
               sessions_remaining: sessionsRemaining,
               day_of_week: day,
               start_time: time,
+              level,
             })
             .select("id")
             .single();

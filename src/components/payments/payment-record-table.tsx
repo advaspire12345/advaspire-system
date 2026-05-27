@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import {
   Search,
   Pencil,
@@ -112,65 +113,29 @@ export function PaymentRecordTable({
   const [activeStartDate, setActiveStartDate] = useState<string | undefined>(initialStartDate);
   const [activeEndDate, setActiveEndDate] = useState<string | undefined>(initialEndDate);
 
-  // Progressive loading: load remaining data in background
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
-  const fetchedRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const fetchAllData = useCallback(async (
-    startOffset: number,
-    existingRows: PaymentRecordRow[],
-    total: number,
-    filterStartDate?: string,
-    filterEndDate?: string,
-  ) => {
-    let offset = startOffset;
-    const existingIds = new Set(existingRows.map((r) => r.id));
-
-    const params = new URLSearchParams();
-    if (filterStartDate) params.set("startDate", filterStartDate);
-    if (filterEndDate) params.set("endDate", filterEndDate);
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    while (offset < total) {
-      if (controller.signal.aborted) return;
-      try {
-        const dateParams = params.toString();
-        const res = await fetch(
-          `/api/payment-record/table?offset=${offset}&limit=10${dateParams ? `&${dateParams}` : ""}`,
-          { signal: controller.signal }
-        );
-        if (!res.ok) break;
-        const result: { rows: PaymentRecordRow[] } = await res.json();
-        if (!result.rows || result.rows.length === 0) break;
-
-        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
-        for (const r of result.rows) existingIds.add(r.id);
-
-        if (newRows.length > 0) {
-          setData((prev) => [...prev, ...newRows]);
-        }
-        offset += 10;
-      } catch {
-        break;
-      }
-    }
-    if (!controller.signal.aborted) {
-      setIsLoadingMore(false);
-    }
-  }, []);
-
-  // Initial progressive load on mount
-  useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    if (initialData.length < totalCount) {
-      fetchAllData(initialData.length, initialData, totalCount, initialStartDate, initialEndDate);
-    }
-  }, [initialData, totalCount, initialStartDate, initialEndDate, fetchAllData]);
+  // Bounded progressive loading via the shared hook. Date filter is part
+  // of the apiUrl so when activeStartDate/activeEndDate change, the apiUrl
+  // identity changes and the hook restarts cleanly with the new filter.
+  const buildApiUrl = useCallback(
+    (offset: number, limit: number) => {
+      const params = new URLSearchParams();
+      if (activeStartDate) params.set("startDate", activeStartDate);
+      if (activeEndDate) params.set("endDate", activeEndDate);
+      const tail = params.toString();
+      return `/api/payment-record/table?offset=${offset}&limit=${limit}${tail ? `&${tail}` : ""}`;
+    },
+    [activeStartDate, activeEndDate],
+  );
+  const { isLoadingMore, resetTo } = useBoundedLoader<PaymentRecordRow>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: buildApiUrl,
+    getId: useCallback((r: PaymentRecordRow) => r.id, []),
+    setData,
+  });
 
   // Edit/Delete modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -207,8 +172,11 @@ export function PaymentRecordTable({
     );
   }, [data, searchQuery]);
 
-  // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  // Pagination — when not searching, derive from server-side total so the
+  // user can navigate past the bounded loaded window.
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -220,14 +188,16 @@ export function PaymentRecordTable({
     setCurrentPage(1);
   };
 
-  // Re-fetch data from API with given date filters (no page refresh)
+  // Re-fetch data from API with given date filters (no page refresh).
+  // Setting activeStartDate/activeEndDate changes apiUrl identity, which
+  // restarts the loader. Reset the dedup state via resetTo so the new
+  // first page isn't immediately deduped against the old set.
   const refetchWithDates = useCallback(async (filterStart?: string, filterEnd?: string) => {
-    abortRef.current?.abort();
     setData([]);
     setCurrentPage(1);
-    setIsLoadingMore(true);
     setActiveStartDate(filterStart);
     setActiveEndDate(filterEnd);
+    resetTo([]);
 
     const params = new URLSearchParams();
     if (filterStart) params.set("startDate", filterStart);
@@ -236,20 +206,15 @@ export function PaymentRecordTable({
 
     try {
       const res = await fetch(`/api/payment-record/table?offset=0&limit=10${dateParams ? `&${dateParams}` : ""}`);
-      if (!res.ok) { setIsLoadingMore(false); return; }
+      if (!res.ok) return;
       const result: { rows: PaymentRecordRow[]; totalCount: number } = await res.json();
       const rows = result.rows ?? [];
-      const newTotal = result.totalCount ?? 0;
       setData(rows);
-      if (rows.length < newTotal) {
-        fetchAllData(rows.length, rows, newTotal, filterStart, filterEnd);
-      } else {
-        setIsLoadingMore(false);
-      }
+      resetTo(rows);
     } catch {
-      setIsLoadingMore(false);
+      // ignore — bounded loader will retry when target re-evaluates
     }
-  }, [fetchAllData]);
+  }, [resetTo]);
 
   // Apply date filter
   const applyDateFilter = useCallback(() => {
@@ -747,7 +712,7 @@ export function PaymentRecordTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />
