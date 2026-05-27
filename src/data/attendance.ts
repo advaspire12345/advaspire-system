@@ -1394,12 +1394,24 @@ export async function getEnrollmentsForAttendancePaginated(
     }
   }
 
-  // Count query — same table, same filters
-  const { count: totalCount } = await supabaseAdmin
+  // Count query — same table, same filters. Branch filter must be applied
+  // server-side too; otherwise totalCount and the page's row count drift,
+  // and post-fetch filtering can drop an entire 10-row page leaving an
+  // empty table even though totalCount > 0.
+  let countQuery = supabaseAdmin
     .from('enrollments')
-    .select('id', { count: 'exact', head: true })
+    .select('id, student:students!inner(branch_id, deleted_at)', { count: 'exact', head: true })
     .in('status', ['active', 'pending'])
-    .is('deleted_at', null);
+    .is('deleted_at', null)
+    .is('students.deleted_at', null)
+    // Enrollments without any schedule data are un-attendable — the slot
+    // builder skips them and the row never appears. Excluding them at the
+    // SQL level means totalCount matches what the user can actually mark.
+    .or('schedule.not.is.null,day_of_week.not.is.null');
+  if (branchIds && branchIds.length > 0) {
+    countQuery = countQuery.in('students.branch_id', branchIds);
+  }
+  const { count: totalCount } = await countQuery;
 
   // Build query - package_id references course_pricing table
   const selectQuery = `
@@ -1431,8 +1443,13 @@ export async function getEnrollmentsForAttendancePaginated(
     .select(selectQuery)
     .in('status', ['active', 'pending'])
     .is('deleted_at', null)
+    .is('students.deleted_at', null)
+    .or('schedule.not.is.null,day_of_week.not.is.null')
     .order('created_at', { ascending: false })
     .range(options.offset, options.offset + options.limit - 1);
+  if (branchIds && branchIds.length > 0) {
+    query = query.in('students.branch_id', branchIds);
+  }
 
   const { data, error } = await query;
 
@@ -2162,6 +2179,193 @@ export async function getAllStudentsForManualAttendance(
   // Sort by student name
   result.sort((a, b) => a.studentName.localeCompare(b.studentName));
 
+  return result;
+}
+
+/**
+ * Server-side search for the manual-attendance "Take Attendance" modal.
+ * Filters active enrollments by student name (ilike) and caps at `limit`.
+ * Returns the same shape as getAllStudentsForManualAttendance so the modal
+ * can swap one in for the other.
+ */
+export async function searchStudentsForManualAttendance(
+  userEmail: string,
+  q: string,
+  limit: number = 50,
+): Promise<AttendanceTableRow[]> {
+  if (!q.trim()) return [];
+
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  // First find matching students by name (or student_id) so we can filter
+  // enrollments down. ilike on the trigram-indexed columns is the hot path.
+  const term = `%${q.trim()}%`;
+  let studentQuery = supabaseAdmin
+    .from("students")
+    .select("id")
+    .or(`name.ilike.${term},student_id.ilike.${term}`)
+    .is("deleted_at", null)
+    .limit(limit);
+  if (branchIds && branchIds.length > 0) {
+    studentQuery = studentQuery.in("branch_id", branchIds);
+  }
+  const { data: matchedStudents } = await studentQuery;
+  const matchedIds = (matchedStudents ?? []).map((s) => s.id);
+  if (matchedIds.length === 0) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from("enrollments")
+    .select(`
+      id,
+      student_id,
+      course_id,
+      day_of_week,
+      schedule,
+      start_time,
+      end_time,
+      sessions_remaining,
+      pool_id,
+      pool:shared_session_pools(id, sessions_remaining, total_sessions),
+      student:students!inner(
+        id,
+        name,
+        photo,
+        branch_id,
+        deleted_at,
+        branch:branches!students_branch_id_branches_id_fk(id, name, city)
+      ),
+      course:courses!inner(id, name),
+      package:course_pricing(description)
+    `)
+    .in("student_id", matchedIds)
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error searching students for manual attendance:", error);
+    return [];
+  }
+
+  // Same pool sibling-count batching as getAllStudentsForManualAttendance.
+  const manualPoolCountMap = new Map<string, number>();
+  const manualPoolOrderMap = new Map<string, string[]>();
+  const manualPoolIds = new Set<string>();
+  for (const e of data ?? []) {
+    if ((e as any).pool_id) manualPoolIds.add((e as any).pool_id);
+  }
+  if (manualPoolIds.size > 0) {
+    const { data: members } = await supabaseAdmin
+      .from("pool_students")
+      .select("pool_id, student_id, joined_at")
+      .in("pool_id", [...manualPoolIds])
+      .order("joined_at", { ascending: true });
+    const byPool = new Map<string, { student_id: string; joined_at: string | null }[]>();
+    for (const m of (members ?? []) as { pool_id: string; student_id: string; joined_at: string | null }[]) {
+      if (!byPool.has(m.pool_id)) byPool.set(m.pool_id, []);
+      byPool.get(m.pool_id)!.push({ student_id: m.student_id, joined_at: m.joined_at });
+    }
+    for (const pid of manualPoolIds) {
+      const arr = byPool.get(pid) ?? [];
+      manualPoolCountMap.set(pid, arr.length);
+      manualPoolOrderMap.set(pid, arr.map((m) => m.student_id));
+    }
+  }
+
+  const result: AttendanceTableRow[] = [];
+  for (const enrollment of (data ?? [])) {
+    const studentData = enrollment.student as unknown as {
+      id: string;
+      name: string;
+      photo: string | null;
+      branch_id: string;
+      deleted_at: string | null;
+      branch: { id: string; name: string; city: string | null };
+    };
+    if (studentData.deleted_at) continue;
+
+    const courseData = enrollment.course as unknown as { id: string; name: string };
+    const pkgData = enrollment.package as unknown as { description: string } | null;
+
+    let manualSessionsRemaining = enrollment.sessions_remaining;
+    const mPoolId = (enrollment as any).pool_id as string | null;
+    const mPool = (enrollment as any).pool as { id: string; sessions_remaining: number; total_sessions: number } | null;
+    if (mPoolId && mPool) {
+      const count = manualPoolCountMap.get(mPoolId) || 2;
+      const poolRemaining = mPool.sessions_remaining;
+      const perStudent = Math.floor(poolRemaining / count);
+      const memberOrder = manualPoolOrderMap.get(mPoolId) ?? [];
+      const position = memberOrder.indexOf(studentData.id);
+      const remainder = poolRemaining >= 0 ? poolRemaining % count : 0;
+      const positionBonus = position >= 0 && position < remainder ? 1 : 0;
+      manualSessionsRemaining = perStudent + positionBonus;
+    }
+
+    let slotTime = enrollment.start_time;
+    if (enrollment.schedule) {
+      try {
+        const parsed = JSON.parse(enrollment.schedule as string);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].time) {
+          slotTime = parsed[0].time;
+        }
+      } catch { /* ignore */ }
+    }
+
+    result.push({
+      id: `manual-${enrollment.id}`,
+      enrollmentId: enrollment.id,
+      studentId: studentData.id,
+      studentName: studentData.name,
+      studentPhoto: studentData.photo,
+      branchId: studentData.branch_id,
+      branchName: useCityName ? (studentData.branch.city || studentData.branch.name) : studentData.branch.name,
+      courseId: courseData.id,
+      courseName: courseData.name,
+      packageName: pkgData?.description ?? null,
+      dayOfWeek: enrollment.day_of_week,
+      slotDay: 'Manual',
+      slotTime: slotTime,
+      startTime: enrollment.start_time,
+      endTime: enrollment.end_time,
+      lastAttendanceDate: null,
+      lastAttendanceStatus: null,
+      lastActivityText: null,
+      lastLesson: null,
+      lastMission: null,
+      lastAdcoin: 0,
+      sessionsRemaining: manualSessionsRemaining,
+      hasExam: false,
+      type: 'enrollment',
+      existingAttendance: null,
+    });
+  }
+
+  result.sort((a, b) => a.studentName.localeCompare(b.studentName));
   return result;
 }
 
@@ -3090,7 +3294,8 @@ export async function getAttendanceLog(
     console.error('Error fetching trial attendance log:', trialError);
   }
 
-  // Pre-fetch pool sibling counts and join order for attendance log
+  // Pre-fetch pool sibling counts and join order for attendance log.
+  // Batched: one .in() instead of one query per pool.
   const logPoolCountMap = new Map<string, number>();
   const logPoolOrderMap = new Map<string, string[]>();
   const logPoolIds = new Set<string>();
@@ -3098,14 +3303,22 @@ export async function getAttendanceLog(
     const enr = record.enrollment as any;
     if (enr?.pool_id) logPoolIds.add(enr.pool_id);
   }
-  for (const pId of logPoolIds) {
+  if (logPoolIds.size > 0) {
     const { data: members } = await supabaseAdmin
       .from('pool_students')
-      .select('student_id, joined_at')
-      .eq('pool_id', pId)
+      .select('pool_id, student_id, joined_at')
+      .in('pool_id', [...logPoolIds])
       .order('joined_at', { ascending: true });
-    logPoolCountMap.set(pId, (members ?? []).length);
-    logPoolOrderMap.set(pId, (members ?? []).map(m => m.student_id));
+    const byPool = new Map<string, { student_id: string }[]>();
+    for (const m of (members ?? []) as { pool_id: string; student_id: string }[]) {
+      if (!byPool.has(m.pool_id)) byPool.set(m.pool_id, []);
+      byPool.get(m.pool_id)!.push({ student_id: m.student_id });
+    }
+    for (const pid of logPoolIds) {
+      const arr = byPool.get(pid) ?? [];
+      logPoolCountMap.set(pid, arr.length);
+      logPoolOrderMap.set(pid, arr.map((m) => m.student_id));
+    }
   }
 
   // Process enrollment attendance records
@@ -3283,7 +3496,7 @@ export async function getAttendanceLog(
 export async function getAttendanceLogPaginated(
   userEmail: string,
   options: { offset: number; limit: number; startDate?: string; endDate?: string }
-): Promise<{ rows: AttendanceLogRow[]; totalCount: number }> {
+): Promise<{ rows: AttendanceLogRow[]; enrollmentRows: AttendanceLogRow[]; trialRows: AttendanceLogRow[]; totalCount: number }> {
   // Import user helpers dynamically to avoid circular imports
   const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
   let branchIds = await getUserBranchIds(userEmail);
@@ -3315,14 +3528,23 @@ export async function getAttendanceLogPaginated(
     }
   }
 
-  // Count query — same table, same filters as enrollment attendance query
+  // Count query — must apply the same branch + soft-delete filters as the
+  // data query, otherwise the displayed total drifts from the rows we can
+  // actually show. Nested filter syntax restricts the inner-joined tables.
   let countQuery = supabaseAdmin
     .from('attendance')
-    .select('id', { count: 'exact', head: true })
-    .is('trial_id', null);
+    .select(
+      'id, enrollment:enrollments!inner(student:students!inner(branch_id, deleted_at))',
+      { count: 'exact', head: true },
+    )
+    .is('trial_id', null)
+    .is('enrollments.students.deleted_at', null);
 
   if (options.startDate) countQuery = countQuery.gte('date', options.startDate);
   if (options.endDate) countQuery = countQuery.lte('date', options.endDate);
+  if (branchIds && branchIds.length > 0) {
+    countQuery = countQuery.in('enrollments.students.branch_id', branchIds);
+  }
 
   const { count: totalCount } = await countQuery;
 
@@ -3366,14 +3588,22 @@ export async function getAttendanceLogPaginated(
     `)
     .is('trial_id', null);
 
+  enrollmentQuery = enrollmentQuery.is('enrollments.students.deleted_at', null);
   if (options.startDate) enrollmentQuery = enrollmentQuery.gte('date', options.startDate);
   if (options.endDate) enrollmentQuery = enrollmentQuery.lte('date', options.endDate);
+  if (branchIds && branchIds.length > 0) {
+    enrollmentQuery = enrollmentQuery.in('enrollments.students.branch_id', branchIds);
+  }
 
   enrollmentQuery = enrollmentQuery
     .order('created_at', { ascending: false })
     .range(options.offset, options.offset + options.limit - 1);
 
-  // Fetch trial attendance records (no pagination — trials are typically few)
+  // Trial-attendance is only fetched on offset=0 (it's a few rows total —
+  // pre-loading it on every paginated batch made offset math drift and pages
+  // ended up with the wrong number of rows). Subsequent batches receive an
+  // empty trialRows array.
+  const fetchTrials = options.offset === 0;
   let trialQuery = supabaseAdmin
     .from('attendance')
     .select(`
@@ -3407,22 +3637,28 @@ export async function getAttendanceLogPaginated(
 
   if (options.startDate) trialQuery = trialQuery.gte('date', options.startDate);
   if (options.endDate) trialQuery = trialQuery.lte('date', options.endDate);
+  if (branchIds && branchIds.length > 0) {
+    trialQuery = trialQuery.in('trials.branch_id', branchIds);
+  }
 
   trialQuery = trialQuery.order('created_at', { ascending: false });
 
-  const [{ data: enrollmentData, error: enrollmentError }, { data: trialData, error: trialError }] = await Promise.all([
-    enrollmentQuery,
-    trialQuery,
-  ]);
-
-  if (enrollmentError) {
-    console.error('Error fetching enrollment attendance log (paginated):', enrollmentError);
+  const enrollmentResp = await enrollmentQuery;
+  const enrollmentData = enrollmentResp.data;
+  if (enrollmentResp.error) {
+    console.error('Error fetching enrollment attendance log (paginated):', enrollmentResp.error);
   }
-  if (trialError) {
-    console.error('Error fetching trial attendance log (paginated):', trialError);
+  let trialData: any[] | null = null;
+  if (fetchTrials) {
+    const trialResp = await trialQuery;
+    trialData = trialResp.data;
+    if (trialResp.error) {
+      console.error('Error fetching trial attendance log (paginated):', trialResp.error);
+    }
   }
 
-  // Pre-fetch pool sibling counts and join order for attendance log
+  // Pre-fetch pool sibling counts and join order for attendance log.
+  // Batched: one .in() instead of one query per pool.
   const logPoolCountMap = new Map<string, number>();
   const logPoolOrderMap = new Map<string, string[]>();
   const logPoolIds = new Set<string>();
@@ -3430,14 +3666,22 @@ export async function getAttendanceLogPaginated(
     const enr = record.enrollment as any;
     if (enr?.pool_id) logPoolIds.add(enr.pool_id);
   }
-  for (const pId of logPoolIds) {
+  if (logPoolIds.size > 0) {
     const { data: members } = await supabaseAdmin
       .from('pool_students')
-      .select('student_id, joined_at')
-      .eq('pool_id', pId)
+      .select('pool_id, student_id, joined_at')
+      .in('pool_id', [...logPoolIds])
       .order('joined_at', { ascending: true });
-    logPoolCountMap.set(pId, (members ?? []).length);
-    logPoolOrderMap.set(pId, (members ?? []).map(m => m.student_id));
+    const byPool = new Map<string, { student_id: string }[]>();
+    for (const m of (members ?? []) as { pool_id: string; student_id: string }[]) {
+      if (!byPool.has(m.pool_id)) byPool.set(m.pool_id, []);
+      byPool.get(m.pool_id)!.push({ student_id: m.student_id });
+    }
+    for (const pid of logPoolIds) {
+      const arr = byPool.get(pid) ?? [];
+      logPoolCountMap.set(pid, arr.length);
+      logPoolOrderMap.set(pid, arr.map((m) => m.student_id));
+    }
   }
 
   // Process enrollment attendance records
@@ -3609,5 +3853,15 @@ export async function getAttendanceLogPaginated(
     return timeB.localeCompare(timeA);
   });
 
-  return { rows: result, totalCount: totalCount ?? 0 };
+  // Surface enrollment rows + trial rows separately so the client's bounded
+  // loader can advance its offset by only the paginated count (enrollments).
+  // Trials come along on offset=0 only; subsequent batches get an empty
+  // trialRows array. `rows` keeps the merged-and-sorted shape for backwards
+  // compat with callers that don't care about the distinction.
+  return {
+    rows: result,
+    enrollmentRows: enrollmentRecords,
+    trialRows: trialRecords,
+    totalCount: totalCount ?? 0,
+  };
 }

@@ -26,6 +26,14 @@ interface FloatingSelectProps {
   disabled?: boolean;
   className?: string;
   searchable?: boolean;
+  // When provided, fires on every search-input change. Used for server-side
+  // search where `options` is populated by the parent in response to the
+  // search term (e.g. async student search in attendance modal).
+  onSearchChange?: (term: string) => void;
+  // When true, skip the client-side substring filter on `options` because
+  // the parent is doing server-side filtering and the provided options are
+  // already the result set.
+  disableClientFilter?: boolean;
 }
 
 const FloatingSelect = React.forwardRef<HTMLDivElement, FloatingSelectProps>(
@@ -41,6 +49,8 @@ const FloatingSelect = React.forwardRef<HTMLDivElement, FloatingSelectProps>(
       disabled = false,
       className,
       searchable = false,
+      onSearchChange,
+      disableClientFilter = false,
     },
     ref
   ) => {
@@ -51,13 +61,15 @@ const FloatingSelect = React.forwardRef<HTMLDivElement, FloatingSelectProps>(
 
     const selectedOption = options.find((opt) => opt.value === value);
 
-    // Filter options based on search
+    // Filter options based on search (skipped when parent does server-side
+    // filtering — in that case `options` already reflects the search term).
     const filteredOptions = React.useMemo(() => {
+      if (disableClientFilter) return options;
       if (!searchTerm.trim()) return options;
       return options.filter((opt) =>
         opt.label.toLowerCase().includes(searchTerm.toLowerCase())
       );
-    }, [options, searchTerm]);
+    }, [options, searchTerm, disableClientFilter]);
 
     // Close dropdown when clicking outside
     React.useEffect(() => {
@@ -185,7 +197,10 @@ const FloatingSelect = React.forwardRef<HTMLDivElement, FloatingSelectProps>(
                   type="text"
                   placeholder="Search..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    onSearchChange?.(e.target.value);
+                  }}
                   className="w-full rounded-lg border border-[#ADAFCA] px-3 py-2 text-sm focus:border-[#23D2E2] focus:outline-none focus:ring-1 focus:ring-[#23D2E2]/20"
                   autoFocus
                   onClick={(e) => e.stopPropagation()}

@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Coins, Search, Settings, Bell, X, Check } from "lucide-react";
+import { HelpButton } from "@/components/help/help-button";
+import type { UserRole } from "@/db/schema";
 import { notify } from "@/lib/notify";
 import {
   fetchMyNotificationsAction,
@@ -46,7 +48,12 @@ interface NotificationItem {
   created_at: string;
 }
 
-export function TopMenuBar() {
+interface TopMenuBarProps {
+  role: UserRole | null;
+  userId: string | null;
+}
+
+export function TopMenuBar({ role, userId }: TopMenuBarProps) {
   const router = useRouter();
   const [searchValue, setSearchValue] = useState("");
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -292,6 +299,11 @@ export function TopMenuBar() {
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Help button — opens role-aware onboarding dialog. Pulses on
+            first/second login (see useOnboardingTrigger). */}
+        <HelpButton role={role} userId={userId} className="text-white hover:bg-white/20 hover:text-white" />
+
         <Separator
           orientation="vertical"
           className="mx-2 data-[orientation=vertical]:h-8 bg-white/30"

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import { Pencil, Trash2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ import { format, parseISO } from "date-fns";
 
 interface TrialTableProps {
   initialData: TrialRow[];
+  totalCount: number;
   branches: BranchOption[];
   courses: CourseOption[];
   canCreate?: boolean;
@@ -33,6 +35,8 @@ interface TrialTableProps {
 }
 
 const ITEMS_PER_PAGE = 10;
+const BATCH_SIZE = 10;
+const INITIAL_LOAD_CAP = 100;
 
 const columns: {
   key: string;
@@ -91,6 +95,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function TrialTable({
   initialData,
+  totalCount,
   branches,
   courses,
   canCreate,
@@ -107,21 +112,38 @@ export function TrialTable({
   const [modalMode, setModalMode] = useState<"add" | "edit" | "delete">("add");
   const [selectedRecord, setSelectedRecord] = useState<TrialRow | null>(null);
 
+  // Bounded progressive loading via the shared hook.
+  const [allData, setAllData] = useState<TrialRow[]>(initialData);
+  useBoundedLoader<TrialRow>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/trial/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: TrialRow) => r.id, []),
+    setData: setAllData,
+    batchSize: BATCH_SIZE,
+    initialLoadCap: INITIAL_LOAD_CAP,
+  });
+
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return initialData;
+    if (!searchQuery.trim()) return allData;
 
     const query = searchQuery.toLowerCase();
-    return initialData.filter(
+    return allData.filter(
       (row) =>
         row.parentName.toLowerCase().includes(query) ||
         row.childName.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query),
     );
-  }, [initialData, searchQuery]);
+  }, [allData, searchQuery]);
 
   // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -464,7 +486,7 @@ export function TrialTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />

@@ -2,7 +2,7 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { ProgramTable } from "@/components/program/program-table";
-import { getProgramsForTable, getAllCategories, getInstructors, archiveExpiredBootcampWorkshops } from "@/data/programs";
+import { getProgramsForTablePaginated, getAllCategories, getInstructors, archiveExpiredBootcampWorkshops } from "@/data/programs";
 import { getAllBranches } from "@/data/branches";
 import {
   createProgramAction,
@@ -30,9 +30,9 @@ export default async function ProgramsPage() {
   // Auto-archive bootcamp/workshop programs whose end_date has passed
   await archiveExpiredBootcampWorkshops();
 
-  // Fetch all required data
-  const [programs, branchesData, categoriesData, instructorsData, vouchersResult] = await Promise.all([
-    getProgramsForTable(user.email),
+  // Fetch all required data — programs is now paginated (first 10 rows + total).
+  const [programsResult, branchesData, categoriesData, instructorsData, vouchersResult] = await Promise.all([
+    getProgramsForTablePaginated(user.email, { offset: 0, limit: 10 }),
     getAllBranches(),
     getAllCategories(),
     getInstructors(),
@@ -102,7 +102,8 @@ export default async function ProgramsPage() {
         />
 
         <ProgramTable
-          initialData={programs}
+          initialData={programsResult.rows}
+          totalCount={programsResult.total}
           branches={branches}
           hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           instructors={instructors}

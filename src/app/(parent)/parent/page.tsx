@@ -64,7 +64,7 @@ export default async function ParentPortalPage() {
         />
       )}
 
-      <ParentNav parentName={portalData.parent.name} />
+      <ParentNav parentName={portalData.parent.name} userId={user.id} />
 
       <main className="mx-auto max-w-5xl px-4 py-6 space-y-6">
         {/* Profile Header Banner */}
@@ -100,7 +100,7 @@ export default async function ParentPortalPage() {
         />
 
         {/* Top row: Children + Upcoming Classes (same height) */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:items-stretch" data-tour="parent-children">
           <div className="md:col-span-7 flex flex-col">
             <ChildrenSection students={portalData.children} />
           </div>
@@ -110,6 +110,7 @@ export default async function ParentPortalPage() {
         </div>
 
         {/* Calendar: full width */}
+        <div data-tour="parent-calendar">
         <ParentCalendar
           scheduledDates={scheduledDates}
           attendanceDates={attendanceDates}
@@ -118,6 +119,7 @@ export default async function ParentPortalPage() {
           upcomingClasses={upcomingClasses}
           upcomingSessions={upcomingSessions}
         />
+        </div>
 
         {/* Bottom row */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
@@ -125,7 +127,7 @@ export default async function ParentPortalPage() {
             <MissionActivity records={attendance} />
             <ProjectGallery photos={photos} />
           </div>
-          <div className="md:col-span-5 space-y-6">
+          <div className="md:col-span-5 space-y-6" data-tour="parent-payments">
             <PaymentList payments={payments} />
             <AttendanceList records={attendance} />
           </div>

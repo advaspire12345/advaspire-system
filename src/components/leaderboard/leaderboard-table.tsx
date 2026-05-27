@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import { ArrowLeftRight, Plus, Settings, Star } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,44 +82,18 @@ export function LeaderboardTable({
     companyTabs && companyTabs.length > 0 ? companyTabs[0].id : null,
   );
 
-  // Progressive loading: start with server-provided first batch, load rest in background
+  // Bounded progressive loading via the shared hook.
   const [allData, setAllData] = useState<LeaderboardEntry[]>(initialData);
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
-  const fetchedRef = useRef(false);
-
-  const fetchRemainingData = useCallback(async () => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
-    let offset = initialData.length;
-    const existingIds = new Set(initialData.map((r) => r.studentId));
-
-    while (offset < totalCount) {
-      try {
-        const res = await fetch(`/api/leaderboard/table?offset=${offset}&limit=10`);
-        if (!res.ok) break;
-        const result: { rows: LeaderboardEntry[] } = await res.json();
-        if (!result.rows || result.rows.length === 0) break;
-
-        const newRows = result.rows.filter((r) => !existingIds.has(r.studentId));
-        for (const r of result.rows) existingIds.add(r.studentId);
-
-        if (newRows.length > 0) {
-          setAllData((prev) => [...prev, ...newRows]);
-        }
-        offset += 10;
-      } catch {
-        break;
-      }
-    }
-    setIsLoadingMore(false);
-  }, [initialData, totalCount]);
-
-  useEffect(() => {
-    if (initialData.length < totalCount) {
-      fetchRemainingData();
-    }
-  }, [initialData.length, totalCount, fetchRemainingData]);
+  const { isLoadingMore } = useBoundedLoader<LeaderboardEntry>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/leaderboard/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: LeaderboardEntry) => r.studentId, []),
+    setData: setAllData,
+  });
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -174,7 +149,9 @@ export function LeaderboardTable({
   }, [participants, currentUserBranchId, showBranchFilter]);
 
   // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -549,7 +526,7 @@ export function LeaderboardTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />

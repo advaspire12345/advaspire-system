@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import { Plus, Settings } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -86,44 +87,19 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Progressive loading: start with server-provided first batch, load rest in background
+  // Bounded progressive loading via the shared hook. Loads first 100 in
+  // 10-row batches, pauses, expands on page change, lifts cap on search.
   const [allData, setAllData] = useState<TransactionDisplayRow[]>(initialData);
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
-  const fetchedRef = useRef(false);
-
-  const fetchRemainingData = useCallback(async () => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
-    let offset = initialData.length;
-    const existingIds = new Set(initialData.map((r) => r.id));
-
-    while (offset < totalCount) {
-      try {
-        const res = await fetch(`/api/transactions/table?offset=${offset}&limit=10`);
-        if (!res.ok) break;
-        const result: { rows: TransactionDisplayRow[] } = await res.json();
-        if (!result.rows || result.rows.length === 0) break;
-
-        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
-        for (const r of result.rows) existingIds.add(r.id);
-
-        if (newRows.length > 0) {
-          setAllData((prev) => [...prev, ...newRows]);
-        }
-        offset += 10;
-      } catch {
-        break;
-      }
-    }
-    setIsLoadingMore(false);
-  }, [initialData, totalCount]);
-
-  useEffect(() => {
-    if (initialData.length < totalCount) {
-      fetchRemainingData();
-    }
-  }, [initialData.length, totalCount, fetchRemainingData]);
+  const { isLoadingMore, resetTo } = useBoundedLoader<TransactionDisplayRow>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/transactions/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: TransactionDisplayRow) => r.id, []),
+    setData: setAllData,
+  });
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -160,7 +136,9 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
     return participants;
   }, [participants, currentUserBranchId, filterByBranch]);
 
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -171,39 +149,22 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
     setCurrentPage(1);
   };
 
-  // Re-fetch first page immediately, then load rest in background
+  // Re-fetch the first page after a new transaction. Resets the loader's
+  // tracking refs via the hook's resetTo so the next page-driven effect
+  // run tops it back up to the initial load cap.
   const refetchData = useCallback(async () => {
     try {
       const res = await fetch(`/api/transactions/table?offset=0&limit=10`);
       if (!res.ok) return;
       const result: { rows: TransactionDisplayRow[]; totalCount: number } = await res.json();
-      setAllData(result.rows ?? []);
+      const rows = result.rows ?? [];
+      setAllData(rows);
       setCurrentPage(1);
-
-      // Load remaining in background (non-blocking)
-      if ((result.rows?.length ?? 0) < (result.totalCount ?? 0)) {
-        setIsLoadingMore(true);
-        const loadRemaining = async () => {
-          let offset = result.rows.length;
-          const existingIds = new Set(result.rows.map((r) => r.id));
-          while (offset < result.totalCount) {
-            const batchRes = await fetch(`/api/transactions/table?offset=${offset}&limit=10`);
-            if (!batchRes.ok) break;
-            const batch: { rows: TransactionDisplayRow[] } = await batchRes.json();
-            if (!batch.rows?.length) break;
-            const newRows = batch.rows.filter((r) => !existingIds.has(r.id));
-            for (const r of batch.rows) existingIds.add(r.id);
-            if (newRows.length > 0) setAllData((prev) => [...prev, ...newRows]);
-            offset += 10;
-          }
-          setIsLoadingMore(false);
-        };
-        loadRemaining();
-      }
+      resetTo(rows);
     } catch {
       // ignore
     }
-  }, []);
+  }, [resetTo]);
 
   // Handle transfer submit
   const handleTransferSubmit = async (formData: TransferFormData) => {
@@ -440,7 +401,7 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
-          totalResults={filteredData.length}
+          totalResults={searchQuery.trim() ? filteredData.length : totalCount}
           itemsPerPage={ITEMS_PER_PAGE}
           onPageChange={setCurrentPage}
         />

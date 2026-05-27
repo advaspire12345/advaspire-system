@@ -37,6 +37,11 @@ export async function POST(request: NextRequest) {
     let skipped = 0;
     const errors: string[] = [];
 
+    // Track certificate numbers seen in THIS upload (case-insensitive). Any
+    // duplicate within the file is rejected even before hitting the DB —
+    // we don't want two different exam rows fighting over the same cert no.
+    const certsInFile = new Map<string, number>(); // upper-cased cert → row index
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] as unknown as ExamRow;
       const rowIndex = i + 1;
@@ -115,6 +120,43 @@ export async function POST(request: NextRequest) {
             throw new Error(`examiner_email "${row.examiner_email}" not found`);
           }
           examinerId = examiner.id;
+        }
+
+        // Certificate number rules:
+        //   1. Only `pass` rows can have a cert number. fail / absent /
+        //      scheduled / in_progress / eligible should NOT carry one —
+        //      it implies the student passed.
+        //   2. Must be unique across the existing examinations table.
+        //   3. Must be unique within THIS upload (no two rows competing).
+        // Comparison is case-insensitive (CERT-2026-001 == cert-2026-001).
+        const certRaw = row.certificate_number?.trim();
+        if (certRaw) {
+          const certKey = certRaw.toUpperCase();
+          if (status !== "pass") {
+            throw new Error(
+              `certificate_number "${certRaw}" is only allowed when status=pass (this row's status=${status}). Leave blank for fail/absent/scheduled rows.`,
+            );
+          }
+          const dupRowInFile = certsInFile.get(certKey);
+          if (dupRowInFile !== undefined) {
+            throw new Error(
+              `certificate_number "${certRaw}" is also used in row ${dupRowInFile} of this file. Each cert number must be unique.`,
+            );
+          }
+          const { data: certExists } = await supabaseAdmin
+            .from("examinations")
+            .select("id, student_id, students!inner(student_id, name)")
+            .ilike("certificate_number", certRaw)
+            .is("deleted_at", null)
+            .limit(1)
+            .maybeSingle();
+          if (certExists) {
+            const otherStu = (certExists as unknown as { students: { student_id: string; name: string } }).students;
+            throw new Error(
+              `certificate_number "${certRaw}" is already taken by ${otherStu.student_id} (${otherStu.name}). Pick a different unused certificate number.`,
+            );
+          }
+          certsInFile.set(certKey, rowIndex);
         }
 
         // Dedup — same (student, exam_name, exam_level, exam_date,

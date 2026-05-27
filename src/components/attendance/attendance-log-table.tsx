@@ -114,67 +114,83 @@ export function AttendanceLogTable({
   const [activeStartDate, setActiveStartDate] = useState<string | undefined>(initialStartDate);
   const [activeEndDate, setActiveEndDate] = useState<string | undefined>(initialEndDate);
 
-  // Progressive loading: load remaining data in background
+  // Bounded progressive loading. The attendance-log API returns enrollment
+  // rows + trial rows separately (trials only on offset=0), so we can't use
+  // the generic useBoundedLoader hook — offset accounting must advance by
+  // enrollmentRows.length, not by the merged batch size. Same AbortController
+  // pattern as the hook though: each effect run cancels the previous, no
+  // shared fetchingRef means no race-condition stall.
+  const INITIAL_LOAD_CAP = 100;
   const [loadTotal, setLoadTotal] = useState(totalCount);
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
-  const fetchedRef = useRef(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadedUpToRef = useRef(initialData.filter((r) => r.type === 'enrollment').length);
+  const seenIdsRef = useRef(new Set(initialData.map((r) => r.id)));
   const abortRef = useRef<AbortController | null>(null);
 
-  const fetchAllData = useCallback(async (
-    startOffset: number,
-    existingRows: AttendanceLogRow[],
-    total: number,
-    filterStartDate?: string,
-    filterEndDate?: string,
-  ) => {
-    let offset = startOffset;
-    const existingIds = new Set(existingRows.map((r) => r.id));
+  const target = (() => {
+    if (searchQuery.trim().length > 0) return loadTotal;
+    const pageRowCount = currentPage * ITEMS_PER_PAGE;
+    const blockEnd = Math.max(INITIAL_LOAD_CAP, Math.ceil(pageRowCount / INITIAL_LOAD_CAP) * INITIAL_LOAD_CAP);
+    return Math.min(blockEnd, loadTotal);
+  })();
 
-    const params = new URLSearchParams();
-    if (filterStartDate) params.set("startDate", filterStartDate);
-    if (filterEndDate) params.set("endDate", filterEndDate);
-
-    // Create abort controller for this fetch sequence
+  useEffect(() => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    while (offset < total) {
-      if (controller.signal.aborted) return;
-      try {
-        const dateParams = params.toString();
-        const res = await fetch(
-          `/api/attendance-log/table?offset=${offset}&limit=10${dateParams ? `&${dateParams}` : ""}`,
-          { signal: controller.signal }
-        );
-        if (!res.ok) break;
-        const result: { rows: AttendanceLogRow[] } = await res.json();
-        if (!result.rows || result.rows.length === 0) break;
-
-        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
-        for (const r of result.rows) existingIds.add(r.id);
-
-        if (newRows.length > 0) {
-          setData((prev) => [...prev, ...newRows]);
-        }
-        offset += 10;
-      } catch {
-        break;
-      }
-    }
-    if (!controller.signal.aborted) {
+    if (loadedUpToRef.current >= target) {
       setIsLoadingMore(false);
+      return;
     }
-  }, []);
 
-  // Initial progressive load on mount
-  useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    if (initialData.length < totalCount) {
-      fetchAllData(initialData.length, initialData, totalCount, initialStartDate, initialEndDate);
-    }
-  }, [initialData, totalCount, initialStartDate, initialEndDate, fetchAllData]);
+    setIsLoadingMore(true);
+
+    (async () => {
+      const params = new URLSearchParams();
+      if (activeStartDate) params.set("startDate", activeStartDate);
+      if (activeEndDate) params.set("endDate", activeEndDate);
+
+      try {
+        while (loadedUpToRef.current < target && !controller.signal.aborted) {
+          const offset = loadedUpToRef.current;
+          const dateParams = params.toString();
+          const res = await fetch(
+            `/api/attendance-log/table?offset=${offset}&limit=10${dateParams ? `&${dateParams}` : ""}`,
+            { signal: controller.signal }
+          );
+          if (!res.ok) break;
+          const result: {
+            rows: AttendanceLogRow[];
+            enrollmentRows?: AttendanceLogRow[];
+            trialRows?: AttendanceLogRow[];
+          } = await res.json();
+          const enrollmentRows = result.enrollmentRows ?? result.rows ?? [];
+          const trialRows = result.trialRows ?? [];
+          const allFromBatch = [...enrollmentRows, ...trialRows];
+          if (enrollmentRows.length === 0) {
+            loadedUpToRef.current = target;
+            break;
+          }
+          const newRows = allFromBatch.filter((r) => !seenIdsRef.current.has(r.id));
+          for (const r of allFromBatch) seenIdsRef.current.add(r.id);
+          if (!controller.signal.aborted && newRows.length > 0) {
+            setData((prev) => [...prev, ...newRows]);
+          }
+          loadedUpToRef.current = offset + enrollmentRows.length;
+          if (enrollmentRows.length < 10) break;
+        }
+      } catch (err) {
+        if ((err as Error)?.name !== "AbortError") {
+          console.error("[attendance-log loader] fetch failed:", err);
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingMore(false);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [target, activeStartDate, activeEndDate]);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -211,7 +227,9 @@ export function AttendanceLogTable({
   }, [data, searchQuery, statusFilter]);
 
   // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(loadTotal / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -228,15 +246,18 @@ export function AttendanceLogTable({
     setCurrentPage(1);
   };
 
-  // Re-fetch data from API with given date filters (no page refresh)
+  // Re-fetch data from API with given date filters (no page refresh).
+  // Resets bounded loader and loads the first 10; the bounded effect tops
+  // it up to INITIAL_LOAD_CAP automatically because activeStart/End change.
   const refetchWithDates = useCallback(async (filterStart?: string, filterEnd?: string) => {
-    // Abort any in-progress fetch
     abortRef.current?.abort();
     setData([]);
     setCurrentPage(1);
     setIsLoadingMore(true);
     setActiveStartDate(filterStart);
     setActiveEndDate(filterEnd);
+    loadedUpToRef.current = 0;
+    seenIdsRef.current = new Set();
 
     const params = new URLSearchParams();
     if (filterStart) params.set("startDate", filterStart);
@@ -246,20 +267,25 @@ export function AttendanceLogTable({
     try {
       const res = await fetch(`/api/attendance-log/table?offset=0&limit=10${dateParams ? `&${dateParams}` : ""}`);
       if (!res.ok) { setIsLoadingMore(false); return; }
-      const result: { rows: AttendanceLogRow[]; totalCount: number } = await res.json();
-      const rows = result.rows ?? [];
+      const result: {
+        rows: AttendanceLogRow[];
+        enrollmentRows?: AttendanceLogRow[];
+        trialRows?: AttendanceLogRow[];
+        totalCount: number;
+      } = await res.json();
+      const enrollmentRows = result.enrollmentRows ?? result.rows ?? [];
+      const trialRows = result.trialRows ?? [];
+      const merged = [...enrollmentRows, ...trialRows];
       const newTotal = result.totalCount ?? 0;
-      setData(rows);
+      setData(merged);
+      for (const r of merged) seenIdsRef.current.add(r.id);
+      loadedUpToRef.current = enrollmentRows.length;
       setLoadTotal(newTotal);
-      if (rows.length < newTotal) {
-        fetchAllData(rows.length, rows, newTotal, filterStart, filterEnd);
-      } else {
-        setIsLoadingMore(false);
-      }
+      setIsLoadingMore(false);
     } catch {
       setIsLoadingMore(false);
     }
-  }, [fetchAllData]);
+  }, []);
 
   // Apply date filter
   const applyDateFilter = useCallback(() => {
@@ -810,7 +836,7 @@ export function AttendanceLogTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : loadTotal}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />
