@@ -634,7 +634,13 @@ export async function maybeCreateLevelUpExam(
 
   const { count: attendedCount } = await attendanceQuery;
 
-  if ((attendedCount ?? 0) < sessionsRequired) return null;
+  // Trigger 2 sessions early so a student imported with 46–47 sessions (or a
+  // live student about to cross 48) gets the exam created without waiting for
+  // the exact threshold to be hit. The exam date placement (next class day)
+  // gives the instructor a window to actually prep them.
+  const EARLY_TRIGGER_BUFFER = 2;
+  const triggerThreshold = Math.max(1, sessionsRequired - EARLY_TRIGGER_BUFFER);
+  if ((attendedCount ?? 0) < triggerThreshold) return null;
 
   // Skip if an active exam for this level already exists
   const { count: existingExamCount } = await supabaseAdmin
@@ -687,13 +693,34 @@ function computeNextScheduledDate(
   const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
   let targetDow: number | null = null;
 
+  // day_of_week may be stored as a bare string ("monday") OR as a JSON array
+  // ('["monday"]') depending on which import path created the enrollment.
+  // Parse defensively.
   if (dayOfWeek) {
-    const idx = dayNames.indexOf(dayOfWeek.toLowerCase());
-    if (idx >= 0) targetDow = idx;
+    let raw: string | null = dayOfWeek.trim();
+    if (raw.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(raw);
+        raw = Array.isArray(parsed) && parsed.length > 0 ? String(parsed[0]) : null;
+      } catch { /* fall through with original */ }
+    }
+    if (raw) {
+      const idx = dayNames.indexOf(raw.toLowerCase());
+      if (idx >= 0) targetDow = idx;
+    }
   } else if (Array.isArray(schedule) && schedule.length > 0) {
     const first = schedule[0] as { day?: string };
     const idx = first.day ? dayNames.indexOf(first.day.toLowerCase()) : -1;
     if (idx >= 0) targetDow = idx;
+  } else if (typeof schedule === "string") {
+    try {
+      const parsed = JSON.parse(schedule);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const first = parsed[0] as { day?: string };
+        const idx = first?.day ? dayNames.indexOf(first.day.toLowerCase()) : -1;
+        if (idx >= 0) targetDow = idx;
+      }
+    } catch { /* ignore */ }
   }
 
   const today = new Date();
@@ -915,4 +942,155 @@ export async function getExaminers(userEmail: string): Promise<ExaminerOption[]>
   }
 
   return data ?? [];
+}
+
+/**
+ * Post-import reconciliation for one enrollment. Run after exam rows are
+ * imported. Brings the enrollment's `level` and any missing reattempt rows
+ * into a consistent state derived from the exam history:
+ *
+ *   - level := max(current level, highest_passed_level + 1, capped at number_of_levels)
+ *   - For each fail row at level L where no follow-up attempt (scheduled,
+ *     in_progress, or pass) exists at the same level → insert a scheduled
+ *     reattempt 8 weeks later on the enrollment's schedule day.
+ *   - Then runs maybeCreateLevelUpExam to fire the eligible exam for the
+ *     current level if the attendance threshold (sessions − 2) is crossed.
+ *   - Does NOT regenerate certificate numbers — imported pass rows keep
+ *     whatever cert they came in with.
+ */
+export async function reconcileImportedExams(enrollmentId: string): Promise<void> {
+  const { data: enrollment } = await supabaseAdmin
+    .from("enrollments")
+    .select(`
+      id,
+      student_id,
+      level,
+      day_of_week,
+      schedule,
+      course:courses(number_of_levels)
+    `)
+    .eq("id", enrollmentId)
+    .maybeSingle();
+  if (!enrollment) return;
+  const course = enrollment.course as unknown as { number_of_levels: number | null } | null;
+  const maxLevels = course?.number_of_levels ?? 0;
+
+  // Resolve schedule day for reattempt placement
+  let scheduleDay: string | null = enrollment.day_of_week ?? null;
+  if (!scheduleDay && typeof enrollment.schedule === "string") {
+    try {
+      const parsed = JSON.parse(enrollment.schedule);
+      if (Array.isArray(parsed) && parsed.length > 0) scheduleDay = parsed[0]?.day ?? null;
+    } catch { /* ignore */ }
+  } else if (!scheduleDay && Array.isArray(enrollment.schedule) && enrollment.schedule.length > 0) {
+    const first = enrollment.schedule[0] as { day?: string };
+    scheduleDay = first?.day ?? null;
+  }
+
+  const { data: exams } = await supabaseAdmin
+    .from("examinations")
+    .select("id, exam_name, exam_level, exam_date, status, reattempt_count, examiner_id")
+    .eq("enrollment_id", enrollmentId)
+    .is("deleted_at", null)
+    .order("exam_date", { ascending: true });
+
+  const allExams = (exams ?? []) as Array<{
+    id: string;
+    exam_name: string;
+    exam_level: number;
+    exam_date: string | null;
+    status: string;
+    reattempt_count: number | null;
+    examiner_id: string | null;
+  }>;
+
+  // 1. Level reconciliation — highest passed level + 1, capped at maxLevels.
+  const passedLevels = allExams.filter((e) => e.status === "pass").map((e) => e.exam_level);
+  const highestPassed = passedLevels.length > 0 ? Math.max(...passedLevels) : 0;
+  let expectedLevel = highestPassed + 1;
+  if (maxLevels > 0) expectedLevel = Math.min(expectedLevel, maxLevels);
+  const currentLevel = enrollment.level ?? 1;
+  if (expectedLevel > currentLevel) {
+    await supabaseAdmin
+      .from("enrollments")
+      .update({ level: expectedLevel })
+      .eq("id", enrollmentId);
+  }
+
+  // 2. Reattempt creation — for each fail with no follow-up at same level.
+  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const snapToScheduleDay = (date: Date): Date => {
+    if (!scheduleDay) return date;
+    const idx = dayNames.indexOf(scheduleDay.toLowerCase());
+    if (idx < 0) return date;
+    const d = new Date(date);
+    let daysAhead = idx - d.getDay();
+    if (daysAhead < 0) daysAhead += 7;
+    d.setDate(d.getDate() + daysAhead);
+    return d;
+  };
+
+  for (const fail of allExams.filter((e) => e.status === "fail")) {
+    const hasFollowUp = allExams.some(
+      (e) =>
+        e.id !== fail.id &&
+        e.exam_level === fail.exam_level &&
+        ["scheduled", "in_progress", "pass"].includes(e.status) &&
+        (e.exam_date ?? "") >= (fail.exam_date ?? ""),
+    );
+    if (hasFollowUp) continue;
+    if (!fail.exam_date) continue;
+
+    const base = new Date(fail.exam_date);
+    base.setDate(base.getDate() + 8 * 7);
+    const target = snapToScheduleDay(base);
+    const rescheduleDate = target.toISOString().split("T")[0];
+
+    const { error } = await supabaseAdmin.from("examinations").insert({
+      student_id: enrollment.student_id,
+      enrollment_id: enrollmentId,
+      exam_name: fail.exam_name,
+      exam_level: fail.exam_level,
+      exam_date: rescheduleDate,
+      status: "scheduled",
+      reattempt_count: (fail.reattempt_count ?? 0) + 1,
+      examiner_id: fail.examiner_id,
+    });
+    if (error) {
+      console.warn(`[reconcileImportedExams] reattempt insert failed for enrollment ${enrollmentId}:`, error);
+    }
+  }
+
+  // 2b. Cleanup — soft-delete stale eligible/scheduled exams at levels the
+  // student has already passed. This handles the case where attendance was
+  // imported BEFORE examinations: the attendance import's level-up scan
+  // creates an eligible exam at Level 1, then exams import reveals Level 1
+  // is already passed.
+  if (highestPassed > 0) {
+    await supabaseAdmin
+      .from("examinations")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("enrollment_id", enrollmentId)
+      .in("status", ["eligible", "scheduled"])
+      .lte("exam_level", highestPassed)
+      .is("deleted_at", null);
+  }
+
+  // 3. Bring students.level up to the max across all of this student's enrollments.
+  if (expectedLevel > currentLevel && enrollment.student_id) {
+    const { data: allEnr } = await supabaseAdmin
+      .from("enrollments")
+      .select("level")
+      .eq("student_id", enrollment.student_id)
+      .is("deleted_at", null);
+    const maxStudentLevel = Math.max(1, ...((allEnr ?? []).map((e) => e.level ?? 1)));
+    await supabaseAdmin
+      .from("students")
+      .update({ level: maxStudentLevel })
+      .eq("id", enrollment.student_id);
+  }
+
+  // 4. Fire the eligible-exam auto-create if attendance threshold is crossed
+  // for the (possibly bumped) current level.
+  await maybeCreateLevelUpExam(enrollmentId);
 }

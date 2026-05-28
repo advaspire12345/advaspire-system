@@ -1130,6 +1130,7 @@ export const getBranchOverviewData = unstable_cache(
         { data: allEnrollments },
         { data: pendingPaymentsData },
         { data: receivedPaymentsData },
+        { data: trialsData },
       ] = await Promise.all([
         // All students for these branches
         supabaseAdmin
@@ -1155,6 +1156,13 @@ export const getBranchOverviewData = unstable_cache(
           .in('students.branch_id', branchIds)
           .eq('status', 'paid')
           .gte('created_at', lastMonth),
+        // Trials per branch — used to compute the *real* trial conversion
+        // rate: trials that became real students ÷ total trials.
+        supabaseAdmin
+          .from('trials')
+          .select('branch_id, status')
+          .in('branch_id', branchIds)
+          .is('deleted_at', null),
       ]);
 
       // Build lookup maps for fast aggregation
@@ -1183,6 +1191,16 @@ export const getBranchOverviewData = unstable_cache(
         if (branchId) {
           receivedPaymentsByBranch[branchId] = (receivedPaymentsByBranch[branchId] ?? 0) + Number(p.amount);
         }
+      }
+
+      // Per-branch trial tallies for the real trial-conversion-rate metric.
+      const trialTotalsByBranch: Record<string, { total: number; converted: number }> = {};
+      for (const t of trialsData ?? []) {
+        const bid = (t as { branch_id: string | null }).branch_id;
+        if (!bid) continue;
+        const entry = trialTotalsByBranch[bid] ?? (trialTotalsByBranch[bid] = { total: 0, converted: 0 });
+        entry.total += 1;
+        if ((t as { status: string }).status === 'converted') entry.converted += 1;
       }
 
       // Aggregate per branch (fast, in-memory)
@@ -1218,9 +1236,15 @@ export const getBranchOverviewData = unstable_cache(
         const inactiveStudents = totalStudents - activeStudentCount;
         const activeRate = totalStudents > 0 ? activeStudentCount / totalStudents : 0;
 
-        // Trial conversion rate
-        const trialBase = activeEnrollmentsCount + pendingEnrollmentsCount;
-        const conversionRate = trialBase > 0 ? activeEnrollmentsCount / trialBase : 0;
+        // Trial conversion rate — converted trials ÷ total trials for this
+        // branch. Previously this was active/(active+pending) enrollments,
+        // which is enrollment-activation rate and has nothing to do with
+        // trials. If a branch has 0 trials we return 0 (column will read
+        // 0.0%) rather than null/undefined to keep the type narrow.
+        const trialTallies = trialTotalsByBranch[branch.id];
+        const conversionRate = trialTallies && trialTallies.total > 0
+          ? trialTallies.converted / trialTallies.total
+          : 0;
 
         const avgEnroll = Math.round(enrollmentsLastYearCount / 12);
 

@@ -42,6 +42,11 @@ export async function POST(request: NextRequest) {
     // we don't want two different exam rows fighting over the same cert no.
     const certsInFile = new Map<string, number>(); // upper-cased cert → row index
 
+    // Enrollments touched by this import — after all rows are inserted we
+    // reconcile each enrollment's `level` against the imported pass history
+    // and create reattempt rows for fails that don't have a follow-up yet.
+    const touchedEnrollmentIds = new Set<string>();
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] as unknown as ExamRow;
       const rowIndex = i + 1;
@@ -196,6 +201,7 @@ export async function POST(request: NextRequest) {
           throw new Error(`Insert failed: ${insertError.message}`);
         }
 
+        if (enrollment?.id) touchedEnrollmentIds.add(enrollment.id);
         success++;
       } catch (err) {
         failed++;
@@ -203,6 +209,21 @@ export async function POST(request: NextRequest) {
         const sid = row.student_id?.trim();
         const label = sid ? `Row ${rowIndex} (${sid})` : `Row ${rowIndex}`;
         errors.push(`${label}: ${message}`);
+      }
+    }
+
+    // Post-import reconciliation: per touched enrollment, bring level into
+    // sync with imported pass history, create scheduled reattempts for any
+    // fails without follow-ups, and fire the next eligible exam if the
+    // attendance threshold (sessions − 2) is already crossed.
+    if (touchedEnrollmentIds.size > 0) {
+      const { reconcileImportedExams } = await import("@/data/examinations");
+      for (const enrollmentId of touchedEnrollmentIds) {
+        try {
+          await reconcileImportedExams(enrollmentId);
+        } catch (err) {
+          console.warn(`[import examinations] reconcile failed for enrollment ${enrollmentId}:`, err);
+        }
       }
     }
 

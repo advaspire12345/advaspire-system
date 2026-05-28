@@ -1,0 +1,77 @@
+name: examination-pass-bumps-level
+description: |
+  Scenario B — passing a Level 1 exam bumps the enrollment to Level 2 and
+  refreshes the student-level cache.
+
+  Setup mirrors the tolerance scenario (sessions_to_level_up=2) so a single
+  mark_present is enough to trigger the auto-create. Then company_admin
+  edits the eligible exam → Status="Pass". handlePassStatus should:
+    - bump enrollment.level from 1 → 2
+    - update students.level to max across enrollments
+    - generate a certificate number
+
+fixtures:
+  branch:
+    name: "Sim Pass Branch"
+    code: "SPB1"
+    parent: "ADS"
+  course:
+    name: "PassCourse"
+    levels: 4
+    sessions_to_level_up: 2
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Bryan"
+      parent_name: "Pass Parent"
+      parent_email: "passp@sim.local"
+      parent_phone: "0123450097"
+      course: "PassCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Bryan"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Bryan"
+    observers: auto
+
+  # Live attendance → maybeCreateLevelUpExam fires, exam row inserted as eligible
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Bryan"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # Company admin marks the auto-created exam as PASS → handlePassStatus runs
+  - actor: ca
+    action: mark_exam_decision
+    with:
+      student: "Bryan"
+      decision: "pass"
+      mark: 85
+    observers: auto
+
+teardown: auto

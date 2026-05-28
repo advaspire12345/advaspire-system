@@ -43,6 +43,11 @@ export class Browser {
       try {
         run(`npx --yes agent-browser auth login ${this.profile} --session ${this.session}`);
         this.loggedIn = true;
+        // Mute the help-tour overlay so it doesn't block automated UI flows.
+        // The hook reads this flag and short-circuits before pulsing/auto-opening.
+        try {
+          this.ab(`eval "localStorage.setItem('lms-onboarding-disabled','true')"`);
+        } catch { /* non-fatal */ }
         return;
       } catch (e) {
         lastErr = e;
