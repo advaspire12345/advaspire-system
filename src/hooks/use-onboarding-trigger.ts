@@ -6,8 +6,13 @@ const STORAGE_PREFIX = "lms-onboarding-seen-";
 const MAX_AUTO_OPENS = 2; // first + second login
 const PULSE_BEFORE_OPEN_MS = 1500;
 
+// Global kill-switch — set by the lms-simulator before each automation run
+// (and available to anyone debugging) so the tour never blocks scripted UI.
+const DISABLE_FLAG = "lms-onboarding-disabled";
+
 function readCount(userId: string): number {
   if (typeof window === "undefined") return MAX_AUTO_OPENS;
+  if (window.localStorage.getItem(DISABLE_FLAG) === "true") return MAX_AUTO_OPENS;
   const raw = window.localStorage.getItem(STORAGE_PREFIX + userId);
   const n = raw ? parseInt(raw, 10) : 0;
   return Number.isFinite(n) && n >= 0 ? n : 0;

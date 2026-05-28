@@ -20,6 +20,7 @@ import stampSessionsRemaining from "./stamp_sessions_remaining.mjs";
 import addPaymentForStudent from "./add_payment_for_student.mjs";
 import takeExtraAttendance from "./take_extra_attendance.mjs";
 import importStudentsCsv from "./import_students_csv.mjs";
+import markExamDecision from "./mark_exam_decision.mjs";
 
 export const ACTIONS = {
   [addStudent.id]: addStudent,
@@ -41,6 +42,7 @@ export const ACTIONS = {
   [addPaymentForStudent.id]: addPaymentForStudent,
   [takeExtraAttendance.id]: takeExtraAttendance,
   [importStudentsCsv.id]: importStudentsCsv,
+  [markExamDecision.id]: markExamDecision,
 };
 
 export function listActions() {

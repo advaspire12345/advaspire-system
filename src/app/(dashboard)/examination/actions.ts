@@ -277,8 +277,10 @@ async function handlePassStatus(
 }
 
 /**
- * Handle fail status — auto-reschedule a follow-up exam +2 months out,
- * status='scheduled', incrementing reattempt_count from the failed row.
+ * Handle fail status — auto-schedule a follow-up exam 8 weekly class
+ * occurrences after the failed date, on the enrollment's schedule day so
+ * the reattempt lands on a real lesson. status='scheduled', reattempt_count
+ * incremented from the failed row.
  */
 async function handleFailStatus(
   examId: string,
@@ -287,9 +289,52 @@ async function handleFailStatus(
   const failedExam = await getExaminationById(examId);
   if (!failedExam) return;
 
+  // Pull the enrollment's schedule day so we can land the reattempt on the
+  // student's actual class day instead of an arbitrary weekday.
+  let scheduleDay: string | null = null;
+  if (failedExam.enrollment_id) {
+    const { data: enr } = await supabaseAdmin
+      .from("enrollments")
+      .select("day_of_week, schedule")
+      .eq("id", failedExam.enrollment_id)
+      .single();
+    if (enr) {
+      scheduleDay = enr.day_of_week ?? null;
+      // day_of_week is stored as either "monday" or as JSON '["monday"]'
+      // depending on the import path. Unwrap if it's the JSON shape.
+      if (scheduleDay && scheduleDay.trim().startsWith("[")) {
+        try {
+          const parsed = JSON.parse(scheduleDay);
+          scheduleDay = Array.isArray(parsed) && parsed.length > 0 ? String(parsed[0]) : null;
+        } catch { /* fall through with original */ }
+      }
+      if (!scheduleDay && Array.isArray(enr.schedule) && enr.schedule.length > 0) {
+        const first = enr.schedule[0] as { day?: string };
+        scheduleDay = first?.day ?? null;
+      } else if (!scheduleDay && typeof enr.schedule === "string") {
+        try {
+          const parsed = JSON.parse(enr.schedule);
+          if (Array.isArray(parsed) && parsed.length > 0) scheduleDay = parsed[0]?.day ?? null;
+        } catch { /* ignore */ }
+      }
+    }
+  }
+
+  const REATTEMPT_SESSIONS = 8; // weeks of preparation between fail and reattempt
   const failedDate = failedExam.exam_date ? new Date(failedExam.exam_date) : new Date();
+  // Start by adding 8 weeks, then snap forward to the enrollment's schedule day.
   const reschedule = new Date(failedDate);
-  reschedule.setMonth(reschedule.getMonth() + 2);
+  reschedule.setDate(reschedule.getDate() + REATTEMPT_SESSIONS * 7);
+  if (scheduleDay) {
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const targetIdx = dayNames.indexOf(scheduleDay.toLowerCase());
+    if (targetIdx >= 0) {
+      const currentIdx = reschedule.getDay();
+      let daysAhead = targetIdx - currentIdx;
+      if (daysAhead < 0) daysAhead += 7;
+      reschedule.setDate(reschedule.getDate() + daysAhead);
+    }
+  }
   const rescheduleDate = reschedule.toISOString().split("T")[0];
 
   // Insert a fresh exam row representing the next attempt

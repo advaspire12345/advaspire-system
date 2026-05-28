@@ -79,5 +79,18 @@ export async function snapshotForRun(runId) {
     const { data } = await supabase.from(table).select("*").ilike("name", namePrefix);
     out[table] = data ?? [];
   }
+  // Examinations don't have a `name` column to filter on — join via the
+  // student. Captures whatever rows got auto-created by maybeCreateLevelUpExam
+  // during the run so the report can show drift between expectation and DB.
+  const simStudentIds = (out.students ?? []).map((s) => s.id);
+  if (simStudentIds.length > 0) {
+    const { data: exams } = await supabase
+      .from("examinations")
+      .select("*")
+      .in("student_id", simStudentIds);
+    out.examinations = exams ?? [];
+  } else {
+    out.examinations = [];
+  }
   return out;
 }
