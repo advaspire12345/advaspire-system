@@ -1,0 +1,86 @@
+name: good-payer-voucher-missed-window
+description: |
+  Negative test for Phase A3 — when the parent's renewal payment lands
+  AFTER `good_payer_voucher_window_days`, no voucher should be granted.
+  The renewal still credits sessions normally; only the reward is gated.
+
+fixtures:
+  branch:
+    name: "LatePay Branch"
+    code: "LPB"
+    parent: "ADS"
+  course:
+    name: "LateCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "LateLewis"
+      parent_name: "Late Parent"
+      parent_email: "pLL@sim.local"
+      parent_phone: "0123450650"
+      course: "LateCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "LateLewis" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "LateLewis" }
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "LateLewis"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # Backdate the first attendance 40 days ago. Window is 35 → too late.
+  - actor: aa
+    action: stamp_attendance_date
+    with:
+      student: "LateLewis"
+      date: "TODAY-40"
+      n_back: 1
+    observers: auto
+
+  - actor: ca
+    action: add_payment_for_student
+    with:
+      student: "LateLewis"
+      course: "LateCourse"
+      package: "4 Sessions"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "LateLewis" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "LateLewis" }
+    observers: auto
+
+teardown: manual

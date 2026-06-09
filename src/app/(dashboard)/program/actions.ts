@@ -9,6 +9,7 @@ import {
   type CreateProgramPayload,
 } from "@/data/programs";
 import { authorizeAction } from "@/data/permissions";
+import { getUser } from "@/lib/supabase/server";
 import { syncEventFromProgram, softDeleteEventForProgram } from "@/data/events";
 import type { ProgramFull } from "@/db/schema";
 
@@ -65,7 +66,7 @@ export interface ProgramFormPayload {
     duration: number;
     description: string | null;
     is_default: boolean;
-    expiry_months: number | null;
+    expiry_weeks: number | null;
     completion_months: number | null;
     voucher_id: string | null;
   }[];
@@ -178,7 +179,10 @@ export async function createCategoryAction(
   try {
     await authorizeAction('programs', 'can_create');
 
-    const category = await createCategory({ name });
+    const user = await getUser();
+    if (!user?.email) return { success: false, error: "Unauthorized" };
+
+    const category = await createCategory({ name }, user.email);
 
     if (!category) {
       return { success: false, error: "Failed to create category" };
@@ -193,6 +197,59 @@ export async function createCategoryAction(
       error: error instanceof Error ? error.message : "An unexpected error occurred",
     };
   }
+}
+
+export async function updateCategoryAction(
+  id: string,
+  name: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await authorizeAction("programs", "can_edit");
+    const { updateCategory } = await import("@/data/programs");
+    const result = await updateCategory(id, { name });
+    if (!result) return { success: false, error: "Failed to update category" };
+    revalidatePath("/program");
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
+export async function deleteCategoryAction(
+  id: string,
+): Promise<{ success: boolean; inUse?: boolean; error?: string }> {
+  try {
+    await authorizeAction("programs", "can_delete");
+    const { deleteCategory } = await import("@/data/programs");
+    const result = await deleteCategory(id);
+    if (!result.ok) {
+      if (result.inUse) {
+        return { success: false, inUse: true, error: "Category is in use by at least one program" };
+      }
+      return { success: false, error: result.error ?? "Failed to delete category" };
+    }
+    revalidatePath("/program");
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
+export async function getCategoryUsageCountsAction(
+  ids: string[],
+): Promise<Record<string, number>> {
+  const { countProgramsUsingCategory } = await import("@/data/programs");
+  const out: Record<string, number> = {};
+  for (const id of ids) {
+    out[id] = await countProgramsUsingCategory(id);
+  }
+  return out;
 }
 
 export async function getProgramByIdAction(

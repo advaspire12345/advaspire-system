@@ -54,11 +54,14 @@ export function useOnboardingTrigger(userId: string | null): {
 
     didFireRef.current = true;
     setShouldPulse(true);
-    const t = setTimeout(() => {
+    // Intentionally no cleanup. In React StrictMode (and during fast-refresh)
+    // the effect's cleanup runs synchronously between the double-mount, which
+    // would clear this timer before it fires — leaving `shouldPulse` stuck
+    // true but `shouldAutoOpen` never firing. The setState below is safe to
+    // call after unmount (React 19 silently ignores it).
+    setTimeout(() => {
       setShouldAutoOpen(true);
     }, PULSE_BEFORE_OPEN_MS);
-
-    return () => clearTimeout(t);
   }, [userId]);
 
   const markSeen = useCallback(() => {

@@ -262,6 +262,8 @@ export function PendingPaymentTable({
         paymentMethod: formData.paymentMethod,
         paidAt: formData.paidAt,
         receiptPhoto: formData.receiptPhoto,
+        customSessions: formData.customSessions ?? null,
+        paymentType: formData.paymentType ?? null,
       });
 
       if (result.success) {

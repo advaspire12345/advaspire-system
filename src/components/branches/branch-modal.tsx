@@ -24,6 +24,10 @@ interface BranchModalProps {
   companyOptions: CompanyOption[];
   existingBranches: BranchEntry[];
   userRole: UserRole;
+  /** Current user's own company id — used to auto-parent + auto-code for
+   *  group_admin even when companyOptions is empty (their company has no
+   *  child branches yet). */
+  currentUserCompanyId?: string | null;
   canCreateCompany: boolean;
   onAdd: (data: BranchFormData) => Promise<void>;
   onEdit: (data: BranchFormData) => Promise<void>;
@@ -60,6 +64,7 @@ export function BranchModal({
   companyOptions,
   existingBranches,
   userRole,
+  currentUserCompanyId = null,
   canCreateCompany,
   onAdd,
   onEdit,
@@ -93,14 +98,30 @@ export function BranchModal({
     return nextNum.toString().padStart(3, "0");
   };
 
+  // Group admins can only create branches/HQs scoped to their own company.
+  // Use the explicit `currentUserCompanyId` prop (server-resolved from the
+  // admin's user.branch_id) so the auto-parent + auto-code logic works
+  // even when their company has zero child branches yet (in which case
+  // `companyOptions` may come back empty).
+  const isGroupAdmin = userRole === "group_admin";
+  const fixedCompanyId =
+    isGroupAdmin
+      ? currentUserCompanyId ?? (companyOptions.length === 1 ? companyOptions[0].id : null)
+      : null;
+
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open) {
       if (mode === "add") {
-        setType(canCreateCompany ? "branch" : "branch");
-        setCode("");
+        setType("branch");
+        // For group_admin: pre-set parent to their company so the code
+        // auto-generator can fire immediately on modal open.  For others
+        // (super_admin who picks the company manually), leave parentId blank.
+        const initialParent = fixedCompanyId ?? "";
+        setParentId(initialParent);
+        // Pre-compute the next code so the field shows it from the start.
+        setCode(initialParent ? getNextCode(initialParent) : "");
         setName("");
-        setParentId("");
         setAddress("");
         setCity("");
         setPhone("");
@@ -234,17 +255,26 @@ export function BranchModal({
     label: c.name,
   }));
 
-  // Type options depend on permissions
-  const typeOptions = canCreateCompany
-    ? [
-        { value: "company", label: "Company" },
-        { value: "hq", label: "HQ (Headquarters)" },
-        { value: "branch", label: "Branch" },
-      ]
-    : [
-        { value: "hq", label: "HQ (Headquarters)" },
-        { value: "branch", label: "Branch" },
-      ];
+  // Type options depend on permissions.  Group-admins are scoped to their
+  // own company and never need (or want) to create another company — drop
+  // the Company option entirely for them, even if their permission row
+  // technically allows it.
+  const typeOptions =
+    canCreateCompany && !isGroupAdmin
+      ? [
+          { value: "company", label: "Company" },
+          { value: "hq", label: "HQ (Headquarters)" },
+          { value: "branch", label: "Branch" },
+        ]
+      : [
+          { value: "hq", label: "HQ (Headquarters)" },
+          { value: "branch", label: "Branch" },
+        ];
+
+  // Hide the company picker entirely for group admins in add mode — they
+  // can only ever add under their own company.  Edit mode still shows it
+  // (read-only or otherwise) so the relationship is visible.
+  const hideCompanyPicker = mode === "add" && isGroupAdmin && !!fixedCompanyId;
 
   const readonlyFieldClass = "bg-muted/50 cursor-not-allowed opacity-70";
 
@@ -311,8 +341,9 @@ export function BranchModal({
               </div>
             )}
 
-            {/* Parent Company - for HQ and Branch */}
-            {showParentCompany && (
+            {/* Parent Company - for HQ and Branch.  Hidden for group_admin
+                in add mode (their company is implicit). */}
+            {showParentCompany && !hideCompanyPicker && (
               isReadonly ? (
                 <div className="relative">
                   <input

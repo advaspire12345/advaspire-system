@@ -114,7 +114,7 @@ const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
   leaderboard: VIEW_CREATE,
   transactions: VIEW_CREATE,
   marketplace: VIEW_CREATE, // can browse + create top-up requests
-  import: NO_ACCESS,
+  import: VIEW_CREATE, // view = download templates, create = upload CSV
   events: FULL_ACCESS,
 };
 
@@ -216,34 +216,54 @@ async function resolveCompanyId(branchId: string | null): Promise<string | null>
 }
 
 /**
- * Get permissions for a role, scoped to a company.
- * Resolution order: company-specific > global default (company_id=NULL) > hardcoded fallback
+ * Get permissions for a role, scoped to a company and optionally a branch.
+ * Resolution order:
+ *   1. (role, company_id, branch_id) — per-branch override
+ *   2. (role, company_id, branch_id IS NULL) — company-wide
+ *   3. (role, company_id IS NULL, branch_id IS NULL) — global default
+ *   4. Hardcoded fallback
  */
 async function getRolePermissionsFromDB(
   role: string,
-  companyId: string | null
+  companyId: string | null,
+  branchId: string | null = null,
 ): Promise<PermissionsMap> {
-  // Try company-specific first
+  // 1. Branch-specific override (only meaningful when both company and branch
+  // are known — a per-branch row makes no sense without a company).
+  if (companyId && branchId) {
+    const { data: branchRows } = await supabaseAdmin
+      .from("role_permissions")
+      .select("resource, can_view, can_create, can_edit, can_delete")
+      .eq("role", role)
+      .eq("company_id", companyId)
+      .eq("branch_id", branchId);
+    const branchMap = buildPermissionsMapFromRows(branchRows ?? []);
+    if (branchMap) return branchMap;
+  }
+
+  // 2. Company-wide (branch_id IS NULL)
   if (companyId) {
     const { data: companyRows } = await supabaseAdmin
       .from("role_permissions")
       .select("resource, can_view, can_create, can_edit, can_delete")
       .eq("role", role)
-      .eq("company_id", companyId);
+      .eq("company_id", companyId)
+      .is("branch_id", null);
     const companyMap = buildPermissionsMapFromRows(companyRows ?? []);
     if (companyMap) return companyMap;
   }
 
-  // Fallback: global defaults (company_id IS NULL)
+  // 3. Global default (both NULL)
   const { data: globalRows } = await supabaseAdmin
     .from("role_permissions")
     .select("resource, can_view, can_create, can_edit, can_delete")
     .eq("role", role)
-    .is("company_id", null);
+    .is("company_id", null)
+    .is("branch_id", null);
   const globalMap = buildPermissionsMapFromRows(globalRows ?? []);
   if (globalMap) return globalMap;
 
-  // Final fallback: hardcoded
+  // 4. Hardcoded
   return getHardcodedDefaults(role);
 }
 
@@ -278,13 +298,20 @@ export async function getPermissionsForUser(
     .single();
 
   const companyId = await resolveCompanyId(user?.branch_id ?? null);
+  // Per-branch overrides are only used for assistant_admin/instructor — those
+  // are the only roles a company_admin can manage. For everyone else (incl.
+  // company_admin and group_admin) we look up at the company tier.
+  const branchScope =
+    (normalizedRole === "assistant_admin" || normalizedRole === "instructor")
+      ? (user?.branch_id ?? null)
+      : null;
 
   // If user has a custom role assigned, use that for permission lookup
   if (user?.custom_role_id) {
-    return getRolePermissionsFromDB(`custom:${user.custom_role_id}`, companyId);
+    return getRolePermissionsFromDB(`custom:${user.custom_role_id}`, companyId, branchScope);
   }
 
-  return getRolePermissionsFromDB(normalizedRole, companyId);
+  return getRolePermissionsFromDB(normalizedRole, companyId, branchScope);
 }
 
 /**
@@ -308,7 +335,19 @@ export const getCurrentUserPermissions = cache(async (): Promise<{
     .single();
 
   if (error || !dbUser) {
-    console.error("Error fetching user for permissions:", error);
+    // Auth session is still valid but the matching public.users row is gone
+    // (deleted or soft-deleted). Without this revocation the page redirects
+    // to /login, middleware sees the still-valid auth cookie and bounces back
+    // to /dashboard → ERR_TOO_MANY_REDIRECTS. Revoking the session globally
+    // means the next request's `getUser()` will return null and /login will
+    // render normally.
+    try {
+      const { createClient } = await import("@/lib/supabase/server");
+      const sb = await createClient();
+      await sb.auth.signOut({ scope: "global" });
+    } catch (e) {
+      console.error("Failed to revoke stale auth session:", e);
+    }
     return null;
   }
 
@@ -358,34 +397,59 @@ export async function authorizeAction(
 // ============================================
 
 /**
- * Get permissions for a role within a company scope.
+ * Get permissions for a role within a company scope, optionally scoped to a
+ * specific branch (used when company_admin manages per-branch overrides for
+ * assistant_admin / instructor).
  */
 export async function getRolePermissions(
   role: string,
-  companyId: string
+  companyId: string | null,
+  branchId: string | null = null,
 ): Promise<PermissionsMap> {
-  return getRolePermissionsFromDB(role, companyId);
+  return getRolePermissionsFromDB(role, companyId, branchId);
 }
 
 /**
- * Save permissions for a role within a company scope.
- * Upserts all 14 resource rows.
+ * Save permissions for a role.
+ *
+ * - `companyId=null, branchId=null` → global default (super_admin editing
+ *   group_admin permissions).
+ * - `companyId=<id>, branchId=null` → company-wide (group_admin editing
+ *   company_admin / assistant_admin / instructor). Branch-level overrides
+ *   under this company for the same role are wiped so everyone re-converges
+ *   on the new company-wide setting.
+ * - `companyId=<id>, branchId=<id>` → per-branch (company_admin editing
+ *   assistant_admin / instructor at their own branch).
  */
 export async function saveRolePermissions(
   role: string,
-  companyId: string,
+  companyId: string | null,
+  branchId: string | null,
   permissions: { resource: PermissionResource; can_view: boolean; can_create: boolean; can_edit: boolean; can_delete: boolean }[]
 ): Promise<boolean> {
-  // Delete existing rows for this role + company
-  const { error: deleteError } = await supabaseAdmin
-    .from("role_permissions")
-    .delete()
-    .eq("role", role)
-    .eq("company_id", companyId);
-
+  // Delete existing rows that exactly match this (role, company, branch) scope.
+  let deleteQ = supabaseAdmin.from("role_permissions").delete().eq("role", role);
+  deleteQ = companyId ? deleteQ.eq("company_id", companyId) : deleteQ.is("company_id", null);
+  deleteQ = branchId ? deleteQ.eq("branch_id", branchId) : deleteQ.is("branch_id", null);
+  const { error: deleteError } = await deleteQ;
   if (deleteError) {
     console.error("Error deleting role permissions:", deleteError);
     return false;
+  }
+
+  // Company-wide save also wipes any branch-level overrides under this company
+  // for the same role, so the new setting really applies to everyone.
+  if (companyId && !branchId) {
+    const { error: branchWipeError } = await supabaseAdmin
+      .from("role_permissions")
+      .delete()
+      .eq("role", role)
+      .eq("company_id", companyId)
+      .not("branch_id", "is", null);
+    if (branchWipeError) {
+      console.error("Error wiping branch overrides:", branchWipeError);
+      return false;
+    }
   }
 
   if (permissions.length === 0) return true;
@@ -393,6 +457,7 @@ export async function saveRolePermissions(
   const rows = permissions.map((p) => ({
     role,
     company_id: companyId,
+    branch_id: branchId,
     resource: p.resource,
     can_view: p.can_view,
     can_create: p.can_create,

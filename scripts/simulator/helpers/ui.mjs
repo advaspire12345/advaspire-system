@@ -69,12 +69,15 @@ export class Browser {
     if (!this.loggedIn) this.login();
   }
 
-  open(path) {
-    this.ensureLoggedIn();
+  // `noAuth` mode skips the login dance — for actions that drive
+  // public, unauthenticated routes (e.g. parent_self_register hitting
+  // /register/[companyCode]/[branchCode]).
+  open(path, { noAuth = false } = {}) {
+    if (!noAuth) this.ensureLoggedIn();
     const url = path.startsWith("http") ? path : `${this.baseUrl}${path}`;
     this.ab(`open ${url}`);
     this.ab(`wait --load networkidle`);
-    return this.ifLoggedOutRetry(() => this.ab(`open ${url}`));
+    if (!noAuth) return this.ifLoggedOutRetry(() => this.ab(`open ${url}`));
   }
 
   ifLoggedOutRetry(fn) {
@@ -99,8 +102,20 @@ export class Browser {
     // React's onClick handler (modals don't open, submits don't submit). The
     // page-scoped JS .click() variant is more reliable. We still verify the
     // button exists in the snapshot first to give a clear error message.
+    //
+    // The "button missing from snapshot" path is retried a handful of times
+    // because /student and /attendance occasionally take a beat to render
+    // their top-bar buttons after an open + networkidle (caught by
+    // pool-fast-burn step 4 where add_student following payment approval
+    // races the page repaint).
     return this.locateAndAct((snap) => {
       const re = new RegExp(`button (?:"${escapeRegex(name)}"|"[^"]*${escapeRegex(name)}[^"]*")`);
+      let attempt = 0;
+      while (!re.test(snap) && attempt < 5) {
+        this.sleep(500);
+        snap = this.snapshot();
+        attempt++;
+      }
       if (!re.test(snap)) {
         throw new Error(`clickButton: no button matching "${name}" in snapshot`);
       }
@@ -135,9 +150,14 @@ export class Browser {
   // the React handler.
   clickDialogButton(name) {
     const safe = String(name).replace(/"/g, '\\"').replace(/'/g, "\\'");
+    // When dialogs nest (course-switch modal on top of student-modal), the
+    // last [role="dialog"] in the DOM is the topmost one — that's where the
+    // active submit button lives. Querying the first one would target the
+    // background dialog whose button set doesn't include this name.
     const js = `(() => {
-      const dlg = document.querySelector('[role="dialog"]');
-      if (!dlg) return 'no_dialog';
+      const dlgs = document.querySelectorAll('[role="dialog"]');
+      if (dlgs.length === 0) return 'no_dialog';
+      const dlg = dlgs[dlgs.length - 1];
       const btns = dlg.querySelectorAll('button');
       // 1) Exact textContent match (preferred — avoids unintended partial hits)
       let target = Array.from(btns).find(b => !b.disabled && b.textContent.trim() === "${safe}");
@@ -195,17 +215,28 @@ export class Browser {
     });
   }
 
-  // Fill an input via its CSS selector using the React-aware value setter.
-  // agent-browser's `fill` updates the DOM value but doesn't always trigger
-  // React's onChange (especially for date/time inputs). Using the prototype
-  // value setter + dispatching an `input` event is the well-known workaround.
+  // Fill an input or textarea via its CSS selector using the React-aware
+  // value setter. agent-browser's `fill` updates the DOM value but doesn't
+  // always trigger React's onChange (especially for date/time inputs).
+  // Using the prototype value setter + dispatching an `input` event is the
+  // well-known workaround.
+  //
+  // The setter must come from the *correct* prototype: HTMLInputElement for
+  // <input>, HTMLTextAreaElement for <textarea>. Using the wrong one throws
+  // `TypeError: Illegal invocation` (caught by activity-broadcast scenario
+  // 2026-06-04 — was hardcoded to HTMLInputElement.prototype).
   fillCss(selector, value) {
     const safeSel = String(selector).replace(/"/g, '\\"').replace(/'/g, "\\'");
     const safeVal = String(value).replace(/"/g, '\\"').replace(/'/g, "\\'");
     const js = `(() => {
       const el = document.querySelector("${safeSel}");
       if (!el) return false;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      const proto = el instanceof window.HTMLTextAreaElement
+        ? window.HTMLTextAreaElement.prototype
+        : el instanceof window.HTMLSelectElement
+          ? window.HTMLSelectElement.prototype
+          : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
       setter.call(el, "${safeVal}");
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -238,21 +269,110 @@ export class Browser {
       this.sleep(150);
     });
     this.sleep(300);
-    // JS-dispatched click on the option text. Returns true if found+clicked.
+    // JS-dispatched click on the option text. Returns 'clicked' if found,
+    // 'empty' if the option list is still loading (async dropdowns —
+    // e.g. mark-present's Lesson + Mission pickers fetch from the server
+    // when the modal opens), or 'no_match' if options exist but none match.
     const safe = String(optionText).replace(/"/g, '\\"').replace(/'/g, "\\'");
     const js = `(() => {
       const opts = document.querySelectorAll('[role="option"]');
+      if (opts.length === 0) return 'empty';
       for (const o of opts) {
         if (o.textContent && o.textContent.trim().includes("${safe}")) {
           o.click();
-          return true;
+          return 'clicked';
         }
       }
-      return false;
+      return 'no_match';
     })()`;
-    const out = this.ab(`eval "${js.replace(/"/g, '\\"')}"`);
-    if (!out.includes("true")) {
-      throw new Error(`selectByLabel: no option "${optionText}" after opening "${label}"`);
+    // Retry the option lookup a handful of times so async-loaded dropdowns
+    // have a chance to settle. Total wait budget ≈ 3s.
+    let out = "";
+    for (let attempt = 0; attempt < 6; attempt++) {
+      out = this.ab(`eval "${js.replace(/"/g, '\\"')}"`);
+      if (out.includes("clicked")) break;
+      if (out.includes("no_match")) break; // options loaded, just not ours — fail fast
+      this.sleep(500);
+    }
+    if (!out.includes("clicked")) {
+      throw new Error(`selectByLabel: no option "${optionText}" after opening "${label}" (last state: ${out.trim()})`);
+    }
+    this.sleep(250);
+  }
+
+  // Searchable-combobox variant of selectByLabel. Opens the combobox by its
+  // label, types `query` into the inner search input, waits for the filtered
+  // option list to populate, then clicks the option whose text contains
+  // `optionText` (defaults to `query`).
+  //
+  // Needed for the Take-Attendance modal's Student field (and similar
+  // FloatingSelect with `searchable=true`) — those open with an empty list
+  // and rely on the user typing to filter.
+  searchAndPick(label, query, optionText) {
+    const wanted = optionText ?? query;
+    // Step 1: open the combobox by label.  Match the label at the END of
+    // the accessible-name string so we don't accidentally pick a different
+    // combobox whose *value* happens to contain the same word (e.g. Scope
+    // combobox shows value "Branch" — would race the Branch combobox).
+    this.locateAndAct((snap) => {
+      const cb = snap.match(
+        new RegExp(`combobox \\[[^\\]]*?ref=(e\\d+)\\]: [^\\n]*?${escapeRegex(label)}\\s*$`, "m"),
+      );
+      if (!cb) throw new Error(`searchAndPick: no combobox "${label}" in snapshot`);
+      this.ab(`click @${cb[1]}`);
+      this.sleep(200);
+    });
+
+    // Step 2: focus the inner search input and type via real keystrokes.
+    // The earlier approach (setter + dispatch input) didn't trigger the
+    // FloatingSelect's React onChange reliably — the input value stayed
+    // empty and the server search never fired (caught by individual-multi-slot
+    // 2026-06-04). Using `keyboard type` sends per-key events that React's
+    // controlled-input handler picks up correctly.
+    const focusJs = `(() => {
+      const inputs = [...document.querySelectorAll('input')].filter(i => i.offsetParent !== null);
+      const search = inputs.find(i => (i.placeholder || '').toLowerCase() === 'search...' || (i.placeholder || '').toLowerCase().includes('search'));
+      const target = search || inputs[inputs.length - 1];
+      if (!target) return 'no_input';
+      target.focus();
+      return 'focused';
+    })()`;
+    const focused = this.ab(`eval "${focusJs.replace(/"/g, '\\"')}"`);
+    if (focused.includes("no_input")) {
+      throw new Error(`searchAndPick: search input not found in open combobox "${label}"`);
+    }
+    this.sleep(150);
+    // Send the query as real keystrokes. Empty-string check avoids a no-op
+    // shell command.
+    const safeKeys = String(query).replace(/"/g, '\\"');
+    this.ab(`keyboard type "${safeKeys}"`);
+    // Debounced server search (~250ms) + fetch + state update + re-render —
+    // give it a generous breath.
+    this.sleep(700);
+
+    // Step 3: pick the option. Retry a few times so async-loaded results
+    // have a chance to settle.
+    const safeW = String(wanted).replace(/"/g, '\\"').replace(/'/g, "\\'");
+    const pickJs = `(() => {
+      const opts = document.querySelectorAll('[role="option"]');
+      if (opts.length === 0) return 'empty';
+      for (const o of opts) {
+        if (o.textContent && o.textContent.includes("${safeW}")) {
+          o.click();
+          return 'clicked';
+        }
+      }
+      return 'no_match';
+    })()`;
+    let out = "";
+    for (let attempt = 0; attempt < 8; attempt++) {
+      out = this.ab(`eval "${pickJs.replace(/"/g, '\\"')}"`);
+      if (out.includes("clicked")) break;
+      if (out.includes("no_match")) break;
+      this.sleep(500);
+    }
+    if (!out.includes("clicked")) {
+      throw new Error(`searchAndPick: no option containing "${wanted}" after typing "${query}" in "${label}" (last: ${out.trim()})`);
     }
     this.sleep(250);
   }

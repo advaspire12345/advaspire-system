@@ -1,0 +1,88 @@
+name: inactivity-reminders
+description: |
+  Verify Phase A1 — inactivity reminder cron. A student with sessions
+  remaining who hasn't attended for > the warning window should
+  generate a notification for every assistant_admin + company_admin at
+  the branch. The reminder must:
+    - fire only after the inactivity threshold (4 weeks default for a
+      2-month-expiry package).
+    - dedupe within the configured `reminder_interval_days` (7 by default).
+    - NEVER mutate enrollment status or sessions_remaining.
+    - stop firing once the student is marked present again OR the admin
+      cancels the enrollment.
+
+fixtures:
+  branch:
+    name: "Inact Branch"
+    code: "INB"
+    parent: "ADS"
+  course:
+    name: "InactCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+    expiry_months: 2
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  # 1. Enrol + fund a student.
+  - actor: aa
+    action: add_student
+    with:
+      name: "InactSam"
+      parent_name: "Inact Parent"
+      parent_email: "pInact@sim.local"
+      parent_phone: "0123450500"
+      course: "InactCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "InactSam" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "InactSam" }
+    observers: auto
+
+  # 2. Mark one attendance to seed a "last attended" date.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "InactSam"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # 3. Backdate that attendance to 5 weeks ago — past the 4-week warning
+  #    window derived from expiry_months=2.
+  - actor: aa
+    action: stamp_attendance_date
+    with:
+      student: "InactSam"
+      date: "TODAY-35"
+      n_back: 1
+    observers: auto
+
+  # 4. Fire the cron sweep. Requires CRON_SECRET in the dev process env;
+  #    if unset, this step fails fast and the scenario report will say so.
+  #    To verify without the cron: run the SQL `SELECT public.checkInactivityAndNotify()`
+  #    or call the helper directly from a Node REPL.
+  - actor: aa
+    action: run_cron
+    with: {}
+    observers: auto
+
+teardown: manual

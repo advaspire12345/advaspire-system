@@ -60,7 +60,10 @@ export default {
       browser.fillLabel("Expiry Date", String(args.expiry_date));
     }
 
-    browser.clickButton("Add Voucher");
+    // Submit. The modal's submit button reuses the label "Add Voucher" — same
+    // text as the page-level toolbar button that opens the modal. Use the
+    // dialog-scoped clicker so we hit the SUBMIT button, not the toolbar one.
+    browser.clickDialogButton("Add Voucher");
   },
 };
 

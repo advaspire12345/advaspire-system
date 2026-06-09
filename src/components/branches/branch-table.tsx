@@ -31,6 +31,8 @@ interface BranchTableProps {
   initialData: BranchEntry[];
   companyOptions: CompanyOption[];
   userRole: UserRole;
+  /** Current user's own company id (for group_admin auto-parent + auto-code). */
+  currentUserCompanyId?: string | null;
   canCreateCompany: boolean;
   canEditCompany: boolean;
   canDeleteCompany: boolean;
@@ -65,6 +67,7 @@ export function BranchTable({
   initialData,
   companyOptions,
   userRole,
+  currentUserCompanyId = null,
   canCreateCompany,
   canEditCompany,
   canDeleteCompany,
@@ -471,6 +474,7 @@ export function BranchTable({
         companyOptions={companyOptions}
         existingBranches={initialData}
         userRole={userRole}
+        currentUserCompanyId={currentUserCompanyId}
         canCreateCompany={canCreateCompany}
         onAdd={handleAdd}
         onEdit={handleEdit}

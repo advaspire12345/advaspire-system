@@ -78,6 +78,11 @@ export interface PaymentFormData {
   paidAt: string | null;
   receiptPhoto: string | null;
   voucherId: string | null;
+  // Set when the "Settle Deficit" toggle was ON. Server inserts these onto
+  // the payment row; approve flow credits `customSessions` instead of the
+  // package duration and skips auto-renewal.
+  customSessions?: number | null;
+  paymentType?: "settle_deficit" | null;
 }
 
 export interface AddPaymentFormData {
@@ -126,6 +131,14 @@ export function PendingPaymentModal({
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const [selectedPackageId, setSelectedPackageId] = useState("");
 
+  // Settle-deficit toggle. ON: package + price become editable and a
+  // "Sessions to settle" field appears. Payment is saved with
+  // payment_type='settle_deficit' + custom_sessions set so the approve
+  // flow credits exactly that count instead of the package duration.
+  const [settleDeficitOn, setSettleDeficitOn] = useState(false);
+  const [customSessions, setCustomSessions] = useState<number>(0);
+  const [customAmount, setCustomAmount] = useState<number>(0);
+
   // Get selected student details
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
 
@@ -165,6 +178,9 @@ export function PendingPaymentModal({
   // Reset form when modal opens or record changes
   useEffect(() => {
     if (open) {
+      setSettleDeficitOn(false);
+      setCustomSessions(0);
+      setCustomAmount(0);
       if (mode === "add") {
         // Reset all fields for add mode
         setSelectedStudentId("");
@@ -223,11 +239,13 @@ export function PendingPaymentModal({
         await onSubmit({
           courseId: selectedCourseId || null,
           packageId: selectedPackageId || null,
-          price: price || record.price,
+          price: settleDeficitOn ? customAmount : (price || record.price),
           paymentMethod: paymentMethod || null,
           paidAt: paidAt ? new Date(paidAt).toISOString() : null,
           receiptPhoto: receiptPhoto[0] || null,
           voucherId: selectedVoucherId && selectedVoucherId !== "__auto__" ? selectedVoucherId : null,
+          customSessions: settleDeficitOn ? customSessions : null,
+          paymentType: settleDeficitOn ? "settle_deficit" : null,
         });
       }
       onOpenChange(false);
@@ -466,6 +484,81 @@ export function PendingPaymentModal({
             ) : (
               <>
                 {/* Edit/Delete/Approve Mode: Display record info */}
+
+                {/* Settle Deficit toggle — placed above package + price so
+                    admin sees it before reaching for the package picker.
+                    Hidden in approve / delete (those are terminal actions). */}
+                {mode === "edit" && (
+                  <div className="flex items-start justify-between rounded-[10px] border border-[#ADAFCA] bg-[#FFF8E5] px-4 py-3">
+                    <div className="pr-3">
+                      <div className="text-sm font-bold text-foreground">
+                        Settle Deficit
+                      </div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        Toggle ON to pay only for negative-balance sessions instead of buying a full package.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !settleDeficitOn;
+                        setSettleDeficitOn(next);
+                        if (next) {
+                          // Sensible defaults: 1 session, amount derived from
+                          // the currently-selected (or record's) package rate.
+                          const pkgPrice = selectedPackage?.price ?? record?.price ?? 0;
+                          const pkgDuration = selectedPackage?.duration ?? null;
+                          if (customSessions === 0) setCustomSessions(1);
+                          if (customAmount === 0 && pkgDuration && pkgDuration > 0) {
+                            setCustomAmount(Math.round(pkgPrice / pkgDuration));
+                          }
+                        }
+                      }}
+                      className={cn(
+                        "relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+                        settleDeficitOn ? "bg-[#615DFA]" : "bg-gray-300"
+                      )}
+                      aria-pressed={settleDeficitOn}
+                    >
+                      <span
+                        className={cn(
+                          "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition",
+                          settleDeficitOn ? "translate-x-5" : "translate-x-0"
+                        )}
+                      />
+                    </button>
+                  </div>
+                )}
+
+                {settleDeficitOn && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min={1}
+                        value={customSessions || ""}
+                        onChange={(e) => setCustomSessions(parseInt(e.target.value) || 0)}
+                        className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground"
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Sessions to settle
+                      </label>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min={0}
+                        value={customAmount || ""}
+                        onChange={(e) => setCustomAmount(parseFloat(e.target.value) || 0)}
+                        className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground"
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Amount (RM)
+                      </label>
+                    </div>
+                  </div>
+                )}
+
                 {/* Parent Name (readonly) */}
                 <div className="relative">
                   <input

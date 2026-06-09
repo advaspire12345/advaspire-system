@@ -1,0 +1,76 @@
+name: course-switch-midway
+description: |
+  Verify Phase A2 — admin moves a student from Course A to Course B
+  mid-package. Sessions carry over 1:1. Source enrollment becomes
+  'course_switched'; a fresh active enrollment lands on Course B with
+  the carry-over balance. Audit row inserted.
+
+fixtures:
+  branch:
+    name: "Switch Branch"
+    code: "SWB"
+    parent: "ADS"
+  course:
+    name: "SwitchA"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  # Second course in the same branch so the course-switch modal has a
+  # valid target option. Runner inserts a default 4-session pricing row.
+  extra_courses:
+    - { name: "SwitchB" }
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "SwitchSara"
+      parent_name: "Switch Parent"
+      parent_email: "pSw@sim.local"
+      parent_phone: "0123450550"
+      course: "SwitchA"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "SwitchSara" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "SwitchSara" }
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "SwitchSara"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # Admin moves Sara to SwitchA — to be substituted at runtime by the
+  # second course the runner provisioned (the runner doesn't yet create
+  # two courses per fixture; this scenario needs a manual sibling course
+  # in the same fixture or a script tweak before it can run all-the-way).
+  - actor: aa
+    action: switch_course
+    with:
+      student: "SwitchSara"
+      target_course: "SwitchB"
+      notes: "QA test transfer"
+    observers: auto
+
+teardown: manual

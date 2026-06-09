@@ -1,0 +1,82 @@
+name: voucher-application-on-renewal
+description: |
+  Verify that an admin can pick a voucher in the edit-payment modal
+  to discount a renewal payment. After approving, the voucher's
+  status flips to 'redeemed' and the payment's amount reflects the
+  discount.
+
+fixtures:
+  branch:
+    name: "VApp Branch"
+    code: "VAB"
+    parent: "ADS"
+  course:
+    name: "VAppCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "VAppStu"
+      parent_name: "VApp Parent"
+      parent_email: "vapp@sim.local"
+      parent_phone: "0123450901"
+      course: "VAppCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "VAppStu" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "VAppStu" }
+    observers: auto
+
+  # Create a voucher TEMPLATE on /voucher — `add_voucher` builds an
+  # un-assigned template row that becomes selectable in the pending-payment
+  # modal's Voucher dropdown via the same pricing's voucher_id binding.
+  # NOTE: vouchers.can_create is denied to assistant_admin by default — only
+  # company_admin and group_admin can create vouchers. Use `ca` here.
+  - actor: ca
+    action: add_voucher
+    with:
+      code: "VAPP50"
+      discount_type: "fixed"
+      discount_value: 50
+      expiry_type: "monthly"
+      expiry_months: 6
+    observers: auto
+
+  # Create a fresh renewal pending payment, then apply the voucher in the edit modal.
+  - actor: ca
+    action: add_payment_for_student
+    with:
+      student: "VAppStu"
+      course: "VAppCourse"
+      package: "4 Sessions"
+    observers: auto
+
+  - actor: ca
+    action: apply_voucher_to_payment
+    with:
+      student: "VAppStu"
+      voucher_code: "VAPP50"
+    observers: auto
+
+teardown: manual

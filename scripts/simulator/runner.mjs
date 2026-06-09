@@ -28,6 +28,13 @@ function applyFixtureDefaults(args, _actionId, fixtures) {
       if (out.course === baseName) out.course = fixtures.courseName;
     }
   }
+  // Public-registration scenarios need the runtime-generated branch_code
+  // and the parent company_code (these aren't known until the fixture runs).
+  // Always override with the fixture values when present — scenario YAML may
+  // include a placeholder like "PSR" that doesn't match the actual runtime
+  // branch code "PSR-abc1".
+  if (fixtures.branchCode) out.branch_code = fixtures.branchCode;
+  if (fixtures.companyCode) out.company_code = fixtures.companyCode;
   return out;
 }
 
@@ -95,9 +102,15 @@ if (cmd === "new") {
   process.exit(0);
 }
 
-// Otherwise, treat as scenario name
+// Otherwise, treat as scenario name. The optional SIM_SCENARIO_PATH env
+// var lets external orchestrators (e.g. the lms-year-simulator skill)
+// keep their YAMLs colocated with the skill instead of dumping them
+// into the shared SCENARIOS_DIR.
 const scenarioName = cmd;
-const scenarioPath = join(SCENARIOS_DIR, `${scenarioName}.yaml`);
+const overridePath = process.env.SIM_SCENARIO_PATH;
+const scenarioPath = overridePath && existsSync(overridePath)
+  ? overridePath
+  : join(SCENARIOS_DIR, `${scenarioName}.yaml`);
 if (!existsSync(scenarioPath)) {
   console.error(`Scenario not found: ${scenarioPath}`);
   process.exit(1);
@@ -295,6 +308,8 @@ async function setupFixtures(scenario, fixtures) {
     fixtures.branchId = data.id;
     fixtures.branchName = branchName;
     fixtures.branchCity = branchCity;
+    fixtures.branchCode = branchCode; // exposed for parent_self_register
+    fixtures.companyCode = f.parent;  // upstream company shortcode
   }
 
   // 2. course (link to fixture branch via course_branches)
@@ -343,6 +358,44 @@ async function setupFixtures(scenario, fixtures) {
           limit_student: s.limit ?? 10,
         });
       if (slotErr) throw new Error(`createCourseSlot: ${slotErr.message}`);
+    }
+
+    // Optional `extra_courses` for scenarios that need a secondary course
+    // (e.g. course-switch tests). Each row gets the same default 4-session
+    // pricing so the modal's target-course picker has a real, billable
+    // option. IDs stored on fixtures.extraCourseIds keyed by short name.
+    if (Array.isArray(scenario.fixtures?.extra_courses)) {
+      fixtures.extraCourseIds = {};
+      for (const ec of scenario.fixtures.extra_courses) {
+        const ecName = `__sim_${runId}_${ec.name}`;
+        const { data: ecRow, error: ecErr } = await supabase
+          .from("courses")
+          .insert({
+            name: ecName,
+            code: `S${runId.slice(0, 3).toUpperCase()}${ec.name.slice(0, 1).toUpperCase()}`,
+            number_of_levels: ec.levels ?? c.levels,
+            sessions_to_level_up: ec.sessions_to_level_up ?? c.sessions_to_level_up,
+            program_type: "course",
+            status: "active",
+            branch_id: fixtures.branchId,
+          })
+          .select("id")
+          .single();
+        if (ecErr) throw new Error(`createExtraCourse(${ec.name}): ${ecErr.message}`);
+        fixtures.extraCourseIds[ec.name] = ecRow.id;
+        await supabase
+          .from("course_branches")
+          .insert({ course_id: ecRow.id, branch_id: fixtures.branchId });
+        await supabase
+          .from("course_pricing")
+          .insert({
+            course_id: ecRow.id,
+            package_type: "session",
+            price: ec.price ?? 220,
+            duration: ec.duration ?? 4,
+            is_default: true,
+          });
+      }
     }
 
     // Default curriculum (section + lessons) so the mark-present modal has
@@ -411,6 +464,27 @@ async function setupFixtures(scenario, fixtures) {
       voucherTemplateId = vt.id;
     }
 
+    // Optional good-payer voucher template (Phase A3): wires
+    // course_pricing.good_payer_voucher_id so renewals approved within
+    // the configured window grant the voucher automatically.
+    let goodPayerVoucherTemplateId = null;
+    if (p.good_payer_voucher) {
+      const code = `SIM-${runId}-${i}-GP`;
+      const { data: gpt, error: gptErr } = await supabase
+        .from("vouchers")
+        .insert({
+          code,
+          discount_type: "fixed",
+          discount_value: p.good_payer_voucher.amount ?? 20,
+          expiry_type: "monthly",
+          expiry_months: p.good_payer_voucher.expiry_months ?? 3,
+        })
+        .select("id")
+        .single();
+      if (gptErr) throw new Error(`createGoodPayerVoucherTemplate: ${gptErr.message}`);
+      goodPayerVoucherTemplateId = gpt.id;
+    }
+
     const { data, error } = await supabase
       .from("course_pricing")
       .insert({
@@ -419,7 +493,13 @@ async function setupFixtures(scenario, fixtures) {
         duration: p.count,
         price: p.price,
         is_default: i === 0,
+        max_students_per_pool: p.max_students_per_pool ?? 1,
         ...(voucherTemplateId ? { voucher_id: voucherTemplateId, completion_months: p.voucher.completion_months ?? 3 } : {}),
+        ...(goodPayerVoucherTemplateId ? {
+          good_payer_voucher_id: goodPayerVoucherTemplateId,
+          good_payer_voucher_window_days: p.good_payer_voucher.window_days ?? 35,
+        } : {}),
+        ...(p.expiry_months ? { expiry_months: p.expiry_months } : {}),
       })
       .select("id")
       .single();
@@ -467,6 +547,16 @@ async function teardown(fixtures) {
     await supabase.from("course_instructors").delete().eq("course_id", courseId);
     await supabase.from("course_pricing").delete().eq("course_id", courseId);
     await supabase.from("courses").delete().eq("id", courseId);
+  }
+  // extra_courses cleanup (course-switch scenarios etc.) — same dependency
+  // order as the primary course.
+  const extraIds = Object.values(fixtures.extraCourseIds ?? {});
+  for (const extraId of extraIds) {
+    await supabase.from("enrollments").delete().eq("course_id", extraId);
+    await supabase.from("course_branches").delete().eq("course_id", extraId);
+    await supabase.from("course_instructors").delete().eq("course_id", extraId);
+    await supabase.from("course_pricing").delete().eq("course_id", extraId);
+    await supabase.from("courses").delete().eq("id", extraId);
   }
   // Legacy code-based template cleanup (kept for backwards compat with
   // scenarios that explicitly record createdVoucherCodes).

@@ -457,12 +457,17 @@ export const getDashboardStats = unstable_cache(
   { revalidate: 60, tags: ["dashboard", "dashboard-stats"] }
 );
 
+// Per-branch top-N keeps every branch represented in the client-side dropdown
+// filter. Without this, a single noisy branch would crowd the global top
+// list and every other branch would render empty (see dashboard bug 2026-06).
+const RECENT_ACTIVITY_PER_BRANCH = 10;
+const RECENT_ACTIVITY_GLOBAL_CAP = 500;
+
 export const getRecentActivity = unstable_cache(
-  async (userEmail: string, limit = 10): Promise<RecentActivity[]> => {
+  async (userEmail: string): Promise<RecentActivity[]> => {
     return withRetry(async () => {
       const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
-      // Get recent attendance
       let attendanceQuery = supabaseAdmin
         .from('attendance')
         .select(`
@@ -479,7 +484,7 @@ export const getRecentActivity = unstable_cache(
           )
         `)
         .order('created_at', { ascending: false })
-        .limit(limit);
+        .limit(RECENT_ACTIVITY_GLOBAL_CAP);
 
       if (dashBranchIds) {
         attendanceQuery = attendanceQuery.in('enrollments.students.branch_id', dashBranchIds);
@@ -487,34 +492,53 @@ export const getRecentActivity = unstable_cache(
 
       const { data: attendanceData } = await attendanceQuery;
 
-      const activities: RecentActivity[] = (attendanceData ?? []).map((a: any, index: number) => ({
-        id: a.id,
-        userName: a.enrollments?.students?.name ?? 'Unknown',
-        action: 'checked in at',
-        branchName: (useCityName ? (a.enrollments?.students?.branches?.city || a.enrollments?.students?.branches?.name) : a.enrollments?.students?.branches?.name) ?? 'Unknown',
-        branchId: a.enrollments?.students?.branches?.id ?? '',
-        avatarUrl: a.enrollments?.students?.photo ?? null,
-        rank: index + 1,
-        createdAt: new Date(a.created_at),
-      }));
+      // Keep top N per branch so the dropdown filter has data for everyone.
+      const perBranchCount: Record<string, number> = {};
+      const activities: RecentActivity[] = [];
+      let rank = 0;
+      for (const a of (attendanceData ?? []) as any[]) {
+        const branchId = a.enrollments?.students?.branches?.id ?? '';
+        if (!branchId) continue;
+        const taken = perBranchCount[branchId] ?? 0;
+        if (taken >= RECENT_ACTIVITY_PER_BRANCH) continue;
+        perBranchCount[branchId] = taken + 1;
+        rank += 1;
+        activities.push({
+          id: a.id,
+          userName: a.enrollments?.students?.name ?? 'Unknown',
+          action: 'checked in at',
+          branchName:
+            (useCityName
+              ? a.enrollments?.students?.branches?.city || a.enrollments?.students?.branches?.name
+              : a.enrollments?.students?.branches?.name) ?? 'Unknown',
+          branchId,
+          avatarUrl: a.enrollments?.students?.photo ?? null,
+          rank,
+          createdAt: new Date(a.created_at),
+        });
+      }
 
-      return activities.slice(0, limit);
+      return activities;
     });
   },
   ["recent-activity"],
   { revalidate: 60, tags: ["dashboard", "recent-activity"] }
 );
 
+const ADCOIN_RANKING_PER_BRANCH = 10;
+const ADCOIN_RANKING_GLOBAL_CAP = 1000;
+
 export const getAdcoinRanking = unstable_cache(
-  async (userEmail: string, limit = 10): Promise<AdcoinRanking[]> => {
+  async (userEmail: string): Promise<AdcoinRanking[]> => {
     return withRetry(async () => {
       const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
 
       let query = supabaseAdmin
         .from('students')
         .select('id, name, adcoin_balance, photo, branch_id, branches!students_branch_id_branches_id_fk(id, name, city)')
+        .is('deleted_at', null)
         .order('adcoin_balance', { ascending: false })
-        .limit(limit);
+        .limit(ADCOIN_RANKING_GLOBAL_CAP);
 
       if (dashBranchIds) {
         query = query.in('branch_id', dashBranchIds);
@@ -522,38 +546,51 @@ export const getAdcoinRanking = unstable_cache(
 
       const { data } = await query;
 
-      return (data ?? []).map((s: any, index) => ({
-        rank: index + 1,
-        studentId: s.id,
-        studentName: s.name,
-        coins: s.adcoin_balance ?? 0,
-        photo: s.photo,
-        branchId: s.branches?.id ?? '',
-        branchName: (useCityName ? (s.branches?.city || s.branches?.name) : s.branches?.name) ?? 'Unknown',
-      }));
+      // Keep top N per branch so the dropdown filter shows results everywhere.
+      const perBranchCount: Record<string, number> = {};
+      const results: AdcoinRanking[] = [];
+      let rank = 0;
+      for (const s of (data ?? []) as any[]) {
+        const branchId = s.branches?.id ?? '';
+        if (!branchId) continue;
+        const taken = perBranchCount[branchId] ?? 0;
+        if (taken >= ADCOIN_RANKING_PER_BRANCH) continue;
+        perBranchCount[branchId] = taken + 1;
+        rank += 1;
+        results.push({
+          rank,
+          studentId: s.id,
+          studentName: s.name,
+          coins: s.adcoin_balance ?? 0,
+          photo: s.photo,
+          branchId,
+          branchName: (useCityName ? (s.branches?.city || s.branches?.name) : s.branches?.name) ?? 'Unknown',
+        });
+      }
+
+      return results;
     });
   },
   ["adcoin-ranking"],
   { revalidate: 60, tags: ["dashboard", "adcoin-ranking"] }
 );
 
-export const getAdcoinTransactions = unstable_cache(
-  async (userEmail: string, limit = 10): Promise<AdcoinTransaction[]> => {
-    return withRetry(async () => {
-      const { branchIds: dashBranchIds, useCityName } = await getDashboardBranchAccess(userEmail);
+const ADCOIN_TX_PER_BRANCH = 10;
+const ADCOIN_TX_GLOBAL_CAP = 1000;
 
-      // Fetch transactions
+export const getAdcoinTransactions = unstable_cache(
+  async (userEmail: string): Promise<AdcoinTransaction[]> => {
+    return withRetry(async () => {
+      const { branchIds: dashBranchIds } = await getDashboardBranchAccess(userEmail);
+
       const { data: transactions } = await supabaseAdmin
         .from('adcoin_transactions')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(50); // Fetch more to filter later
+        .limit(ADCOIN_TX_GLOBAL_CAP);
 
-      if (!transactions || transactions.length === 0) {
-        return [];
-      }
+      if (!transactions || transactions.length === 0) return [];
 
-      // Collect all participant IDs
       const participantIds = new Set<string>();
       for (const t of transactions) {
         if (t.sender_id) participantIds.add(t.sender_id);
@@ -562,7 +599,6 @@ export const getAdcoinTransactions = unstable_cache(
 
       const idsArray = Array.from(participantIds);
 
-      // Fetch students and users in parallel
       const [{ data: students }, { data: users }] = await Promise.all([
         supabaseAdmin
           .from('students')
@@ -574,7 +610,6 @@ export const getAdcoinTransactions = unstable_cache(
           .in('id', idsArray),
       ]);
 
-      // Build participant map
       const participantMap = new Map<string, { name: string; photo: string | null; branchId: string }>();
       for (const s of students ?? []) {
         participantMap.set(s.id, { name: s.name, photo: s.photo, branchId: s.branch_id });
@@ -585,18 +620,22 @@ export const getAdcoinTransactions = unstable_cache(
         }
       }
 
-      // Build results - prefer receiver info for display
+      // Per-branch cap so the dropdown filter has rows for every branch.
+      const perBranchCount: Record<string, number> = {};
       const results: AdcoinTransaction[] = [];
+      let rank = 0;
       for (const t of transactions) {
         const receiver = t.receiver_id ? participantMap.get(t.receiver_id) : null;
         const sender = t.sender_id ? participantMap.get(t.sender_id) : null;
         const participant = receiver ?? sender;
-
         if (!participant) continue;
 
-        // Filter by branch if user has branch restriction
         if (dashBranchIds && !dashBranchIds.includes(participant.branchId)) continue;
 
+        const taken = perBranchCount[participant.branchId] ?? 0;
+        if (taken >= ADCOIN_TX_PER_BRANCH) continue;
+        perBranchCount[participant.branchId] = taken + 1;
+        rank += 1;
         results.push({
           id: t.id,
           studentName: participant.name,
@@ -605,11 +644,9 @@ export const getAdcoinTransactions = unstable_cache(
           description: t.description,
           branchId: participant.branchId,
           avatarUrl: participant.photo,
-          rank: results.length + 1,
+          rank,
           createdAt: new Date(t.created_at),
         });
-
-        if (results.length >= limit) break;
       }
 
       return results;
@@ -1006,7 +1043,24 @@ export const getPaymentDueListData = unstable_cache(
         name: useCityName ? (b.city || b.name) : b.name,
       }));
 
-      // Get students with payment due (pending payments or low sessions)
+      // Pivot: query pending payments FIRST (much smaller set), then fetch
+      // only the students referenced.  Previous version queried all live
+      // students and passed 611 UUIDs through `.in()`, blowing past
+      // PostgREST's URL limit and silently returning empty.
+      const { data: pendingPaymentsData } = await supabaseAdmin
+        .from('payments')
+        .select('student_id')
+        .eq('status', 'pending');
+
+      const pendingStudentIds = Array.from(
+        new Set((pendingPaymentsData ?? []).map((p) => p.student_id).filter(Boolean) as string[])
+      );
+
+      if (pendingStudentIds.length === 0) {
+        return { items: [], branches };
+      }
+
+      // Load full student detail for only those students with pending payments.
       let studentsQuery = supabaseAdmin
         .from('students')
         .select(`
@@ -1016,47 +1070,28 @@ export const getPaymentDueListData = unstable_cache(
           branch_id,
           branches!students_branch_id_branches_id_fk(id, name, city)
         `)
-        .is('deleted_at', null);
+        .is('deleted_at', null)
+        .in('id', pendingStudentIds);
 
       if (dashBranchIds) {
         studentsQuery = studentsQuery.in('branch_id', dashBranchIds);
       }
 
       const { data: studentsData } = await studentsQuery;
-
-      // Get enrollments with session counts for each student
       const studentIds = (studentsData ?? []).map((s) => s.id);
 
       if (studentIds.length === 0) {
         return { items: [], branches };
       }
 
-      // Get enrollments and pending payments in parallel
-      const [{ data: enrollmentsData }, { data: pendingPaymentsData }] = await Promise.all([
-        supabaseAdmin
-          .from('enrollments')
-          .select(`
-            id,
-            student_id,
-            sessions_remaining
-          `)
-          .in('student_id', studentIds)
-          .in('status', ['active', 'completed']) // Include completed to capture negative sessions
-          .is('deleted_at', null),
-        // Get students who have pending (unpaid) payments
-        supabaseAdmin
-          .from('payments')
-          .select('student_id')
-          .in('student_id', studentIds)
-          .eq('status', 'pending')
-      ]);
+      // Sessions remaining per student (active + completed enrollments).
+      const { data: enrollmentsData } = await supabaseAdmin
+        .from('enrollments')
+        .select('id, student_id, sessions_remaining')
+        .in('student_id', studentIds)
+        .in('status', ['active', 'completed'])
+        .is('deleted_at', null);
 
-      // Build set of students with pending payments
-      const studentsWithPendingPayments = new Set(
-        (pendingPaymentsData ?? []).map((p) => p.student_id)
-      );
-
-      // Calculate sessions left per student (use sessions_remaining directly)
       const sessionsMap: Record<string, number> = {};
       (enrollmentsData ?? []).forEach((e) => {
         const sessionsLeft = e.sessions_remaining ?? 0;
@@ -1067,12 +1102,9 @@ export const getPaymentDueListData = unstable_cache(
         }
       });
 
-      // Filter to students with pending payments
+      // All studentsData rows have pending payments by construction, so no
+      // additional filter is needed here.
       const items: PaymentDueItem[] = (studentsData ?? [])
-        .filter((s) => {
-          const hasPendingPayment = studentsWithPendingPayments.has(s.id);
-          return hasPendingPayment; // Show all students with pending payments
-        })
         .map((s, idx) => ({
           id: s.id,
           studentId: s.id,
@@ -1143,17 +1175,20 @@ export const getBranchOverviewData = unstable_cache(
           .from('enrollments')
           .select('id, student_id, status, enrolled_at')
           .is('deleted_at', null),
-        // All pending payments for these branches
+        // All pending payments for these branches.  Filter out soft-deleted
+        // students so this RM total matches the Payment Due List below.
         supabaseAdmin
           .from('payments')
-          .select('amount, students!inner(branch_id)')
+          .select('amount, students!inner(branch_id, deleted_at)')
           .in('students.branch_id', branchIds)
+          .is('students.deleted_at', null)
           .eq('status', 'pending'),
         // All received payments this month for these branches
         supabaseAdmin
           .from('payments')
-          .select('amount, students!inner(branch_id)')
+          .select('amount, students!inner(branch_id, deleted_at)')
           .in('students.branch_id', branchIds)
+          .is('students.deleted_at', null)
           .eq('status', 'paid')
           .gte('created_at', lastMonth),
         // Trials per branch — used to compute the *real* trial conversion

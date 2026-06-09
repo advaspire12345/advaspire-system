@@ -45,12 +45,19 @@ export default {
     browser.clickButton("Take Attendance");
     browser.sleep(900);
 
-    // 2. Student dropdown — searchable.
-    browser.selectByLabel("Student", args.student);
+    // 2. Student dropdown — searchable: must TYPE to filter (the combobox
+    //    opens with "No options available" until a query is typed).
+    browser.searchAndPick("Student", args.student);
     browser.sleep(500);
 
-    // 3. Program filtered by student's enrollments.
-    browser.selectByLabel("Program", args.course);
+    // 3. Program filtered by student's enrollments — also searchable-style
+    //    but options auto-populate once a student is chosen.  Fall back to
+    //    the legacy non-search helper if the option list is non-empty.
+    try {
+      browser.selectByLabel("Program", args.course);
+    } catch {
+      browser.searchAndPick("Program", args.course);
+    }
     browser.sleep(400);
 
     // 4. Type (Physical/Online).

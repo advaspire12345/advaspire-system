@@ -2736,7 +2736,7 @@ export async function updateSessionTracking(
       period_start,
       pool_id,
       expires_at,
-      package:course_pricing(id, package_type, duration, price, expiry_months)
+      package:course_pricing(id, package_type, duration, price, expiry_weeks)
     `)
     .eq('id', enrollmentId)
     .single();
@@ -2751,7 +2751,7 @@ export async function updateSessionTracking(
     package_type: 'session' | 'monthly';
     duration: number;
     price: number;
-    expiry_months: number | null;
+    expiry_weeks: number | null;
   } | null;
 
   console.log('[Session Tracking] Enrollment data:', {
@@ -2763,15 +2763,32 @@ export async function updateSessionTracking(
     package: packageData,
   });
 
-  // Set expires_at on first attendance if not already set and pricing has expiry_months
-  if (packageData?.expiry_months && !(enrollment as any).expires_at) {
+  // Set expires_at on first attendance if not already set and pricing has expiry_weeks.
+  if (packageData?.expiry_weeks && !(enrollment as any).expires_at) {
     const expiresAt = new Date();
-    expiresAt.setMonth(expiresAt.getMonth() + packageData.expiry_months);
+    expiresAt.setDate(expiresAt.getDate() + packageData.expiry_weeks * 7);
     await supabaseAdmin
       .from('enrollments')
       .update({ expires_at: expiresAt.toISOString() })
       .eq('id', enrollmentId);
     console.log('[Session Tracking] Set expires_at to', expiresAt.toISOString());
+  }
+
+  // Stamp cycle_anchor_date on the first present/late attendance after a
+  // payment was approved. Powers the good-payer voucher window check in
+  // approvePayment — the anchor is cleared at credit time and refilled on
+  // the next attendance.
+  const { data: anchorRow } = await supabaseAdmin
+    .from('enrollments')
+    .select('cycle_anchor_date')
+    .eq('id', enrollmentId)
+    .maybeSingle();
+  if (anchorRow && !(anchorRow as any).cycle_anchor_date) {
+    await supabaseAdmin
+      .from('enrollments')
+      .update({ cycle_anchor_date: attendanceDate })
+      .eq('id', enrollmentId);
+    console.log('[Session Tracking] Stamped cycle_anchor_date =', attendanceDate);
   }
 
   // If no package assigned, still track sessions and create pending payment if needed
@@ -2787,26 +2804,19 @@ export async function updateSessionTracking(
         .maybeSingle();
 
       if (poolMembership) {
-        console.log('[Session Tracking] No package but pooled — deducting from pool');
-        const { deductPoolSession, getPoolById } = await import("./pools");
-        const { createPoolRenewalPayment } = await import("./payments");
+        console.log('[Session Tracking] No package but pooled — per-student deduction');
+        const { deductPoolSessionForStudent, checkPoolCompletionOrExpiry } = await import("./pools");
+        const { createPoolRenewalPaymentsIfBelowThreshold } = await import("./payments");
 
-        const newRemaining = await deductPoolSession(enrollment.pool_id);
-        if (newRemaining === null) {
-          return { success: false, message: 'Failed to deduct from shared pool' };
-        }
+        await deductPoolSessionForStudent(
+          enrollment.pool_id,
+          enrollment.student_id,
+          attendanceDate,
+        );
+        await createPoolRenewalPaymentsIfBelowThreshold(enrollment.pool_id);
+        await checkPoolCompletionOrExpiry(enrollment.pool_id);
 
-        if (newRemaining <= 0) {
-          const pool = await getPoolById(enrollment.pool_id);
-          if (pool) {
-            await createPoolRenewalPayment(enrollment.pool_id);
-          }
-        }
-
-        return {
-          success: true,
-          message: `Shared pool session deducted (no package). ${newRemaining} remaining in pool.`
-        };
+        return { success: true, message: `Per-student pool deduction applied (no package).` };
       }
       // Not in pool_students — stale breadcrumb, fall through to individual deduction
     }
@@ -2920,28 +2930,27 @@ export async function updateSessionTracking(
       .maybeSingle();
 
     if (poolMembershipCheck) {
-      // Deduct from the shared pool - each sibling's attendance deducts 1 session
-      const { deductPoolSession, getPoolById } = await import("./pools");
-      const { createPoolRenewalPayment } = await import("./payments");
+      // Per-student deduction: only the attending student's per-student count
+      // drops. Other pool members are unaffected. Also arms the completion/
+      // expiry window on first attendance after the latest package credit.
+      const { deductPoolSessionForStudent, checkPoolCompletionOrExpiry } = await import("./pools");
+      const { createPoolRenewalPaymentsIfBelowThreshold } = await import("./payments");
 
-      const newRemaining = await deductPoolSession(enrollment.pool_id);
+      await deductPoolSessionForStudent(
+        enrollment.pool_id,
+        enrollment.student_id,
+        attendanceDate,
+      );
 
-      if (newRemaining === null) {
-        return { success: false, message: 'Failed to deduct from shared pool' };
-      }
+      // Renewal + low-sessions notification: trigger when ANY member's
+      // per-student count crosses down to 2. The helper internally dedupes
+      // so we don't spam pending rows on every subsequent attendance.
+      await createPoolRenewalPaymentsIfBelowThreshold(enrollment.pool_id);
 
-      // If pool is depleted (0 or negative), create a renewal payment
-      if (newRemaining <= 0) {
-        const pool = await getPoolById(enrollment.pool_id);
-        if (pool) {
-          await createPoolRenewalPayment(enrollment.pool_id);
-        }
-      }
+      // Completion-voucher / expiry check.
+      await checkPoolCompletionOrExpiry(enrollment.pool_id);
 
-      return {
-        success: true,
-        message: `Shared pool session deducted. ${newRemaining} remaining in pool.`
-      };
+      return { success: true, message: `Per-student pool deduction applied.` };
     }
     // Not in pool_students — stale breadcrumb, fall through to individual deduction
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import { Pencil, Trash2, Plus } from "lucide-react";
@@ -114,6 +114,9 @@ export function TrialTable({
 
   // Bounded progressive loading via the shared hook.
   const [allData, setAllData] = useState<TrialRow[]>(initialData);
+
+  // Resync after router.refresh() so saved/edited/deleted rows appear without a manual reload.
+  useEffect(() => { setAllData(initialData); }, [initialData]);
   useBoundedLoader<TrialRow>({
     initialData,
     totalCount,

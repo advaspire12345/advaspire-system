@@ -357,6 +357,15 @@ export async function linkParentToAuth(parentId: string, authId: string): Promis
 }
 
 export async function softDeleteParent(parentId: string): Promise<boolean> {
+  // Look up the auth_id so we can purge the Supabase Auth user too — otherwise
+  // the email is permanently reserved and re-registering the same parent would
+  // fail with "User already registered".
+  const { data: row } = await supabaseAdmin
+    .from('parents')
+    .select('auth_id')
+    .eq('id', parentId)
+    .maybeSingle();
+
   const { error } = await supabaseAdmin
     .from('parents')
     .update({ deleted_at: new Date().toISOString() })
@@ -365,6 +374,14 @@ export async function softDeleteParent(parentId: string): Promise<boolean> {
   if (error) {
     console.error('Error soft deleting parent:', error);
     return false;
+  }
+
+  if (row?.auth_id) {
+    const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(row.auth_id);
+    if (authErr) {
+      console.error('Error deleting auth.users row for parent:', authErr);
+      // Don't fail the whole delete — the public.parents row is already soft-deleted.
+    }
   }
 
   return true;

@@ -24,6 +24,7 @@ import { ALL_RESOURCES } from "@/db/schema";
 interface BranchOption {
   id: string;
   name: string;
+  type?: string;
 }
 
 interface TeamTableProps {
@@ -153,6 +154,15 @@ export function TeamTable({
     inChargeProgramIds: formData.inChargeProgramIds ?? [],
   });
 
+  // Radix Dialog leaves `body { pointer-events: none }` and `overflow: hidden`
+  // applied while a dialog is mounted; if the React tree re-renders (via
+  // router.refresh) DURING the close animation, Radix's cleanup gets cut off
+  // and the body stays locked → page becomes dark + unscrollable + unclickable.
+  // Delaying the refresh past the close animation (~250ms) lets Radix finish.
+  const refreshAfterDialogClose = () => {
+    setTimeout(() => router.refresh(), 250);
+  };
+
   const handleAdd = async (formData: TeamMemberFormData) => {
     if (!onAdd) return;
     const payload = convertToPayload(formData, true);
@@ -160,7 +170,7 @@ export function TeamTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to create team member");
     }
-    router.refresh();
+    refreshAfterDialogClose();
   };
 
   const handleEdit = async (formData: TeamMemberFormData) => {
@@ -170,7 +180,7 @@ export function TeamTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to update team member");
     }
-    router.refresh();
+    refreshAfterDialogClose();
   };
 
   const handleDelete = async () => {
@@ -179,7 +189,7 @@ export function TeamTable({
     if (!result.success) {
       throw new Error(result.error || "Failed to delete team member");
     }
-    router.refresh();
+    refreshAfterDialogClose();
   };
 
   const openPermissionModal = async (record: TeamTableRow) => {

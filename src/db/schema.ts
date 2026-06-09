@@ -17,13 +17,13 @@ export type UserRole =
 
 export type TeamMemberStatus = 'active' | 'inactive';
 
-export type EnrollmentStatus = 'active' | 'completed' | 'cancelled' | 'expired' | 'pending';
+export type EnrollmentStatus = 'active' | 'completed' | 'cancelled' | 'expired' | 'pending' | 'course_switched';
 
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded' | 'cancelled';
 
-export type PaymentType = 'registration' | 'monthly' | 'package' | 'other';
+export type PaymentType = 'registration' | 'monthly' | 'package' | 'other' | 'settle_deficit';
 
 export type PaymentMethod = 'cash' | 'credit_card' | 'bank_transfer' | 'promptpay' | 'billplz' | 'other';
 
@@ -64,6 +64,13 @@ export interface SharedSessionPool {
   period_start: string | null;
   period_months: number | null;
   parent_id: string | null;
+  // The pricing whose completion/expiry rules currently govern the pool. Set
+  // to the most-recently-credited package and updated on every new credit.
+  current_window_pricing_id: string | null;
+  // The date on which the window started ticking. Set on the first attendance
+  // recorded on or after the latest package credit. NULL = window armed
+  // (credited) but not yet started.
+  window_started_at: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -78,6 +85,9 @@ export interface PoolStudent {
   student_id: string;
   enrollment_id: string;
   joined_at: string;
+  // Per-student session count inside the pool. Set on payment approval via
+  // `creditSessionsToPool` (R1 even-split). Decremented by attendance.
+  sessions_remaining: number;
 }
 
 // ============================================
@@ -258,6 +268,10 @@ export interface Enrollment {
   expires_at: string | null;
   level: number;
   adcoin_balance: number;
+  /** First attendance date after the most recent payment. Powers the
+   * good-payer voucher window check in approvePayment. NULL between
+   * cycles (i.e. no attendance yet against the current credit). */
+  cycle_anchor_date: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -317,6 +331,10 @@ export interface Payment {
   voucher_id: string | null;
   discount_amount: number | null;
   invoice_snapshot: InvoiceSnapshot | null;
+  // When non-null, the approve flow credits this many sessions instead of
+  // looking up the package's `duration`. Used by 'settle_deficit' payments
+  // (partial pay for negative balances) where price is not a fixed package.
+  custom_sessions: number | null;
   // Billplz online-payment fields. Null for cash/offline payments.
   billplz_bill_id: string | null;
   billplz_url: string | null;
@@ -776,6 +794,7 @@ export interface PoolStudentInsert {
   pool_id: string;
   student_id: string;
   enrollment_id: string;
+  sessions_remaining?: number;
 }
 
 // ============================================
@@ -1439,9 +1458,36 @@ export interface CoursePricing {
   duration: number;
   description: string | null;
   is_default: boolean;
-  expiry_months: number | null;
+  expiry_weeks: number | null;
+  completion_months: number | null;
   voucher_id: string | null;
+  voucher_amount: number | null;
+  voucher_deadline_months: number | null;
+  limit_sess: number | null;
+  // How many students one purchase of this package covers. 1 = non-shareable
+  // (each sibling needs their own package); 2+ = up to N siblings share.
+  max_students_per_pool: number;
+  // Inactivity reminder config (Phase A1). When NULL, the cron derives the
+  // window from expiry_weeks (half of the expiry window, min 2 weeks).
+  inactivity_warning_weeks: number | null;
+  reminder_interval_days: number;
+  // Good-payer reward (Phase A3) now uses voucher_id + completion_months
+  // directly — the legacy dedicated columns were dropped 2026-06-06.
   deleted_at: string | null;
+}
+
+/**
+ * Course-switch audit row (Phase A2). Recorded each time an admin moves a
+ * student from one course to another, carrying over `sessions_moved`.
+ */
+export interface EnrollmentCourseSwitch {
+  id: string;
+  from_enrollment_id: string;
+  to_enrollment_id: string;
+  sessions_moved: number;
+  actor_user_id: string | null;
+  notes: string | null;
+  created_at: string;
 }
 
 // ============================================
@@ -1523,7 +1569,7 @@ export interface CoursePricingInsert {
   duration: number;
   description?: string | null;
   is_default?: boolean;
-  expiry_months?: number | null;
+  expiry_weeks?: number | null;
   voucher_amount?: number | null;
   voucher_deadline_months?: number | null;
 }
@@ -1586,7 +1632,7 @@ export interface CoursePricingUpdate {
   duration?: number;
   description?: string | null;
   is_default?: boolean;
-  expiry_months?: number | null;
+  expiry_weeks?: number | null;
   voucher_amount?: number | null;
   voucher_deadline_months?: number | null;
 }
@@ -1904,6 +1950,7 @@ export interface RolePermission {
   id: string;
   role: string;
   company_id: string | null;
+  branch_id: string | null;
   resource: PermissionResource;
   can_view: boolean;
   can_create: boolean;
@@ -2171,4 +2218,42 @@ export interface SessionRescheduleUpdate {
   origin_event_id?: string | null;
   target_event_id?: string | null;
   updated_at?: string;
+}
+
+// ============================================
+// SESSION TRANSFER (cross-parent gift of sessions)
+// ============================================
+
+export type SessionTransferStatus =
+  | 'pending_sender'    // admin created it; awaiting from-parent approval
+  | 'pending_receiver'  // from-parent approved; awaiting to-parent acceptance
+  | 'executed'          // both approved; sessions moved
+  | 'cancelled';        // either party rejected
+
+export interface SessionTransfer {
+  id: string;
+  from_student_id: string;
+  to_student_id: string;
+  course_id: string;
+  sessions: number;
+  status: SessionTransferStatus;
+  sender_approved_at: string | null;
+  receiver_accepted_at: string | null;
+  executed_at: string | null;
+  cancelled_by_role: 'sender' | 'receiver' | 'admin' | null;
+  cancelled_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  notes: string | null;
+}
+
+export interface SessionTransferInsert {
+  from_student_id: string;
+  to_student_id: string;
+  course_id: string;
+  sessions: number;
+  status?: SessionTransferStatus;
+  created_by?: string | null;
+  notes?: string | null;
 }

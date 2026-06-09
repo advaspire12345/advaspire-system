@@ -1,0 +1,32 @@
+name: activity-broadcast
+description: |
+  Admin creates an activity event — verifies event_type='activity'
+  lands so students can see it.
+
+fixtures:
+  branch:
+    name: "Act Branch"
+    code: "ACT"
+    parent: "ADS"
+  course:
+    name: "ActCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+
+steps:
+  - actor: aa
+    action: create_event
+    with:
+      event_type: "activity"
+      title: "Robotics Competition"
+      date: "TODAY+14"
+      description: "Inter-branch competition"
+    observers: auto
+
+teardown: manual

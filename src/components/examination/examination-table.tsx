@@ -123,6 +123,9 @@ export function ExaminationTable({
 
   // Bounded progressive loading via the shared hook.
   const [serverData, setServerData] = useState<ExaminationTableRow[]>(initialData);
+
+  // Resync after router.refresh() so saved/edited/deleted rows appear without a manual reload.
+  useEffect(() => { setServerData(initialData); }, [initialData]);
   const { isLoadingMore } = useBoundedLoader<ExaminationTableRow>({
     initialData,
     totalCount,

@@ -94,12 +94,18 @@ export const TOUR_STEPS: Record<UserRole, TourStep[]> = {
   ],
 
   company_admin: [
-    HELP_BUTTON_STEP,
     {
       selector: 'a[href="/student"], a[href="/students"]',
-      title: "Add and manage students",
+      title: "Start here — add your students",
       body:
         "Adding a student auto-creates their parent (if new), the enrollment, and the first pending payment. Siblings sharing: add the first as INDIVIDUAL, then add the second with 'Share with sibling' checked.",
+    },
+    HELP_BUTTON_STEP,
+    {
+      selector: 'a[href="/team"]',
+      title: "Add your assistant admins and instructors",
+      body:
+        "Invite your branch team here: assistant_admin to help with day-to-day admin (trials, students, attendance), and instructor accounts for the people teaching the classes. Assign each instructor to the programs they teach so they only see what's theirs.",
     },
     {
       selector: 'a[href="/slot"], a[href="/slots"]',

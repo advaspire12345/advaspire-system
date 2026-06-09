@@ -82,10 +82,46 @@ export async function GET(request: NextRequest) {
     const poolInfo = await getSiblingPoolInfo(parentId, courseId);
 
     if (poolInfo && poolInfo.siblings.length > 0) {
+      // Compute effective capacity = MAX(max_students_per_pool) across the
+      // pricings of every payment currently contributing sessions to the pool.
+      let effectiveCapacity = 1;
+      const { data: contributingEnrollments } = await supabaseAdmin
+        .from('enrollments')
+        .select('package_id')
+        .eq('pool_id', poolInfo.poolId)
+        .eq('status', 'active')
+        .is('deleted_at', null);
+      const pricingIds = Array.from(
+        new Set(((contributingEnrollments ?? []) as Array<{ package_id: string | null }>)
+          .map((e) => e.package_id)
+          .filter((id): id is string => !!id)),
+      );
+      if (pricingIds.length > 0) {
+        const { data: pricings } = await supabaseAdmin
+          .from('course_pricing')
+          .select('max_students_per_pool')
+          .in('id', pricingIds);
+        effectiveCapacity = Math.max(
+          1,
+          ...((pricings ?? []) as Array<{ max_students_per_pool: number | null }>).map(
+            (p) => p.max_students_per_pool ?? 1,
+          ),
+        );
+      }
+      const currentMemberCount = poolInfo.siblings.length;
+      // ADD mode: new student is not yet a member → can auto-join if there's room AND the governing package supports ≥2 students.
+      const canJoinExistingPool = !excludeStudentId
+        && currentMemberCount < effectiveCapacity
+        && effectiveCapacity >= 2;
       return NextResponse.json({
         hasPool: true,
         parentChildCount,
-        poolInfo,
+        poolInfo: {
+          ...poolInfo,
+          effectiveCapacity,
+          currentMemberCount,
+          canJoinExistingPool,
+        },
       });
     }
     // If pool exists but has no active members, continue to check sibling enrollments

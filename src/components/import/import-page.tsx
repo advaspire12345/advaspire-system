@@ -24,6 +24,10 @@ interface SlotOption {
   day: string;
   time: string;
   limit_student: number;
+  /** Branch name shown next to the slot row when the importer can see more
+   *  than one branch (group_admin / super_admin). NULL for company_admin and
+   *  other single-branch users — the branch label would be redundant noise. */
+  branch?: string | null;
 }
 interface ProgramSlots {
   program: string;
@@ -32,6 +36,10 @@ interface ProgramSlots {
 interface InstructorOption {
   name: string;
   email: string;
+  /** Branch label shown when the importer sees more than one branch
+   *  (group_admin / super_admin). NULL for single-branch users — the label
+   *  would be redundant noise in that case. */
+  branch?: string | null;
 }
 
 interface ImportPageProps {
@@ -1431,7 +1439,10 @@ function StudentsFieldReference({
                 <div className="text-xs font-bold text-[#3e3f5e] mb-1 truncate">{ps.program}</div>
                 <ul className="text-xs space-y-0.5">
                   {ps.slots.map((s, idx) => (
-                    <li key={`${s.day}-${s.time}-${idx}`} className="text-muted-foreground">
+                    <li key={`${s.branch ?? ''}-${s.day}-${s.time}-${idx}`} className="text-muted-foreground">
+                      {s.branch && (
+                        <span className="text-[#615DFA] font-semibold">{s.branch} · </span>
+                      )}
                       {s.day} {s.time}
                       <span className="text-[#3e3f5e]"> (cap {s.limit_student})</span>
                     </li>
@@ -1517,7 +1528,10 @@ function AttendanceFieldReference({ instructorOptions }: { instructorOptions: In
     {
       title: "Instructors (for instructor_name)",
       emptyText: "No instructors available.",
-      items: instructorOptions.map((u) => ({ primary: u.name, secondary: `(${u.email})` })),
+      items: instructorOptions.map((u) => ({
+        primary: u.name,
+        secondary: u.branch ? `(${u.email}) · ${u.branch}` : `(${u.email})`,
+      })),
     },
   ];
   return (
@@ -1578,7 +1592,10 @@ function TransactionsFieldReference({ instructorOptions }: { instructorOptions: 
     {
       title: "Team members (for user emails)",
       emptyText: "No team members available.",
-      items: instructorOptions.map((u) => ({ primary: u.email, secondary: `(${u.name})` })),
+      items: instructorOptions.map((u) => ({
+        primary: u.email,
+        secondary: u.branch ? `(${u.name}) · ${u.branch}` : `(${u.name})`,
+      })),
     },
   ];
   return (

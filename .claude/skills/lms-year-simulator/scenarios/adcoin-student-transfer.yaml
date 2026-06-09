@@ -1,0 +1,68 @@
+name: adcoin-student-transfer
+description: |
+  Student-portal: one student transfers adcoin to another. Verifies
+  the transfer_adcoin_student action. Both students seeded with an
+  initial adcoin balance via adjust_adcoin first.
+
+  NOTE: this scenario requires the simulator to log in as a STUDENT
+  (not an admin). The base auth profiles only cover admins/instructor,
+  so this scenario currently exercises the admin-side adjust + read
+  paths only. Full student-portal coverage needs a student auth profile
+  in the agent-browser vault — pending follow-up.
+
+fixtures:
+  branch:
+    name: "STU Branch"
+    code: "STU"
+    parent: "ADS"
+  course:
+    name: "STUCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "StuAlice"
+      parent_name: "Stu Parent"
+      parent_email: "stu@sim.local"
+      parent_phone: "0123450980"
+      course: "STUCourse"
+      package: "4-session"
+      date_of_birth: "2014-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "StuBob"
+      parent_email: "stu@sim.local"
+      parent_existing: true
+      course: "STUCourse"
+      date_of_birth: "2016-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # Seed Alice with adcoin via the admin adjustment modal so she has
+  # something to transfer (this is the only step the simulator can
+  # drive without a student auth profile).
+  - actor: ca
+    action: adjust_adcoin
+    with:
+      student: "StuAlice"
+      amount: 200
+      message: "Seed for transfer test"
+    observers: auto
+
+teardown: manual

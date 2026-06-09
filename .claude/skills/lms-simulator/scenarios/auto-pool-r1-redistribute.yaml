@@ -1,0 +1,101 @@
+name: auto-pool-r1-redistribute
+description: |
+  Verify Part A auto-pool with R1 redistribution.
+
+  Two siblings on the default 4-session-max-1 package. After both pay:
+    - A pool is auto-created (no Shared button to click — pooling is automatic).
+    - R1 redistribution kicks in on the 2nd payment approval:
+        total = 4 + 4 = 8, member_count = 2 → each = 4.
+    - pool.sessions_remaining should reflect the sum.
+    - Each pool_student.sessions_remaining = 4.
+
+  Then mark Abu present and verify only Abu's per-student count drops to 3.
+
+fixtures:
+  branch:
+    name: "Sim AP Branch"
+    code: "APB1"
+    parent: "ADS"
+  course:
+    name: "APCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  # 1. First sibling — Ali, 4-session package.
+  - actor: aa
+    action: add_student
+    with:
+      name: "AliAP"
+      parent_name: "AP Parent"
+      parent_email: "pAP@sim.local"
+      parent_phone: "0123450099"
+      course: "APCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "AliAP"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "AliAP"
+    observers: auto
+
+  # 2. Second sibling — Abu, same parent + course. Default pkg is max=1,
+  #    so the modal still shows the package picker. Abu also gets a 4-session.
+  - actor: aa
+    action: add_student
+    with:
+      name: "AbuAP"
+      parent_email: "pAP@sim.local"
+      parent_existing: true
+      course: "APCourse"
+      package: "4-session"
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "AbuAP"
+    observers: auto
+
+  # 3. Approving Abu's payment triggers R1: total = 4 + 4 = 8 → 4 each.
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "AbuAP"
+    observers: auto
+    expect:
+      "*.pool.sessions_remaining": 8
+      "*.pool.active_students": 2
+
+  # 4. Mark Abu present → per-student deduction: Abu = 3, Ali stays at 4.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "AbuAP"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+teardown: auto

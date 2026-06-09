@@ -17,12 +17,43 @@ export interface VoucherTableRow {
   expiryDate: string | null;
 }
 
-async function getVouchers(): Promise<VoucherTableRow[]> {
-  const { data, error } = await supabaseAdmin
+async function getVouchers(userEmail: string): Promise<VoucherTableRow[]> {
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("@/data/users");
+
+  // Resolve current user's company id (NULL = super_admin, sees all).
+  let companyId: string | null = null;
+  if (!isSuperAdmin(userEmail)) {
+    const u = await getUserByEmail(userEmail);
+    if (u?.branch_id) {
+      const { data: b } = await supabaseAdmin
+        .from("branches")
+        .select("id, type, parent_id")
+        .eq("id", u.branch_id)
+        .maybeSingle();
+      if (b) companyId = b.type === "company" ? b.id : b.parent_id;
+    }
+    // If the user is restricted but we couldn't resolve a company, they see
+    // nothing (avoids leaking other companies' vouchers).
+    if (!companyId) {
+      const branchIds = await getUserBranchIds(userEmail);
+      if (branchIds === null) {
+        // resolved to super_admin via the role check inside getUserBranchIds
+      } else {
+        return [];
+      }
+    }
+  }
+
+  let query = supabaseAdmin
     .from("vouchers")
     .select("id, code, discount_type, discount_value, expiry_type, expiry_months, expiry_date")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+    .is("deleted_at", null);
+
+  if (companyId) {
+    query = query.eq("company_id", companyId);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     console.error("Error fetching vouchers:", error);
@@ -48,7 +79,7 @@ export default async function VoucherPage() {
   const perms = permData?.permissions.vouchers;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
-  const vouchers = await getVouchers();
+  const vouchers = await getVouchers(user.email);
 
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">

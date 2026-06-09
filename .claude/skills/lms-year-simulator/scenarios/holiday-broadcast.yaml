@@ -1,0 +1,33 @@
+name: holiday-broadcast
+description: |
+  Admin creates a holiday event — verifies it lands in the events
+  table with event_type='holiday' so all roles can see it on the
+  calendar.
+
+fixtures:
+  branch:
+    name: "Hol Branch"
+    code: "HOL"
+    parent: "ADS"
+  course:
+    name: "HolCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+
+steps:
+  - actor: aa
+    action: create_event
+    with:
+      event_type: "holiday"
+      title: "Hari Raya"
+      date: "TODAY+30"
+      description: "Office closed"
+    observers: auto
+
+teardown: manual

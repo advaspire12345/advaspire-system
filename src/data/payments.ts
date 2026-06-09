@@ -1095,10 +1095,46 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
   // Create frozen invoice snapshot (immutable after 1 week)
   await createInvoiceSnapshot(paymentId);
 
+  // ─── Settle-deficit / custom-sessions short-circuit ────────────────────
+  // When `custom_sessions` is set (payment_type = 'settle_deficit', or any
+  // ad-hoc partial payment), credit exactly that many sessions and skip the
+  // package-duration lookup AND the auto-renewal check entirely. Paying down
+  // negative balance shouldn't spawn a new pending row.
+  if (payment.custom_sessions != null && payment.custom_sessions > 0) {
+    const customN = payment.custom_sessions;
+    if (payment.pool_id) {
+      const { creditSessionsToPool } = await import("./pools");
+      await creditSessionsToPool(payment.pool_id, customN, payment.student_id, payment.package_id);
+    } else {
+      // Find the enrollment to credit.
+      const { data: enrRow } = await supabaseAdmin
+        .from('enrollments')
+        .select('id, sessions_remaining')
+        .eq('student_id', payment.student_id)
+        .in('status', ['active', 'expired'])
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (enrRow) {
+        await supabaseAdmin
+          .from('enrollments')
+          .update({
+            sessions_remaining: (enrRow.sessions_remaining ?? 0) + customN,
+            status: 'active',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', enrRow.id);
+      }
+    }
+    return updatedPayment;
+  }
+
   // Check if this is a pool payment (shared sibling package)
   if (payment.pool_id) {
     // Add sessions to the shared pool instead of individual enrollment
-    const { addPoolSessions, getPoolById } = await import("./pools");
+    // (legacy import removed — creditSessionsToPool / getPoolById are now
+    // imported inline at the call sites that need them.)
 
     // Get the pricing info to know how many sessions to add
     if (payment.course_id && payment.amount) {
@@ -1112,8 +1148,14 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
 
       if (pricingData) {
         const sessionsToAdd = pricingData.duration;
-        const newRemaining = await addPoolSessions(payment.pool_id, sessionsToAdd);
-        console.log(`[Pool Payment] Added ${sessionsToAdd} sessions to pool ${payment.pool_id}. New remaining: ${newRemaining}`);
+        // Per-student R1 redistribution: total = sum(per-student) + new N,
+        // each member gets floor(total / count), payer gets the remainder.
+        // Also re-arms the completion/expiry window for the new pricing.
+        const { creditSessionsToPool, getPoolById } = await import("./pools");
+        await creditSessionsToPool(payment.pool_id, sessionsToAdd, payment.student_id, pricingData.id);
+        const poolAfter = await getPoolById(payment.pool_id);
+        const newRemaining = poolAfter?.sessions_remaining ?? null;
+        console.log(`[Pool Payment] Credited ${sessionsToAdd} via R1 redistribution to pool ${payment.pool_id}. New total: ${newRemaining}`);
 
         // Set package_id on the payment if not already set
         if (!payment.package_id) {
@@ -1263,6 +1305,20 @@ export async function approvePayment(paymentId: string): Promise<Payment | null>
         }
 
         console.log(`[Payment Approval] Sessions updated: ${currentSessions} + ${sessionsToAdd} = ${newSessions}`);
+
+        // Good-payer voucher (Phase A3): if the parent paid the renewal
+        // within the per-pricing window measured from the cycle anchor,
+        // grant the configured voucher. No-op for the first purchase
+        // (cycle_anchor_date is NULL before the first attendance).
+        try {
+          const { checkAndCreateGoodPayerVoucher } = await import("./vouchers");
+          const voucher = await checkAndCreateGoodPayerVoucher(enrollment.id);
+          if (voucher) {
+            console.log(`[Payment Approval] Good-payer voucher granted: ${voucher.id}`);
+          }
+        } catch (err) {
+          console.warn("[Payment Approval] good-payer voucher check failed:", err);
+        }
       } else {
         // No pricing found - just log and check if renewal needed based on current sessions
         console.log(`[Payment Approval] No pricing data found, current sessions: ${currentSessions}`);
@@ -2048,6 +2104,120 @@ export async function getPaymentRecordsForTablePaginated(
 // ============================================
 // POOL RENEWAL PAYMENTS
 // ============================================
+
+/**
+ * Per-student threshold-driven renewal. Called after every pool attendance.
+ *
+ * Behaviour:
+ *   1. Read per-student counts from `pool_students`. If no member is at <= 2,
+ *      do nothing (return).
+ *   2. Dedup: if there's ANY pending payment row already for this pool, skip
+ *      — the parent already has something to act on.
+ *   3. Compute packages_needed = ceil(member_count / max_students_per_pool)
+ *      of the most-recently-used package on the pool.
+ *   4. Insert that many pending payment rows.
+ *   5. Insert a "low sessions" notification once (deduped by the existing
+ *      notification key system).
+ *
+ * Single threshold (2 per student) for both the notification and the
+ * pending row, per design.
+ */
+const LOW_SESSIONS_PER_STUDENT = 2;
+
+export async function createPoolRenewalPaymentsIfBelowThreshold(
+  poolId: string,
+): Promise<void> {
+  const { data: members } = await supabaseAdmin
+    .from('pool_students')
+    .select('student_id, sessions_remaining')
+    .eq('pool_id', poolId);
+  const rows = (members ?? []) as Array<{ student_id: string; sessions_remaining: number }>;
+  if (rows.length === 0) return;
+
+  const minPerStudent = Math.min(...rows.map((r) => r.sessions_remaining ?? 0));
+  if (minPerStudent > LOW_SESSIONS_PER_STUDENT) return;
+
+  // Dedup — any pending row for this pool means we already nudged.
+  const { data: existingPending } = await supabaseAdmin
+    .from('payments')
+    .select('id')
+    .eq('pool_id', poolId)
+    .eq('status', 'pending')
+    .limit(1);
+  if ((existingPending ?? []).length > 0) return;
+
+  // Look up the pool + its most-recently-used pricing for the package shape.
+  const { data: pool } = await supabaseAdmin
+    .from('shared_session_pools')
+    .select('id, course_id, package_id, current_window_pricing_id, parent_id, name')
+    .eq('id', poolId)
+    .maybeSingle();
+  if (!pool) return;
+
+  const pricingId = (pool.current_window_pricing_id as string | null) ?? (pool.package_id as string | null);
+  if (!pricingId) return;
+  const { data: pricing } = await supabaseAdmin
+    .from('course_pricing')
+    .select('id, price, max_students_per_pool')
+    .eq('id', pricingId)
+    .maybeSingle();
+  if (!pricing) return;
+
+  const memberCount = rows.length;
+  const cap = (pricing.max_students_per_pool as number | null) ?? 1;
+  const packagesNeeded = Math.max(1, Math.ceil(memberCount / Math.max(1, cap)));
+
+  // Spread the rows across the pool's students so admins know who to chase.
+  // First N students get a row each; if N > memberCount, extras assigned to
+  // the first student.
+  const studentIds = rows.map((r) => r.student_id);
+  for (let i = 0; i < packagesNeeded; i++) {
+    const ownerStudentId = studentIds[i] ?? studentIds[0];
+    const paymentData: PaymentInsert = {
+      student_id: ownerStudentId,
+      course_id: pool.course_id as string | null,
+      package_id: pricing.id,
+      pool_id: poolId,
+      amount: Number(pricing.price ?? 0),
+      payment_type: 'package',
+      status: 'pending',
+      is_shared_package: true,
+      shared_with: studentIds,
+      notes: `Auto-renewal ${i + 1}/${packagesNeeded} for pool ${pool.name || pool.id}`,
+    };
+    await createPayment(paymentData);
+  }
+
+  // Fire low-sessions notification. Best-effort — uses notifyStaff helper if
+  // a branch is resolvable from the pool's students; otherwise skipped.
+  try {
+    const { notifyStaff } = await import('./notifications');
+    const firstStudentId = studentIds[0];
+    if (firstStudentId) {
+      const { data: stu } = await supabaseAdmin
+        .from('students')
+        .select('branch_id, branch:branches!students_branch_id_branches_id_fk(parent_id, type)')
+        .eq('id', firstStudentId)
+        .maybeSingle();
+      const branch = (stu?.branch as unknown as { parent_id: string | null; type: string } | null) ?? null;
+      const companyId = branch?.type === 'company' ? stu?.branch_id : branch?.parent_id;
+      if (companyId) {
+        await notifyStaff(
+          { roles: ['instructor', 'assistant_admin', 'company_admin'], companyId },
+          {
+            type: 'pool_low_sessions',
+            title: 'Pool sessions running low',
+            body: `${pool.name || 'Sibling pool'} has a member at ${LOW_SESSIONS_PER_STUDENT} sessions remaining. ${packagesNeeded} pending payment row(s) created.`,
+            link: `/pending-payments`,
+            data: { poolId, packagesNeeded },
+          },
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[createPoolRenewalPaymentsIfBelowThreshold] notify failed:', err);
+  }
+}
 
 /**
  * Create a pending payment for a shared session pool when sessions are depleted

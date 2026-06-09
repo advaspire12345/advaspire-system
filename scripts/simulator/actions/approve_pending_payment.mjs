@@ -49,7 +49,19 @@ export default {
       }
       return 'no_row';
     })()`;
-    const out = browser.ab(`eval "${findAndClick.replace(/"/g, '\\"')}"`);
+    // Retry the lookup a few times — under load Next.js sometimes serves
+    // a slightly-stale /pending-payments render that doesn't yet include
+    // the row inserted milliseconds earlier by add_student/mark_offline_paid.
+    // Total wait budget ≈ 6s.
+    let out = "";
+    for (let attempt = 0; attempt < 6; attempt++) {
+      out = browser.ab(`eval "${findAndClick.replace(/"/g, '\\"')}"`);
+      if (out.includes("clicked")) break;
+      if (out.includes("disabled")) break; // row found but not ready — fail fast
+      // No row yet — wait, soft-reload, retry.
+      browser.sleep(1000);
+      if (attempt === 2) browser.open("/pending-payments");
+    }
     if (out.includes("no_row")) {
       throw new Error(`approve_pending_payment: no pending-payment row for "${args.student}"`);
     }

@@ -1,0 +1,74 @@
+name: exam-fail-then-8week-reattempt
+description: |
+  Scenario C — failing an exam auto-schedules a reattempt 8 weeks later,
+  snapped to the enrollment's class day (Monday in this fixture).
+
+  Setup: same as the pass scenario. Mark present once → auto-create exam at
+  Level 1. CA edits the row to Status="Fail". handleFailStatus should
+  insert a new status='scheduled' row with reattempt_count=1, exam_date set
+  to the next Monday at +56 days from the failed exam's date.
+
+fixtures:
+  branch:
+    name: "Sim Fail Branch"
+    code: "SFB1"
+    parent: "ADS"
+  course:
+    name: "FailCourse"
+    levels: 4
+    sessions_to_level_up: 2
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Carl"
+      parent_name: "Fail Parent"
+      parent_email: "failp@sim.local"
+      parent_phone: "0123450095"
+      course: "FailCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Carl"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Carl"
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Carl"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # Mark the auto-created exam as FAIL → handleFailStatus schedules reattempt
+  - actor: ca
+    action: mark_exam_decision
+    with:
+      student: "Carl"
+      decision: "fail"
+      mark: 35
+    observers: auto
+
+teardown: auto
