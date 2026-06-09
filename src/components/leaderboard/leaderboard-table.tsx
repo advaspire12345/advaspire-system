@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import { ArrowLeftRight, Plus, Settings, Star } from "lucide-react";
@@ -84,6 +84,9 @@ export function LeaderboardTable({
 
   // Bounded progressive loading via the shared hook.
   const [allData, setAllData] = useState<LeaderboardEntry[]>(initialData);
+
+  // Resync after router.refresh() so saved/edited/deleted rows appear without a manual reload.
+  useEffect(() => { setAllData(initialData); }, [initialData]);
   const { isLoadingMore } = useBoundedLoader<LeaderboardEntry>({
     initialData,
     totalCount,

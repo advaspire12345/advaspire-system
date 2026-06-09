@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import Image from "next/image";
@@ -44,6 +44,9 @@ interface ProgramTableProps {
   onEdit?: (programId: string, payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
   onDelete?: (programId: string) => Promise<{ success: boolean; error?: string }>;
   onCreateCategory?: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
+  onUpdateCategory?: (id: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  onDeleteCategory?: (id: string) => Promise<{ success: boolean; inUse?: boolean; error?: string }>;
+  categoryUsage?: Record<string, number>;
   onFetchProgram: (programId: string) => Promise<{ success: boolean; data?: ProgramFull; error?: string }>;
   onUploadCoverImage?: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
 }
@@ -122,6 +125,9 @@ export function ProgramTable({
   onEdit,
   onDelete,
   onCreateCategory,
+  onUpdateCategory,
+  onDeleteCategory,
+  categoryUsage = {},
   onFetchProgram,
   onUploadCoverImage,
 }: ProgramTableProps) {
@@ -131,6 +137,14 @@ export function ProgramTable({
 
   // Bounded progressive loading via the shared hook.
   const [allData, setAllData] = useState<ProgramTableRow[]>(initialData);
+
+  // After a save (router.refresh() in handleAdd / handleEdit / handleDelete)
+  // the server returns fresh initialData but the local allData state is
+  // only seeded once on mount, so it would stay stale.  Resync on every
+  // initialData change so newly-saved rows appear without a hard refresh.
+  useEffect(() => {
+    setAllData(initialData);
+  }, [initialData]);
   useBoundedLoader<ProgramTableRow>({
     initialData,
     totalCount,
@@ -527,6 +541,9 @@ export function ProgramTable({
         onEdit={handleEdit}
         onDelete={handleDelete}
         onCreateCategory={onCreateCategory}
+        onUpdateCategory={onUpdateCategory}
+        onDeleteCategory={onDeleteCategory}
+        categoryUsage={categoryUsage}
         onFetchProgram={onFetchProgram}
         onUploadCoverImage={onUploadCoverImage}
       />

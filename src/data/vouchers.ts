@@ -238,3 +238,85 @@ export async function checkAndCreateVoucher(enrollmentId: string): Promise<Vouch
     amount,
   });
 }
+
+// ============================================
+// GOOD-PAYER VOUCHER (Phase A3)
+// ============================================
+
+/**
+ * Grant a good-payer voucher to the student behind this enrollment if
+ * the renewal payment arrived within `good_payer_voucher_window_days`
+ * of the cycle anchor (first attendance after the previous credit).
+ *
+ * Idempotent per cycle: clears `enrollments.cycle_anchor_date` after a
+ * grant so the next cycle is judged independently.
+ *
+ * Returns the voucher row if granted, else null.
+ */
+export async function checkAndCreateGoodPayerVoucher(
+  enrollmentId: string,
+): Promise<Voucher | null> {
+  const { data: enrollment } = await supabaseAdmin
+    .from('enrollments')
+    .select(`
+      id, student_id, course_id, package_id, cycle_anchor_date,
+      package:course_pricing!enrollments_package_id_course_pricing_fk(
+        id, voucher_id, completion_months
+      )
+    `)
+    .eq('id', enrollmentId)
+    .maybeSingle();
+  if (!enrollment) return null;
+
+  const pricing = (enrollment as any).package as {
+    id: string;
+    voucher_id: string | null;
+    completion_months: number | null;
+  } | null;
+  const anchor = (enrollment as any).cycle_anchor_date as string | null;
+  const rewardVoucherId = pricing?.voucher_id ?? null;
+  if (!rewardVoucherId) return null;
+  if (!anchor) return null; // no cycle yet (first purchase) — nothing to reward.
+
+  // Use completion_months as the good-payer window (months, not days) so the
+  // configured value means the same thing in both contexts.  Default to a
+  // 1-month window if not set.
+  const windowMonths = pricing?.completion_months ?? 1;
+  const anchorDate = new Date(anchor + 'T00:00:00');
+  const deadline = new Date(anchorDate);
+  deadline.setMonth(deadline.getMonth() + windowMonths);
+  if (new Date() > deadline) {
+    // Outside the window — no reward, but still clear the anchor so the
+    // next cycle starts fresh on the next attendance.
+    await supabaseAdmin
+      .from('enrollments')
+      .update({ cycle_anchor_date: null })
+      .eq('id', enrollmentId);
+    return null;
+  }
+
+  // Look up the voucher template amount.
+  const { data: voucherRecord } = await supabaseAdmin
+    .from('vouchers')
+    .select('discount_value')
+    .eq('id', rewardVoucherId as string)
+    .single();
+  const amount = voucherRecord?.discount_value ?? 0;
+
+  if (!pricing?.id) return null;
+  const granted = await createVoucher({
+    student_id: (enrollment as any).student_id,
+    enrollment_id: enrollmentId,
+    pricing_id: pricing.id,
+    course_id: (enrollment as any).course_id,
+    amount,
+  });
+
+  // Clear the anchor — next attendance after this credit starts the new cycle.
+  await supabaseAdmin
+    .from('enrollments')
+    .update({ cycle_anchor_date: null })
+    .eq('id', enrollmentId);
+
+  return granted;
+}

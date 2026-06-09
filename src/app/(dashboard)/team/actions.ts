@@ -181,6 +181,14 @@ export async function deleteTeamMemberAction(
   try {
     await authorizeAction('team', 'can_delete');
 
+    // Refuse self-delete. Deleting your own row kills your public.users + auth
+    // simultaneously and traps the next page render in a dashboard ↔ /login
+    // redirect loop. Self-management goes through /profile.
+    const actor = await getCurrentUserPermissions();
+    if (actor?.userId === userId) {
+      return { success: false, error: "You can't delete your own account from here. Use /profile to manage your account." };
+    }
+
     const success = await softDeleteTeamMember(userId);
 
     if (!success) {
@@ -246,7 +254,11 @@ export async function loadUserPermissionsAction(
 // ROLE PERMISSION ACTIONS
 // ============================================
 
-async function getCurrentCompanyId(): Promise<string | null> {
+async function getCurrentScope(): Promise<{
+  companyId: string | null;
+  branchId: string | null;
+  role: string;
+} | null> {
   const permData = await getCurrentUserPermissions();
   if (!permData) return null;
 
@@ -256,17 +268,61 @@ async function getCurrentCompanyId(): Promise<string | null> {
     .eq("id", permData.userId)
     .single();
 
-  if (!user?.branch_id) return null;
-  return resolveCompanyId(user.branch_id);
+  const branchId = user?.branch_id ?? null;
+  const companyId = branchId ? await resolveCompanyId(branchId) : null;
+  return { companyId, branchId, role: permData.role };
+}
+
+/**
+ * Resolve the (company, branch) scope to read or write a role's permissions
+ * for, given who is editing and which role tab they picked.
+ *
+ *   super_admin   → editing group_admin: global (NULL, NULL)
+ *   group_admin   → editing any role under their company: (company, NULL)
+ *   company_admin → editing assistant_admin / instructor / custom: (company, own branch)
+ */
+function resolveSaveScope(
+  actorRole: string,
+  actorCompanyId: string | null,
+  actorBranchId: string | null,
+  targetRole: string,
+): { companyId: string | null; branchId: string | null } | { error: string } {
+  if (actorRole === "super_admin") {
+    if (targetRole !== "group_admin") {
+      return { error: "Super Admin manages Group Admin permissions only here." };
+    }
+    return { companyId: null, branchId: null };
+  }
+  if (actorRole === "group_admin") {
+    if (!actorCompanyId) return { error: "No company found" };
+    if (targetRole === "group_admin") {
+      return { error: "Group Admin permissions are managed by Super Admin." };
+    }
+    return { companyId: actorCompanyId, branchId: null };
+  }
+  if (actorRole === "company_admin") {
+    if (!actorCompanyId || !actorBranchId) return { error: "Missing branch context" };
+    if (targetRole !== "assistant_admin" && targetRole !== "instructor" && !targetRole.startsWith("custom:")) {
+      return { error: "You can only edit permissions for Assistant Admin and Instructor roles" };
+    }
+    return { companyId: actorCompanyId, branchId: actorBranchId };
+  }
+  return { error: "You do not have permission to edit role permissions." };
 }
 
 export async function loadRolePermissionsAction(
   role: string
 ): Promise<PermissionsMap | null> {
   try {
-    const companyId = await getCurrentCompanyId();
-    if (!companyId) return null;
-    return getRolePermissions(role, companyId);
+    const scope = await getCurrentScope();
+    if (!scope) return null;
+    const resolved = resolveSaveScope(scope.role, scope.companyId, scope.branchId, role);
+    if ("error" in resolved) {
+      // Fall back to whatever lookup is reasonable for read context — defaults
+      // to global so the modal can still render the values.
+      return getRolePermissions(role, scope.companyId, null);
+    }
+    return getRolePermissions(role, resolved.companyId, resolved.branchId);
   } catch (error) {
     console.error("Error loading role permissions:", error);
     return null;
@@ -280,20 +336,13 @@ export async function saveRolePermissionsAction(
   try {
     await authorizeAction("team", "can_edit");
 
-    const permData = await getCurrentUserPermissions();
-    if (!permData) return { success: false, error: "Unauthorized" };
+    const scope = await getCurrentScope();
+    if (!scope) return { success: false, error: "Unauthorized" };
 
-    // company_admin can only edit assistant_admin and instructor
-    if (permData.role === "company_admin") {
-      if (role !== "assistant_admin" && role !== "instructor" && !role.startsWith("custom:")) {
-        return { success: false, error: "You can only edit permissions for Assistant Admin and Instructor roles" };
-      }
-    }
+    const resolved = resolveSaveScope(scope.role, scope.companyId, scope.branchId, role);
+    if ("error" in resolved) return { success: false, error: resolved.error };
 
-    const companyId = await getCurrentCompanyId();
-    if (!companyId) return { success: false, error: "No company found" };
-
-    const success = await saveRolePermissions(role, companyId, permissions);
+    const success = await saveRolePermissions(role, resolved.companyId, resolved.branchId, permissions);
     if (!success) return { success: false, error: "Failed to save permissions" };
 
     revalidatePath("/team");
@@ -306,9 +355,9 @@ export async function saveRolePermissionsAction(
 
 export async function getCustomRolesAction(): Promise<CustomRole[]> {
   try {
-    const companyId = await getCurrentCompanyId();
-    if (!companyId) return [];
-    return getCustomRoles(companyId);
+    const scope = await getCurrentScope();
+    if (!scope?.companyId) return [];
+    return getCustomRoles(scope.companyId);
   } catch (error) {
     console.error("Error fetching custom roles:", error);
     return [];
@@ -326,10 +375,10 @@ export async function createCustomRoleAction(
       return { success: false, error: "Only Group Admin can create custom roles" };
     }
 
-    const companyId = await getCurrentCompanyId();
-    if (!companyId) return { success: false, error: "No company found" };
+    const scope = await getCurrentScope();
+    if (!scope?.companyId) return { success: false, error: "No company found" };
 
-    const role = await createCustomRole(companyId, name, permData.userId);
+    const role = await createCustomRole(scope.companyId, name, permData.userId);
     if (!role) return { success: false, error: "Failed to create custom role (max 2 per company)" };
 
     revalidatePath("/team");

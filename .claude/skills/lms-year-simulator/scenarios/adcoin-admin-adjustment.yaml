@@ -1,0 +1,47 @@
+name: adcoin-admin-adjustment
+description: |
+  Admin adjusts a student's adcoin balance up via the leaderboard
+  modal — verifies the adjust_adcoin action + adcoin_transactions
+  log entry with type='adjusted'.
+
+fixtures:
+  branch:
+    name: "AdjAd Branch"
+    code: "ADJ"
+    parent: "ADS"
+  course:
+    name: "AdjCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "AdjStu"
+      parent_name: "Adj Parent"
+      parent_email: "adj@sim.local"
+      parent_phone: "0123450920"
+      course: "AdjCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: adjust_adcoin
+    with:
+      student: "AdjStu"
+      amount: 100
+      message: "Welcome bonus"
+    observers: auto
+
+teardown: manual

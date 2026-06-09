@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +13,7 @@ import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingSelect } from "@/components/ui/floating-select";
 import { FloatingMultiSelect } from "@/components/ui/floating-multiselect";
 import { FloatingTextarea } from "@/components/ui/floating-textarea";
-import { Upload } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PhotoUpload } from "@/components/ui/photo-upload";
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
@@ -24,6 +25,7 @@ import type { UserRole, TeamMemberStatus } from "@/db/schema";
 interface BranchOption {
   id: string;
   name: string;
+  type?: string;
 }
 
 export interface TeamMemberFormData {
@@ -112,17 +114,23 @@ export function TeamModal({
       // Company admin can only create assistant_admin and instructor
       return ALL_ROLE_OPTIONS.filter((r) => r.value === "assistant_admin" || r.value === "instructor");
     }
-    // Super admin can create all roles
-    return ALL_ROLE_OPTIONS;
+    // Super admin can create every role EXCEPT super_admin itself.
+    // Promoting someone to super_admin via the UI is never a routine flow —
+    // those accounts are provisioned out-of-band.
+    return ALL_ROLE_OPTIONS.filter((r) => r.value !== "super_admin");
   }, [currentUserRole]);
 
-  // Filter branch options based on current user's role
+  // Filter branch options based on current user's role.
+  // - company_admin: locked to their own branch.
+  // - everyone else: exclude company-type branches when the role being assigned
+  //   isn't group_admin. group_admin sees the dedicated Company picker instead,
+  //   so company-type entries should never appear in the Branch picker for
+  //   non-group_admin assignments.
   const branchOptions = useMemo(() => {
     if (currentUserRole === "company_admin" && currentUserBranchId) {
-      // Company admin can only assign to their own branch
       return branches.filter((b) => b.id === currentUserBranchId);
     }
-    return branches;
+    return branches.filter((b) => b.type !== "company");
   }, [branches, currentUserRole, currentUserBranchId]);
   const [formData, setFormData] = useState<TeamMemberFormData>(initialFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -565,13 +573,24 @@ export function TeamModal({
               (formData.role === "company_admin" ||
                 formData.role === "assistant_admin" ||
                 formData.role === "instructor") && (
-                <FloatingMultiSelect
-                  label="In-charge Programs"
-                  value={formData.inChargeProgramIds}
-                  onChange={(ids) => updateField("inChargeProgramIds", ids)}
-                  options={programs.map((p) => ({ value: p.id, label: p.name }))}
-                  searchable
-                />
+                <div className="space-y-1.5">
+                  <FloatingMultiSelect
+                    label="In-charge Programs"
+                    value={formData.inChargeProgramIds}
+                    onChange={(ids) => updateField("inChargeProgramIds", ids)}
+                    options={programs.map((p) => ({ value: p.id, label: p.name }))}
+                    searchable
+                  />
+                  {programs.length === 0 && (
+                    <Link
+                      href="/program"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#23D2E2] hover:text-[#18a9b8] hover:underline px-1"
+                    >
+                      <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      No programs yet — add one
+                    </Link>
+                  )}
+                </div>
               )}
 
             {/* Employed Date */}

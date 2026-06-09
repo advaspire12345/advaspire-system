@@ -1,86 +1,84 @@
-import { LandingHeader } from "@/components/landing/landing-header";
-import { ProfileCover } from "@/components/landing/profile-cover";
-import { ProfileHeader } from "@/components/landing/profile-header";
-import { ProfileNavigation } from "@/components/landing/profile-navigation";
-import { SocialNetworkCard } from "@/components/landing/social-network-card";
-import { UserInfoCard } from "@/components/landing/user-info-card";
-import { ProgramList } from "@/components/landing/program-list";
-import { Leaderboard } from "@/components/landing/leaderboard";
-import { PhotoContainer } from "@/components/landing/photo-container";
-import { MarketplaceList } from "@/components/landing/marketplace-list";
-import { VideoPlayer } from "@/components/landing/video-player";
-import { ForumList } from "@/components/landing/forum-list";
-import { TeamList } from "@/components/landing/team-list";
-import { UpcomingEventsList } from "@/components/landing/upcoming-events-list";
-import {
-  mockProfile,
-  mockPhotos,
-  mockPrograms,
-  mockEvents,
-  mockMarketplace,
-  mockForumTopics,
-  mockTeamMembers,
-} from "@/data/landing-mock";
-import { getLeaderboardData } from "@/data/leaderboard";
+import { MarketingNav } from "@/components/marketing/marketing-nav";
+import { MarketingHero } from "@/components/marketing/marketing-hero";
+import { MarketingTechMarquee } from "@/components/marketing/marketing-tech-marquee";
+import { MarketingCourses } from "@/components/marketing/marketing-courses";
+import { MarketingProjectsShowcase } from "@/components/marketing/marketing-projects-showcase";
+import { MarketingGallery } from "@/components/marketing/marketing-gallery";
+import { MarketingAgeTiers } from "@/components/marketing/marketing-age-tiers";
+import { MarketingWhyUs } from "@/components/marketing/marketing-why-us";
+import { MarketingPortfolio } from "@/components/marketing/marketing-portfolio";
+import { MarketingPricing } from "@/components/marketing/marketing-pricing";
+import { MarketingSocial } from "@/components/marketing/marketing-social";
+import { MarketingTrialForm } from "@/components/marketing/marketing-trial-form";
+import { MarketingBranches } from "@/components/marketing/marketing-branches";
+import { MarketingFooter } from "@/components/marketing/marketing-footer";
+import { WhatsAppButton } from "@/components/marketing/whatsapp-button";
+import { AIChatWidget } from "@/components/marketing/ai-chat-widget";
+import { MarketingRevealController } from "@/components/marketing/use-reveal";
 
-export default async function Home() {
-  // Fetch real leaderboard data from database
-  const leaderboardData = await getLeaderboardData();
+export default function HomePage() {
+  const jsonLd = [
+    {
+      "@context": "https://schema.org",
+      "@type": "EducationalOrganization",
+      name: "Advaspire Robotics Academy",
+      url: "https://www.advaspire.com",
+      logo: "https://www.advaspire.com/advaspire-logo.png",
+      description:
+        "Project-based robotics and coding classes for kids aged 7-18. Tracks include Robotics, Game Coding, App Coding, and Data Coding & AI.",
+      sameAs: ["https://www.advaspire.com"],
+      telephone: "+60173180089",
+      address: { "@type": "PostalAddress", addressCountry: "MY" },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "LocalBusiness",
+      name: "Advaspire Robotics & Coding Academy — Semenyih",
+      telephone: "+60173180089",
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: "Semenyih",
+        addressRegion: "Selangor",
+        addressCountry: "MY",
+      },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "LocalBusiness",
+      name: "Advaspire Robotics & Coding Academy — Kepong",
+      telephone: "+60173180089",
+      address: {
+        "@type": "PostalAddress",
+        addressLocality: "Kepong",
+        addressRegion: "Kuala Lumpur",
+        addressCountry: "MY",
+      },
+    },
+  ];
 
-  // Map to landing page format (limit to top 10)
-  const leaderboardEntries = leaderboardData.slice(0, 10).map((entry) => ({
-    id: entry.id,
-    rank: entry.rank,
-    name: entry.studentName,
-    programJoined: entry.program ?? "No Program",
-    adcoin: entry.adcoin,
-    avatarUrl: entry.photo ?? "/stat/01.jpg",
-  }));
   return (
-    <div className="min-h-screen bg-[#f8f8fb]">
-      {/* Header */}
-      <LandingHeader />
-
-      {/* Cover + Profile Header Container */}
-      <div className="mx-auto mt-3 max-w-[1184px] px-4 sm:mt-4 sm:px-4 md:px-0">
-        <ProfileCover coverUrl={mockProfile.coverUrl} />
-        <ProfileHeader profile={mockProfile} />
-        <ProfileNavigation />
-      </div>
-
-      {/* Main content */}
-      <div className="mx-auto max-w-[1184px] px-4 sm:px-4 md:px-0">
-
-        {/* Three Column Layout - stacks on mobile/tablet */}
-        <div className="mt-3 flex flex-col gap-4 pb-8 sm:mt-4 sm:pb-12 lg:grid lg:grid-cols-12">
-          {/* Main Feed - comes first on mobile/tablet (order-1), center on desktop */}
-          <main className="order-1 space-y-4 lg:order-2 lg:col-span-6">
-            <Leaderboard entries={leaderboardEntries} />
-            <PhotoContainer photos={mockPhotos} totalCount={24} />
-          </main>
-
-          {/* Left Sidebar - comes second on mobile/tablet (order-2), left on desktop */}
-          <aside className="order-2 space-y-4 lg:order-1 lg:col-span-3">
-            <SocialNetworkCard />
-            <UserInfoCard profile={mockProfile} />
-            <ProgramList programs={mockPrograms} />
-            <UpcomingEventsList events={mockEvents} />
-          </aside>
-
-          {/* Right Sidebar - comes third on mobile/tablet (order-3), right on desktop */}
-          <aside className="order-3 space-y-4 lg:col-span-3">
-            <MarketplaceList items={mockMarketplace} />
-            <VideoPlayer videos={[
-              "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&q=80",
-              "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=400&q=80",
-              "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&q=80",
-              "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&q=80",
-            ]} />
-            <ForumList topics={mockForumTopics} />
-            <TeamList members={mockTeamMembers} />
-          </aside>
-        </div>
-      </div>
-    </div>
+    <main className="bg-[#FAF7F2] text-[#1A1A2E] selection:bg-[#D4FF1A] selection:text-[#1A1A2E]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <MarketingRevealController />
+      <MarketingNav />
+      <MarketingHero />
+      <MarketingTechMarquee />
+      <MarketingCourses />
+      <MarketingProjectsShowcase />
+      <MarketingGallery />
+      <MarketingAgeTiers />
+      <MarketingWhyUs />
+      <MarketingPortfolio />
+      <MarketingPricing />
+      <MarketingTrialForm />
+      <MarketingSocial />
+      <MarketingBranches />
+      <MarketingFooter />
+      <WhatsAppButton />
+      <AIChatWidget />
+    </main>
   );
 }

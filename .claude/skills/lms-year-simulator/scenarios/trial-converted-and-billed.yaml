@@ -1,0 +1,64 @@
+name: trial-converted-and-billed
+description: |
+  Trial student → admin enrols matching student → trial flips to
+  'converted', enrollment is created, admin bills + approves.
+
+fixtures:
+  branch:
+    name: "TrConv Branch"
+    code: "TCB"
+    parent: "ADS"
+  course:
+    name: "TrConvCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_trial
+    with:
+      child_name: "ConvTina"
+      parent_name: "Conv Family"
+      parent_phone: "0123450930"
+      parent_email: "conv@sim.local"
+      course: "TrConvCourse"
+      child_age: 10
+      scheduled_date: "TODAY+7"
+      scheduled_time: "10:00"
+    observers: auto
+
+  # Admin enrols a student with the SAME parent phone — triggers
+  # automatic trial → converted update via the matching logic in
+  # src/app/(dashboard)/student/actions.ts.
+  - actor: aa
+    action: add_student
+    with:
+      name: "ConvTina"
+      parent_name: "Conv Family"
+      parent_email: "conv@sim.local"
+      parent_phone: "0123450930"
+      course: "TrConvCourse"
+      package: "4-session"
+      date_of_birth: "2015-06-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "ConvTina" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "ConvTina" }
+    observers: auto
+
+teardown: manual

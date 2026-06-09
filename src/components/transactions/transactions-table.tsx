@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { useBoundedLoader } from "@/hooks/use-bounded-loader";
@@ -90,6 +90,9 @@ export function TransactionsTable({ initialData, totalCount, participants, hideB
   // Bounded progressive loading via the shared hook. Loads first 100 in
   // 10-row batches, pauses, expands on page change, lifts cap on search.
   const [allData, setAllData] = useState<TransactionDisplayRow[]>(initialData);
+
+  // Resync after router.refresh() so saved/edited/deleted rows appear without a manual reload.
+  useEffect(() => { setAllData(initialData); }, [initialData]);
   const { isLoadingMore, resetTo } = useBoundedLoader<TransactionDisplayRow>({
     initialData,
     totalCount,

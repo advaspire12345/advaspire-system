@@ -21,6 +21,11 @@ import { ProjectGallery } from "@/components/parent/project-gallery";
 import { PaymentList } from "@/components/parent/payment-list";
 import { PaymentWarningModal } from "@/components/parent/payment-warning-modal";
 import { ParentProfileHeader } from "@/components/parent/parent-profile-header";
+import { SessionTransferCard } from "@/components/parent/session-transfer-card";
+import {
+  getPendingSenderTransfersForParent,
+  getPendingReceiverTransfersForParent,
+} from "@/data/session-transfers";
 
 export default async function ParentPortalPage() {
   const user = await getUser();
@@ -38,15 +43,40 @@ export default async function ParentPortalPage() {
   const studentIds = portalData.children.map((c) => c.id);
 
   // Fetch all supplementary data in parallel
-  const [attendance, upcomingClasses, payments, photos, events, upcomingSessions] =
-    await Promise.all([
-      getParentAttendanceHistory(studentIds),
-      Promise.resolve(getParentUpcomingClasses(portalData.children)),
-      getParentPaymentHistory(studentIds),
-      getParentProjectPhotos(studentIds),
-      getParentEvents(portalData.parent.id),
-      getUpcomingSessions(studentIds),
-    ]);
+  const [
+    attendance,
+    upcomingClasses,
+    payments,
+    photos,
+    events,
+    upcomingSessions,
+    pendingSenderTransfers,
+    pendingReceiverTransfers,
+  ] = await Promise.all([
+    getParentAttendanceHistory(studentIds),
+    Promise.resolve(getParentUpcomingClasses(portalData.children)),
+    getParentPaymentHistory(studentIds),
+    getParentProjectPhotos(studentIds),
+    getParentEvents(portalData.parent.id),
+    getUpcomingSessions(studentIds),
+    getPendingSenderTransfersForParent(user.id),
+    getPendingReceiverTransfersForParent(user.id),
+  ]);
+
+  const senderTransferRows = pendingSenderTransfers.map((r) => ({
+    id: r.transfer.id,
+    fromStudentName: r.fromStudentName,
+    toStudentName: r.toStudentName,
+    courseName: r.courseName,
+    sessions: r.transfer.sessions,
+  }));
+  const receiverTransferRows = pendingReceiverTransfers.map((r) => ({
+    id: r.transfer.id,
+    fromStudentName: r.fromStudentName,
+    toStudentName: r.toStudentName,
+    courseName: r.courseName,
+    sessions: r.transfer.sessions,
+  }));
 
   // Compute calendar dates from upcoming classes
   const scheduledDates = upcomingClasses.map((c) => new Date(c.date));
@@ -67,6 +97,13 @@ export default async function ParentPortalPage() {
       <ParentNav parentName={portalData.parent.name} userId={user.id} />
 
       <main className="mx-auto max-w-5xl px-4 py-6 space-y-6">
+        {senderTransferRows.length > 0 && (
+          <SessionTransferCard mode="approve" rows={senderTransferRows} />
+        )}
+        {receiverTransferRows.length > 0 && (
+          <SessionTransferCard mode="accept" rows={receiverTransferRows} />
+        )}
+
         {/* Profile Header Banner */}
         <ParentProfileHeader
           parentName={portalData.parent.name}

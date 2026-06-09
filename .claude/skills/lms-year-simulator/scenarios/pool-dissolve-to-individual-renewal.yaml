@@ -1,0 +1,72 @@
+name: pool-dissolve-to-individual-renewal
+description: |
+  Two siblings A + B in a pool. B's enrollment cancels → pool
+  dissolves to one member → A becomes individual. The next renewal
+  payment fires as an individual payment row (not pool).
+
+fixtures:
+  branch:
+    name: "PD Branch"
+    code: "PDB"
+    parent: "ADS"
+  course:
+    name: "PDCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+    max_students_per_pool: 2
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "PDAli"
+      parent_name: "PD Family"
+      parent_email: "pd@sim.local"
+      parent_phone: "0123450960"
+      course: "PDCourse"
+      package: "4-session"
+      date_of_birth: "2014-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "PDAli" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "PDAli" }
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "PDAbu"
+      parent_email: "pd@sim.local"
+      parent_existing: true
+      course: "PDCourse"
+      date_of_birth: "2016-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with: { student: "PDAli", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+
+  # Cancel B → triggers dissolvePoolIfOneMember on the enrollment soft-delete.
+  - actor: aa
+    action: cancel_enrollment
+    with: { student: "PDAbu" }
+    observers: auto
+
+teardown: manual

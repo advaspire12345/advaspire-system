@@ -1,0 +1,76 @@
+name: settle-deficit-toggle
+description: |
+  Verify Part B settle-deficit toggle on the edit-payment modal.
+
+  Flow:
+    1. Add a student with a 4-session package.
+    2. Pay + approve → student has 4 sessions in their enrollment.
+    3. Admin creates a new pending payment for the same student.
+    4. Admin opens the Edit modal and toggles "Settle Deficit" ON, sets
+       sessions=2 and amount=110.
+    5. Save → the payment row's payment_type becomes 'settle_deficit' and
+       custom_sessions=2.
+
+fixtures:
+  branch:
+    name: "Sim SD Branch"
+    code: "SDB1"
+    parent: "ADS"
+  course:
+    name: "SDCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "SDStu"
+      parent_name: "SD Parent"
+      parent_email: "pSD@sim.local"
+      parent_phone: "0123450077"
+      course: "SDCourse"
+      package: "4-session"
+      date_of_birth: "2015-04-04"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "SDStu"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "SDStu"
+    observers: auto
+
+  # Create a fresh pending payment we can edit and toggle Settle Deficit on.
+  - actor: ca
+    action: add_payment_for_student
+    with:
+      student: "SDStu"
+      course: "SDCourse"
+      package: "4 Sessions"
+    observers: auto
+
+  # Toggle Settle Deficit ON with 2 sessions at RM110.
+  - actor: ca
+    action: edit_pending_payment
+    with:
+      student: "SDStu"
+      settle_deficit_sessions: 2
+      settle_deficit_amount: 110
+    observers: auto
+
+teardown: manual

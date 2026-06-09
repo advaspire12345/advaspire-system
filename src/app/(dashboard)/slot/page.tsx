@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/db";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 import { getUserBranchIds } from "@/data/users";
 import { getAllBranches } from "@/data/branches";
-import { getAllCourses } from "@/data/courses";
+import { getCoursesForUser } from "@/data/courses";
 import { archiveExpiredBootcampWorkshops } from "@/data/programs";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,8 @@ async function getSlotsForTable(userEmail: string, useCityName: boolean): Promis
   const { getUserByEmail } = await import("@/data/users");
   const user = await getUserByEmail(userEmail);
 
-  // Expand for group_admin
+  // Expand for group_admin only — they oversee every branch under their
+  // company. company_admin stays scoped to their own branch (no cross-branch).
   if (branchIds && branchIds.length > 0 && user?.role === "group_admin") {
     const { data: assigned } = await supabaseAdmin
       .from("branches").select("id, type, parent_id").in("id", branchIds).is("deleted_at", null);
@@ -48,7 +49,7 @@ async function getSlotsForTable(userEmail: string, useCityName: boolean): Promis
     .from("course_slots")
     .select(`
       id, course_id, branch_id, day, time, duration, limit_student,
-      course:courses!inner(id, name),
+      course:courses!inner(id, name, status),
       branch:branches!inner(id, name, city)
     `)
     .is("deleted_at", null)
@@ -65,7 +66,15 @@ async function getSlotsForTable(userEmail: string, useCityName: boolean): Promis
     return [];
   }
 
-  return (data ?? []).map((s: any) => ({
+  // Hide slots tied to a draft or archived program — those programs aren't
+  // active for enrollment yet (draft) or anymore (archived), so showing
+  // their slots is misleading.
+  const visible = (data ?? []).filter((s: any) => {
+    const status = s.course?.status as string | null | undefined;
+    return status !== "draft" && status !== "archived";
+  });
+
+  return visible.map((s: any) => ({
     id: s.id,
     courseId: s.course_id,
     courseName: s.course?.name ?? "Unknown",
@@ -119,11 +128,19 @@ export default async function SlotPage() {
 
   await archiveExpiredBootcampWorkshops();
 
-  const coursesData = await getAllCourses();
+  // Scope program options to the user's company — admins of one company
+  // shouldn't see another company's programs in the Add Slot picker.
+  // getCoursesForUser already handles super_admin (all) and the group_admin
+  // company-expansion case the same way /program does.
+  const coursesData = await getCoursesForUser(user.email);
+
   // Slots only apply to recurring programs — bootcamps/workshops have fixed start/end dates
-  // and are scheduled directly, not via weekly slots.
+  // and are scheduled directly, not via weekly slots. Drop draft/archived
+  // programs too: their slots are hidden in the listing (see getSlotsForTable),
+  // so letting admins create new slots against them would be confusing.
   const courses = coursesData
     .filter((c) => c.programType !== "bootcamp" && c.programType !== "workshop")
+    .filter((c) => c.status !== "draft" && c.status !== "archived")
     .map((c) => ({ id: c.id, name: c.name }));
 
   const slots = await getSlotsForTable(user.email, useCityName);

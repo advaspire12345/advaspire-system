@@ -21,8 +21,28 @@ import addPaymentForStudent from "./add_payment_for_student.mjs";
 import takeExtraAttendance from "./take_extra_attendance.mjs";
 import importStudentsCsv from "./import_students_csv.mjs";
 import markExamDecision from "./mark_exam_decision.mjs";
+import createSessionTransfer from "./create_session_transfer.mjs";
+import stampAttendanceDate from "./stamp_attendance_date.mjs";
+import runCron from "./run_cron.mjs";
+import switchCourse from "./switch_course.mjs";
+import createEvent from "./create_event.mjs";
+import transferAdcoinAdmin from "./transfer_adcoin_admin.mjs";
+import adjustAdcoin from "./adjust_adcoin.mjs";
+import transferAdcoinStudent from "./transfer_adcoin_student.mjs";
+import applyVoucherToPayment from "./apply_voucher_to_payment.mjs";
+import parentSelfRegister from "./parent_self_register.mjs";
 
 export const ACTIONS = {
+  [createSessionTransfer.id]: createSessionTransfer,
+  [stampAttendanceDate.id]: stampAttendanceDate,
+  [runCron.id]: runCron,
+  [switchCourse.id]: switchCourse,
+  [createEvent.id]: createEvent,
+  [transferAdcoinAdmin.id]: transferAdcoinAdmin,
+  [adjustAdcoin.id]: adjustAdcoin,
+  [transferAdcoinStudent.id]: transferAdcoinStudent,
+  [applyVoucherToPayment.id]: applyVoucherToPayment,
+  [parentSelfRegister.id]: parentSelfRegister,
   [addStudent.id]: addStudent,
   [markPresent.id]: markPresent,
   [addVoucher.id]: addVoucher,

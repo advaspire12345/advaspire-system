@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/db";
 import { notifyStaff, purgeOldNotifications } from "@/data/notifications";
+import { checkInactivityAndNotify } from "@/data/enrollments";
 
 /**
  * Vercel cron endpoint — invoked weekly. Configured in vercel.json.
@@ -209,7 +210,15 @@ export async function GET(req: NextRequest) {
     console.warn("[cron] attendance_unmarked:", err);
   }
 
-  // 4. Cleanup: delete notifications older than 30 days
+  // 4. Inactivity reminders → assistant_admin + company_admin per branch.
+  // Non-destructive: never cancels or zeros sessions; admins decide.
+  try {
+    summary.inactivity_reminder = await checkInactivityAndNotify();
+  } catch (err) {
+    console.warn("[cron] inactivity_reminder:", err);
+  }
+
+  // 5. Cleanup: delete notifications older than 30 days
   try {
     summary.purged = await purgeOldNotifications();
   } catch (err) {

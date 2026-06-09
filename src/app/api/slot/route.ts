@@ -15,7 +15,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  const rows = slots.map((s: { day: string; time: string; duration: number; limitStudent: number }) => ({
+  type IncomingSlot = { day: string; time: string; duration: number; limitStudent: number };
+
+  // Reject duplicates within the submitted batch.
+  const seen = new Set<string>();
+  for (const s of slots as IncomingSlot[]) {
+    const key = `${s.day}|${s.time}`;
+    if (seen.has(key)) {
+      return NextResponse.json(
+        { error: `Duplicate slot in this batch: ${s.day} ${s.time}.` },
+        { status: 409 },
+      );
+    }
+    seen.add(key);
+  }
+
+  // Reject duplicates against existing rows (same program, branch, day, time).
+  const { data: existing } = await supabaseAdmin
+    .from("course_slots")
+    .select("day, time")
+    .eq("course_id", courseId)
+    .eq("branch_id", branchId)
+    .is("deleted_at", null);
+
+  const existingKeys = new Set((existing ?? []).map((r) => `${r.day}|${normalizeTime(r.time)}`));
+  for (const s of slots as IncomingSlot[]) {
+    if (existingKeys.has(`${s.day}|${normalizeTime(s.time)}`)) {
+      return NextResponse.json(
+        { error: `A slot for this program already exists on ${s.day} at ${s.time}.` },
+        { status: 409 },
+      );
+    }
+  }
+
+  const rows = (slots as IncomingSlot[]).map((s) => ({
     course_id: courseId,
     branch_id: branchId,
     day: s.day,
@@ -32,6 +65,12 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ success: true });
+}
+
+// Postgres `time` round-trips as "HH:MM:SS"; incoming values may be "HH:MM".
+// Trim to "HH:MM" so the duplicate-key compare doesn't miss equal times.
+function normalizeTime(t: string): string {
+  return t.length >= 5 ? t.slice(0, 5) : t;
 }
 
 export async function PUT(request: NextRequest) {
@@ -58,6 +97,45 @@ export async function PUT(request: NextRequest) {
       .from("course_slots")
       .update({ deleted_at: new Date().toISOString() })
       .in("id", toDelete);
+  }
+
+  // Duplicate check: every (day, time) in the incoming list must be unique
+  // within the batch, and may not collide with any non-deleted existing slot
+  // for this (program, branch) — except a slot's own id, which is allowed to
+  // keep its current day/time.
+  const batchSeen = new Set<string>();
+  for (const s of slots as { day: string; time: string }[]) {
+    const key = `${s.day}|${normalizeTime(s.time)}`;
+    if (batchSeen.has(key)) {
+      return NextResponse.json(
+        { error: `Duplicate slot in this batch: ${s.day} ${s.time}.` },
+        { status: 409 },
+      );
+    }
+    batchSeen.add(key);
+  }
+
+  const { data: existingRows } = await supabaseAdmin
+    .from("course_slots")
+    .select("id, day, time")
+    .eq("course_id", courseId)
+    .eq("branch_id", branchId)
+    .is("deleted_at", null);
+
+  const otherKeys = new Map<string, string>(); // key -> id of the row that owns it
+  for (const r of existingRows ?? []) {
+    if (toDelete.includes(r.id)) continue;
+    otherKeys.set(`${r.day}|${normalizeTime(r.time)}`, r.id as string);
+  }
+  for (const s of slots as { id: string | null; day: string; time: string }[]) {
+    const key = `${s.day}|${normalizeTime(s.time)}`;
+    const conflictId = otherKeys.get(key);
+    if (conflictId && conflictId !== s.id) {
+      return NextResponse.json(
+        { error: `A slot for this program already exists on ${s.day} at ${s.time}.` },
+        { status: 409 },
+      );
+    }
   }
 
   // Update existing slots and insert new ones

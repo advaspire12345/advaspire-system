@@ -123,64 +123,34 @@ export default {
       browser.sleep(300);
     }
 
+    // Auto-pool model: same-parent + same-course siblings always pool
+    // automatically. The legacy `share_with_sibling` and `force_individual`
+    // flags are honored at the field-schema level but have no UI button to
+    // click — pooling is determined by the server, not by an admin toggle.
     if (args.force_individual) {
-      // The form auto-toggles shareWithSibling=true when a sibling is detected
-      // (student-modal.tsx:545-556). If the user wants this student to stay
-      // INDIVIDUAL despite the auto-detection, we click the Shared button to
-      // toggle it off. Only do this if a Shared button is actually present.
-      const sharedSafe = "Shared";
-      let attempts = 0;
-      let state = "missing";
-      while (attempts < 6 && state === "missing") {
-        const out = browser.ab(
-          `eval "(() => { const dlg = document.querySelector('[role=\\\"dialog\\\"]'); if (!dlg) return 'no_dialog'; const btns = dlg.querySelectorAll('button'); for (const b of btns) { if (!b.disabled && (b.textContent || '').trim().toLowerCase().startsWith('${sharedSafe.toLowerCase()}')) { return b.className.split(' ').includes('border-[#615DFA]') ? 'active' : 'inactive'; } } return 'missing'; })()"`,
-        );
-        if (out.includes("active")) { state = "active"; break; }
-        if (out.includes("inactive")) { state = "inactive"; break; }
-        browser.sleep(300);
-        attempts++;
-      }
-      // If Shared isn't on screen at all, nothing to toggle — student is already
-      // individual (no sibling detected). If it's active (auto-shared), toggle off.
-      if (state === "active") {
-        browser.clickDialogButton("Shared");
-        browser.sleep(400);
-      }
-    } else if (args.share_with_sibling) {
-      // Shared mode is tricky:
-      //   1. The "Shared" button only renders after siblingPoolCheck resolves
-      //      (async fetch — triggers when parent + course are both set).
-      //   2. In add mode the modal *auto-sets* shareWithSibling=true the moment
-      //      a sibling-in-course is detected (student-modal.tsx:545-556).
-      //      That means clicking the button at that point TOGGLES IT OFF —
-      //      exactly the opposite of what we want.
-      //
-      // So we poll until the button appears, then only click if it's not
-      // already active (active state = border-[#615DFA] class on the button).
-      const sharedSafe = "Shared";
-      let attempts = 0;
-      let state = "waiting";
-      while (attempts < 12 && state === "waiting") {
-        const out = browser.ab(
-          `eval "(() => { const dlg = document.querySelector('[role=\\\"dialog\\\"]'); if (!dlg) return 'no_dialog'; const btns = dlg.querySelectorAll('button'); for (const b of btns) { if (!b.disabled && (b.textContent || '').trim().toLowerCase().startsWith('${sharedSafe.toLowerCase()}')) { return b.className.split(' ').includes('border-[#615DFA]') ? 'active' : 'inactive'; } } return 'waiting'; })()"`,
-        );
-        if (out.includes("active")) { state = "active"; break; }
-        if (out.includes("inactive")) { state = "inactive"; break; }
-        browser.sleep(300);
-        attempts++;
-      }
-      if (state === "waiting") {
-        throw new Error(
-          "add_student(share_with_sibling): Shared button never appeared — check that the sibling exists in the same parent + course and is enrolled",
-        );
-      }
-      if (state === "inactive") {
-        browser.clickDialogButton("Shared");
-        browser.sleep(500);
-      }
-      // If already 'active' the form auto-detected the sibling and turned
-      // share on for us — leave it alone.
-    } else if (args.package) {
+      console.warn(
+        "add_student: 'force_individual' is a no-op under the auto-pool model — siblings always pool when the package's max_students_per_pool ≥ 2.",
+      );
+    }
+    if (args.share_with_sibling) {
+      console.warn(
+        "add_student: 'share_with_sibling' is a no-op under the auto-pool model — pooling happens automatically when a sibling enrollment is detected.",
+      );
+    }
+
+    // Wait briefly for siblingPoolCheck to settle so the auto-join panel
+    // (which hides the package picker) has time to render.
+    browser.sleep(400);
+
+    // If the auto-join panel is rendered, the package picker is hidden and
+    // we don't need to (and can't) pick a package — the new student joins
+    // the existing pool's sessions outright.
+    const autoJoinPresent = browser.ab(
+      `eval "(() => { const dlg = document.querySelector('[role=\\\"dialog\\\"]'); if (!dlg) return 'no_dialog'; return dlg.textContent.includes('Joining existing sibling pool') ? 'yes' : 'no'; })()"`,
+    );
+    const isAutoJoin = autoJoinPresent.includes("yes");
+
+    if (!isAutoJoin && args.package) {
       const [countStr, type] = String(args.package).split("-");
       const count = countStr.trim();
       if (type === "monthly") {

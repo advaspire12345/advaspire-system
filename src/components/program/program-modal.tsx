@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingTextarea } from "@/components/ui/floating-textarea";
 import { FloatingSelect } from "@/components/ui/floating-select";
+import { CategoryPicker } from "./category-picker";
 import { FloatingMultiSelect } from "@/components/ui/floating-multiselect";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -60,9 +61,13 @@ interface PricingItem {
   duration: number;
   description: string;
   is_default: boolean;
-  expiry_months: number | null;
+  expiry_weeks: number | null;
   completion_months: number | null;
   voucher_id: string | null;
+  // How many students one purchase covers. 1 = each sibling needs own package.
+  // 2+ = up to N siblings auto-join the same package's pool. Defaults to 1
+  // when undefined (e.g. legacy rows). UI initialises to 1 on add.
+  max_students_per_pool?: number | null;
 }
 
 interface SlotItem {
@@ -88,6 +93,10 @@ interface ProgramModalProps {
   onEdit: (payload: ProgramFormPayload) => Promise<void>;
   onDelete: () => Promise<void>;
   onCreateCategory?: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
+  onUpdateCategory?: (id: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  onDeleteCategory?: (id: string) => Promise<{ success: boolean; inUse?: boolean; error?: string }>;
+  /** Map of category_id → number of programs using it.  Drives delete-icon visibility. */
+  categoryUsage?: Record<string, number>;
   onFetchProgram: (programId: string) => Promise<{ success: boolean; data?: ProgramFull; error?: string }>;
   onUploadCoverImage?: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
 }
@@ -134,48 +143,78 @@ function PricingFieldList({ items, vouchers, onAdd, onUpdate, onRemove }: Pricin
         {items.map((plan, index) => (
           <div key={plan.id} className="flex items-start gap-2 w-full bg-muted/30 rounded-xl p-3 sm:p-0 sm:bg-transparent border border-border sm:border-0">
             <div className="flex-1 space-y-3">
-              {/* Row 1: Package Type, Price, Duration */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <FloatingSelect
-                  label="Package Type"
-                  value={plan.package_type}
-                  onChange={(val) => onUpdate(plan.id, {
-                    package_type: val as PricingPackageType,
-                    ...(val === "monthly" ? { expiry_months: null, completion_months: null, voucher_id: null } : {}),
-                  })}
-                  options={[
-                    { value: "monthly", label: "Monthly" },
-                    { value: "session", label: "Per Session" },
-                  ]}
-                />
+              {/* Row 1 — 9-column grid keeps Package Type the same width in
+                  both layouts (col-span-3 = 1/3).  The remaining 6 cols are
+                  shared by Price+Duration (monthly: 3+3) or by Price+Sessions+Max
+                  share (session: 2+2+2). */}
+              <div className="grid grid-cols-1 sm:grid-cols-9 gap-3">
+                <div className="sm:col-span-3">
+                  <FloatingSelect
+                    label="Package Type"
+                    value={plan.package_type}
+                    onChange={(val) => onUpdate(plan.id, {
+                      package_type: val as PricingPackageType,
+                      // Monthly is fixed-price — no voucher fields at all.
+                      ...(val === "monthly"
+                        ? { expiry_weeks: null, completion_months: null, voucher_id: null }
+                        : {}),
+                    })}
+                    options={[
+                      { value: "monthly", label: "Monthly" },
+                      { value: "session", label: "Per Session" },
+                    ]}
+                  />
+                </div>
 
-                <FloatingInput
-                  label="Price"
-                  type="number"
-                  value={plan.price.toString()}
-                  onChange={(e) => onUpdate(plan.id, { price: parseFloat(e.target.value) || 0 })}
-                />
+                <div className={plan.package_type === "session" ? "sm:col-span-2" : "sm:col-span-3"}>
+                  <FloatingInput
+                    label="Price"
+                    type="number"
+                    value={plan.price.toString()}
+                    onChange={(e) => onUpdate(plan.id, { price: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
 
-                <FloatingInput
-                  label={
-                    plan.package_type === "monthly"
-                      ? "Duration (months)"
-                      : "Session Count"
-                  }
-                  type="number"
-                  value={plan.duration.toString()}
-                  onChange={(e) => onUpdate(plan.id, { duration: parseInt(e.target.value) || 0 })}
-                />
+                <div className={plan.package_type === "session" ? "sm:col-span-2" : "sm:col-span-3"}>
+                  <FloatingInput
+                    label={
+                      plan.package_type === "monthly"
+                        ? "Duration (months)"
+                        : "Session Count"
+                    }
+                    type="number"
+                    value={plan.duration.toString()}
+                    onChange={(e) => onUpdate(plan.id, { duration: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                {plan.package_type === "session" && (
+                  <div className="sm:col-span-2">
+                    <FloatingInput
+                      label="Max share"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={plan.max_students_per_pool?.toString() ?? "1"}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value);
+                        onUpdate(plan.id, { max_students_per_pool: Number.isFinite(n) && n >= 1 ? Math.min(n, 10) : 1 });
+                      }}
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Row 2: Expiry, Completion, Voucher — session packages only */}
+              {/* Row 2: Expiry | Completion | Voucher — session packages only.
+                  Voucher + Completion (Months) drive BOTH completion-earn AND
+                  good-payer reward at the backend (no separate fields). */}
               {plan.package_type === "session" && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <FloatingInput
-                    label="Expiry (months)"
+                    label="Expiry (weeks)"
                     type="number"
-                    value={plan.expiry_months?.toString() ?? ""}
-                    onChange={(e) => onUpdate(plan.id, { expiry_months: e.target.value ? parseInt(e.target.value) : null })}
+                    value={plan.expiry_weeks?.toString() ?? ""}
+                    onChange={(e) => onUpdate(plan.id, { expiry_weeks: e.target.value ? parseInt(e.target.value) : null })}
                   />
                   <FloatingInput
                     label="Completion (months)"
@@ -188,16 +227,26 @@ function PricingFieldList({ items, vouchers, onAdd, onUpdate, onRemove }: Pricin
                     value={plan.voucher_id ?? ""}
                     onChange={(val) => {
                       if (val === "__create__") {
-                        router.push("/voucher");
+                        // Open the /voucher page with the Add Voucher modal
+                        // pre-opened so the user can create one in-place and
+                        // come back to this program.
+                        router.push("/voucher?add=1");
                         return;
                       }
                       onUpdate(plan.id, { voucher_id: val || null });
                     }}
-                    options={[
-                      { value: "", label: "No Voucher" },
-                      ...vouchers.map((v) => ({ value: v.id, label: `${v.code} (${v.discount})` })),
-                      { value: "__create__", label: "+ Create Voucher" },
-                    ]}
+                    options={
+                      vouchers.length === 0
+                        ? [{ value: "__create__", label: "+ Add Voucher" }]
+                        : [
+                            { value: "", label: "No Voucher" },
+                            ...vouchers.map((v) => ({
+                              value: v.id,
+                              label: `${v.code} (${v.discount})`,
+                            })),
+                            { value: "__create__", label: "+ Add Voucher" },
+                          ]
+                    }
                   />
                 </div>
               )}
@@ -354,6 +403,9 @@ export function ProgramModal({
   onEdit,
   onDelete,
   onCreateCategory,
+  onUpdateCategory,
+  onDeleteCategory,
+  categoryUsage = {},
   onFetchProgram,
   onUploadCoverImage,
 }: ProgramModalProps) {
@@ -402,7 +454,7 @@ export function ProgramModal({
     duration: 1,
     description: "",
     is_default: true,
-    expiry_months: null,
+    expiry_weeks: null,
     completion_months: null,
     voucher_id: null,
   }]);
@@ -418,27 +470,12 @@ export function ProgramModal({
     }
 
     if (branchIds.length > 0) {
-      setSlots((prevSlots) => {
-        const newSlots = [...prevSlots];
-        // Remove slots for branches that are no longer selected
-        const filteredSlots = newSlots.filter((s) => branchIds.includes(s.branch_id));
-        // Add one slot for each branch that doesn't have any
-        branchIds.forEach((branchId) => {
-          const hasSlot = filteredSlots.some((s) => s.branch_id === branchId);
-          if (!hasSlot) {
-            filteredSlots.push({
-              id: generateTempId(),
-              branch_id: branchId,
-              teacher_ids: [],
-              day: "monday",
-              time: "09:00",
-              duration: 60,
-              limit_student: 10,
-            });
-          }
-        });
-        return filteredSlots;
-      });
+      // Drop slots tied to branches that were de-selected, but do NOT auto-
+      // create a placeholder slot for newly-selected branches — the admin
+      // must add slots explicitly via the Slots tab.
+      setSlots((prevSlots) =>
+        prevSlots.filter((s) => branchIds.includes(s.branch_id)),
+      );
     } else {
       setSlots([]);
     }
@@ -562,9 +599,10 @@ export function ProgramModal({
           duration: p.duration,
           description: p.description || "",
           is_default: p.is_default,
-          expiry_months: p.expiry_months ?? null,
+          expiry_weeks: p.expiry_weeks ?? null,
           completion_months: p.completion_months ?? null,
           voucher_id: p.voucher_id ?? null,
+          max_students_per_pool: p.max_students_per_pool ?? 1,
         }))
       );
     } else {
@@ -575,7 +613,7 @@ export function ProgramModal({
         duration: 1,
         description: "",
         is_default: true,
-        expiry_months: null,
+        expiry_weeks: null,
         completion_months: null,
         voucher_id: null,
       }]);
@@ -595,17 +633,11 @@ export function ProgramModal({
         }))
       );
     } else {
-      // If no slots but have branches, create default slots for each branch
-      const defaultSlots = (data.branches || []).map((b) => ({
-        id: generateTempId(),
-        branch_id: b.id,
-        teacher_ids: [],
-        day: "monday",
-        time: "09:00",
-        duration: 60,
-        limit_student: 10,
-      }));
-      setSlots(defaultSlots);
+      // Start with an empty slot list; the admin adds slots manually.
+      // Previously we auto-seeded a default Monday-09:00 slot per branch,
+      // which surprised admins by attaching real schedule entries to brand-new
+      // (or draft) programs before they were ready.
+      setSlots([]);
     }
 
     // Reset the loading flag after state updates are scheduled
@@ -642,7 +674,7 @@ export function ProgramModal({
       duration: 1,
       description: "",
       is_default: true,
-      expiry_months: null,
+      expiry_weeks: null,
       completion_months: null,
       voucher_id: null,
     }]);
@@ -660,7 +692,7 @@ export function ProgramModal({
       duration: 1,
       description: "",
       is_default: pricing.length === 0,
-      expiry_months: null,
+      expiry_weeks: null,
       completion_months: null,
       voucher_id: null,
     };
@@ -690,7 +722,7 @@ export function ProgramModal({
         duration: 1,
         description: "",
         is_default: true,
-        expiry_months: null,
+        expiry_weeks: null,
         completion_months: null,
         voucher_id: null,
       }]);
@@ -789,16 +821,23 @@ export function ProgramModal({
               })),
             })),
         })),
-      pricing: pricing.map((p) => ({
-        package_type: p.package_type,
-        price: p.price,
-        duration: p.duration,
-        description: p.description || null,
-        is_default: p.is_default,
-        expiry_months: p.expiry_months,
-        completion_months: p.completion_months,
-        voucher_id: p.voucher_id,
-      })),
+      pricing: pricing.map((p) => {
+        // voucher_id + completion_months serve BOTH completion-earn and
+        // good-payer rewards.  Monthly packages have no vouchers at all
+        // (fixed price).
+        const isMonthly = p.package_type === "monthly";
+        return {
+          package_type: p.package_type,
+          price: p.price,
+          duration: p.duration,
+          description: p.description || null,
+          is_default: p.is_default,
+          expiry_weeks: isMonthly ? null : p.expiry_weeks,
+          completion_months: isMonthly ? null : (p.completion_months ?? null),
+          voucher_id: isMonthly ? null : (p.voucher_id ?? null),
+          max_students_per_pool: p.max_students_per_pool ?? 1,
+        };
+      }),
       slots: slots.map((s) => ({
         branch_id: s.branch_id,
         teacher_ids: s.teacher_ids,
@@ -1208,19 +1247,29 @@ export function ProgramModal({
                         />
                       </div>
 
-                      <div className={categoryId === "new" ? "" : "md:col-span-2"}>
-                        <FloatingSelect
-                          label="Category"
+                      <div className={categoryId === "new" || categoryId === "edit" ? "" : "md:col-span-2"}>
+                        <CategoryPicker
+                          categories={localCategories}
                           value={categoryId}
                           onChange={setCategoryId}
-                          options={[
-                            { value: "new", label: "+ Add New Category" },
-                            ...localCategories.map((c) => ({
-                              value: c.id,
-                              label: c.name,
-                            })),
-                          ]}
-                          searchable
+                          onUpdate={onUpdateCategory ? async (id, name) => {
+                            const res = await onUpdateCategory(id, name);
+                            if (res.success) {
+                              setLocalCategories((prev) =>
+                                prev.map((c) => (c.id === id ? { ...c, name } : c)),
+                              );
+                            }
+                            return res;
+                          } : undefined}
+                          onDelete={onDeleteCategory ? async (id) => {
+                            const res = await onDeleteCategory(id);
+                            if (res.success) {
+                              setLocalCategories((prev) => prev.filter((c) => c.id !== id));
+                              if (categoryId === id) setCategoryId("");
+                            }
+                            return res;
+                          } : undefined}
+                          usage={categoryUsage}
                         />
                       </div>
 
