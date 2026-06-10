@@ -49,6 +49,11 @@ interface ImportPageProps {
   programPackages?: ProgramPackages[];
   programSlots?: ProgramSlots[];
   instructorOptions?: InstructorOption[];
+  /** When true (company_admin / single-branch importer), the Students CSV
+   *  drops the `branch_name` column — the server fills in the importer's own
+   *  branch automatically. group_admin / super_admin keep the column so they
+   *  can target a specific branch per row. */
+  hideStudentBranchColumn?: boolean;
 }
 
 type ImportType = "students" | "attendance" | "payments" | "transactions" | "trials" | "examinations";
@@ -61,7 +66,7 @@ interface ImportSection {
   /** Sample data rows shipped with the template. Auto-skipped server-side by
    *  the EXAMPLE marker prefix on each row's id field — the user can delete
    *  them or leave them. Multiple rows can demo different features (e.g. one
-   *  individual + one with share_with_sibling for the Students template). */
+   *  individual + one sibling auto-pooled for the Students template). */
   exampleRows?: string[][];
 }
 
@@ -74,7 +79,6 @@ const STUDENT_COLUMNS = [
   "schedule_day", "schedule_time",
   "enrollment_status", "sessions_remaining",
   "level",
-  "share_with_sibling",
 ];
 
 // Example rows shipped with each template. They're a live format hint right
@@ -85,9 +89,10 @@ const STUDENT_COLUMNS = [
 // The Students template ships with FOUR sample rows covering the most
 // common patterns:
 //   1) New student, individual enrollment
-//   2) Sibling of (1), shared pool via share_with_sibling=true
-//   3) Same student as (1), enrolled in a SECOND program (multi-enrollment
-//      per student — different program → new enrollment under same student)
+//   2) Sibling of (1) — same parent_email + same program_name → auto-pools
+//      with row 1 (no flag needed)
+//   3) Same student as (1), enrolled in a SECOND program (different program
+//      → new enrollment under same student, stays individual)
 //   4) Same student as (1), SAME program but a SECOND weekly slot — note
 //      sessions_remaining is 0 because slot A (row 1) already counted those
 //      sessions; the system would otherwise double-count
@@ -112,11 +117,10 @@ const STUDENT_EXAMPLE_ROWS = [
     "active",
     "8",
     "1",  // level — current course level (1 = beginner; blank treated as 1)
-    "",   // share_with_sibling — blank = individual
   ],
   [
     "",  // student_id — same convention; existing IDs look like ADV-001-25004
-    "EXAMPLE 2 — sibling of EXAMPLE 1, shared (delete or leave)",
+    "EXAMPLE 2 — sibling of EXAMPLE 1, auto-pooled (delete or leave)",
     "2020-06-22",
     "female",
     "SK Taman Hijau",
@@ -126,7 +130,7 @@ const STUDENT_EXAMPLE_ROWS = [
     "12 Jalan Hijau",
     "Semenyih",
     "Advaspire Robotics & Coding Academy Semenyih",
-    "Junior Robotics",  // SAME program as row 1 — required for sibling pool
+    "Junior Robotics",  // SAME program as row 1 — auto-pools with row 1
     "session",
     "12",
     "tuesday",
@@ -134,7 +138,6 @@ const STUDENT_EXAMPLE_ROWS = [
     "active",
     "0",
     "1",  // level
-    "true",  // share_with_sibling — joins / creates pool with row 1's student
   ],
   [
     "",  // student_id — blank again; the student will be matched by name + parent
@@ -156,7 +159,6 @@ const STUDENT_EXAMPLE_ROWS = [
     "active",
     "4",
     "3",  // level — same student may be at a different level in a different program
-    "",   // share_with_sibling — blank, this is a fresh enrollment for the same student
   ],
   [
     "",  // student_id — blank; matches existing EXAMPLE 1 student by name+parent
@@ -178,7 +180,6 @@ const STUDENT_EXAMPLE_ROWS = [
     "active",
     "0",          // sessions_remaining=0 because row 1 already counted this student's Junior Robotics sessions; non-zero here would double-count
     "1",          // level — same value as row 1 for this program
-    "true",       // share_with_sibling=true — joins the same pool created by EXAMPLE 2; both slots end up in the family Junior Robotics pool
   ],
 ];
 
@@ -282,7 +283,7 @@ const SECTIONS: ImportSection[] = [
     id: "students",
     title: "Students & Parents",
     description:
-      "Import students with parent info and enrollment — works for new sign-ups AND migrating existing rosters with their original IDs. student_id can be blank (system auto-generates) OR your own value (used as-is — useful when bringing students over from a previous system). `level` is the student's current course level (integer, blank defaults to 1) — also stamped on the new enrollment so the level shown in /attendance and /examinations reflects the import. The first four rows are samples (individual, shared-sibling, multi-program, multi-slot-same-program); they're auto-skipped because student_name starts with \"EXAMPLE\". One student can have multiple rows (same student_name + parent_email) to create additional enrollments — different program, day, or time. For multi-slot rows of the SAME program, put sessions_remaining on the FIRST row only; subsequent rows should be 0 (slot is added but sessions already counted).",
+      "Import students with parent info and enrollment — works for new sign-ups AND migrating existing rosters with their original IDs. student_id can be blank (system auto-generates) OR your own value (used as-is — useful when bringing students over from a previous system). `level` is the student's current course level (integer, blank defaults to 1) — also stamped on the new enrollment so the level shown in /attendance and /examinations reflects the import. The first four rows are samples (individual, auto-pooled sibling, multi-program, multi-slot-same-program); they're auto-skipped because student_name starts with \"EXAMPLE\". Siblings auto-pool — any two rows with the same parent_email + program_name are joined into a shared pool automatically (no flag needed). One student can have multiple rows (same student_name + parent_email) to create additional enrollments — different program, day, or time. For multi-slot rows of the SAME program, put sessions_remaining on the FIRST row only; subsequent rows should be 0 (slot is added but sessions already counted).",
     templateColumns: STUDENT_COLUMNS,
     exampleRows: STUDENT_EXAMPLE_ROWS,
   },
@@ -365,12 +366,31 @@ export function ImportPage({
   programPackages = [],
   programSlots = [],
   instructorOptions = [],
+  hideStudentBranchColumn = false,
 }: ImportPageProps) {
   const [activeSection, setActiveSection] = useState<ImportType | null>(null);
   const [parsedData, setParsedData] = useState<Record<string, string>[]>([]);
   const [fileName, setFileName] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+
+  // For single-branch importers, strip the branch_name column from the
+  // Students template + example rows. The server will fall back to the
+  // importer's own branch.
+  const branchColIndex = STUDENT_COLUMNS.indexOf("branch_name");
+  const sections = hideStudentBranchColumn
+    ? SECTIONS.map((s) =>
+        s.id !== "students" || branchColIndex < 0
+          ? s
+          : {
+              ...s,
+              templateColumns: s.templateColumns.filter((c) => c !== "branch_name"),
+              exampleRows: (s.exampleRows ?? []).map((r) =>
+                r.filter((_, i) => i !== branchColIndex),
+              ),
+            },
+      )
+    : SECTIONS;
 
   const downloadTemplateCsv = (section: ImportSection) => {
     const lines = [section.templateColumns.map(csvEscape).join(",")];
@@ -651,7 +671,7 @@ export function ImportPage({
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {SECTIONS.map((section) => (
+            {sections.map((section) => (
               <div
                 key={section.id}
                 className="rounded-xl border border-border hover:border-[#23D2E2] hover:bg-[#23D2E2]/5 transition"
@@ -828,54 +848,6 @@ export function ImportPage({
                   </div>
                 )}
 
-                {/* All-share-with-sibling warning. Sibling pools need at
-                    least one "anchor" individual row per parent — the others
-                    join into that one. If every row for a given parent is
-                    shared, the server can't create the pool from nothing. */}
-                {(() => {
-                  const sharedRows = parsedData.filter((r) =>
-                    !(r.student_name ?? "").trim().toUpperCase().startsWith("EXAMPLE") &&
-                    ["true","yes","1","y"].includes((r.share_with_sibling ?? "").trim().toLowerCase()),
-                  );
-                  if (sharedRows.length === 0) return null;
-                  // Group by (parent_email, program_name); flag groups with no individual anchor.
-                  const groups = new Map<string, { shared: number; individual: number }>();
-                  for (const r of parsedData) {
-                    if ((r.student_name ?? "").trim().toUpperCase().startsWith("EXAMPLE")) continue;
-                    const key = `${(r.parent_email ?? "").trim().toLowerCase()}|${(r.program_name ?? "").trim()}`;
-                    if (!groups.has(key)) groups.set(key, { shared: 0, individual: 0 });
-                    const g = groups.get(key)!;
-                    if (["true","yes","1","y"].includes((r.share_with_sibling ?? "").trim().toLowerCase())) {
-                      g.shared++;
-                    } else {
-                      g.individual++;
-                    }
-                  }
-                  const orphaned = Array.from(groups.entries()).filter(([, v]) => v.shared > 0 && v.individual === 0);
-                  if (orphaned.length === 0) return null;
-                  return (
-                    <div className="rounded-lg p-4 bg-red-50 border border-red-200">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="font-bold text-sm text-red-900 mb-1">
-                            Sibling pool needs an &ldquo;anchor&rdquo; sibling
-                          </p>
-                          <p className="text-xs text-red-800 mb-2">
-                            These parent + program groups have <span className="font-mono">share_with_sibling=true</span> on every row, with no individual sibling for them to share with. Set <span className="font-mono">share_with_sibling</span> to blank on ONE row per group — that row becomes the anchor, and the others join its pool.
-                          </p>
-                          <ul className="text-xs font-mono text-red-700 space-y-0.5">
-                            {orphaned.map(([key]) => {
-                              const [email, prog] = key.split("|");
-                              return <li key={key}>• {email || "(no email)"} / {prog || "(no program)"}</li>;
-                            })}
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
                 {/* In-file certificate_number duplicate detection
                     (Examinations only) — flag before sending to the server. */}
                 {section.id === "examinations" && (() => {
@@ -1022,26 +994,12 @@ export function ImportPage({
                             // Per-section pre-flight detectors. Each adds the
                             // offending row numbers to the failedRows set.
                             if (section.id === "students") {
-                              const orphanGroups = new Map<string, { individuals: number; shared: number[] }>();
                               parsedData.forEach((r, i) => {
                                 if (isExample(r)) return;
                                 if ((r.parent_email ?? "").trim().toLowerCase() === "aiman.parent@example.com") {
                                   failedRows.add(i + 1);
                                 }
-                                const key = `${(r.parent_email ?? "").trim().toLowerCase()}|${(r.program_name ?? "").trim()}`;
-                                if (!orphanGroups.has(key)) orphanGroups.set(key, { individuals: 0, shared: [] });
-                                const g = orphanGroups.get(key)!;
-                                if (["true","yes","1","y"].includes((r.share_with_sibling ?? "").trim().toLowerCase())) {
-                                  g.shared.push(i + 1);
-                                } else {
-                                  g.individuals += 1;
-                                }
                               });
-                              for (const g of orphanGroups.values()) {
-                                if (g.shared.length > 0 && g.individuals === 0) {
-                                  g.shared.forEach((rn) => failedRows.add(rn));
-                                }
-                              }
                             }
 
                             if (section.id === "payments") {
@@ -1497,12 +1455,10 @@ function StudentsFieldReference({
         <span className="font-mono">/attendance</span>. Stick to the slots above for clean grouping.
       </p>
       <p className="text-[11px] text-muted-foreground mt-2">
-        <strong>Sibling sharing:</strong> set <span className="font-mono">share_with_sibling=true</span>{" "}
-        (also accepts <span className="font-mono">yes</span>, <span className="font-mono">1</span>, <span className="font-mono">y</span>)
-        to join the student into the existing sibling pool for the same parent + program. Leave blank or
-        set <span className="font-mono">false</span> for individual enrollment. Row order doesn&apos;t matter — the import
-        processes all individual rows first, then the shared ones, so every <span className="font-mono">share_with_sibling=true</span>{" "}
-        row will find its already-imported sibling. If no individual sibling exists for that parent + program, the shared row is rejected with an explanatory error.
+        <strong>Sibling sharing is automatic:</strong> any two rows with the same{" "}
+        <span className="font-mono">parent_email</span> + <span className="font-mono">program_name</span> get pooled together —
+        no flag required. The first row of the pair becomes the anchor; the second auto-joins. This also covers
+        a single student with multiple slots in the same program: the second slot auto-joins the family pool.
       </p>
       <p className="text-[11px] text-muted-foreground mt-2">
         Tip — for students who <strong>already paid</strong> and still have unused sessions: set <span className="font-mono">enrollment_status=active</span> and <span className="font-mono">sessions_remaining</span> to whatever count they have left. No payment row is generated by this import, so they won&apos;t be double-charged. To record the historical payment / attendance / adcoin, use the Payments / Attendance / Transactions imports next.

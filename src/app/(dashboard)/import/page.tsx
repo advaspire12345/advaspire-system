@@ -239,6 +239,7 @@ export default async function ImportPageRoute() {
           programPackages={programPackages}
           programSlots={programSlots}
           instructorOptions={instructorOptions}
+          hideStudentBranchColumn={branchScope !== null && branchScope.length === 1}
         />
       </div>
     </main>
