@@ -4,7 +4,8 @@ import { Banner } from "@/components/ui/banner";
 import { BranchTable } from "@/components/branches/branch-table";
 import { getBranchData, getCompanyOptions } from "@/data/branches";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
-import { getUserBranchIds } from "@/data/users";
+import { getUserBranchIds, getUserByEmail } from "@/data/users";
+import { supabaseAdmin } from "@/db";
 
 export default async function BranchPage() {
   const user = await getUser();
@@ -20,12 +21,31 @@ export default async function BranchPage() {
   // Admin users only see their assigned branches + parent companies
   const branchIds = await getUserBranchIds(user.email);
 
-  const [branchData, allCompanyOptions] = await Promise.all([
+  const [branchData, allCompanyOptions, currentUser] = await Promise.all([
     getBranchData(branchIds ?? undefined),
     getCompanyOptions(),
+    getUserByEmail(user.email),
   ]);
 
-  // If admin, filter company options to only their own company
+  // Resolve the current user's OWN company id — needed for group_admin so the
+  // Add modal can auto-set parent + auto-generate code even when their company
+  // has zero child branches yet (in that case `branchData` won't include the
+  // company row).
+  let currentUserCompanyId: string | null = null;
+  if (currentUser?.branch_id) {
+    const { data: row } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .eq("id", currentUser.branch_id)
+      .maybeSingle();
+    if (row) {
+      currentUserCompanyId = row.type === "company" ? row.id : row.parent_id;
+    }
+  }
+
+  // If admin, filter company options to only their own company.  Make sure
+  // the user's company is in the list even if their branchData filter missed
+  // it (group_admin with no child branches yet).
   let companyOptions = allCompanyOptions;
   if (branchIds) {
     const adminCompanyIds = new Set(
@@ -33,6 +53,7 @@ export default async function BranchPage() {
         .filter((b) => b.type === "company")
         .map((b) => b.id)
     );
+    if (currentUserCompanyId) adminCompanyIds.add(currentUserCompanyId);
     companyOptions = allCompanyOptions.filter((c) => adminCompanyIds.has(c.id));
   }
 
@@ -52,6 +73,7 @@ export default async function BranchPage() {
           initialData={branchData}
           companyOptions={companyOptions}
           userRole={permData?.role ?? "instructor"}
+          currentUserCompanyId={currentUserCompanyId}
           canCreateCompany={companyPerms?.can_create ?? false}
           canEditCompany={companyPerms?.can_edit ?? false}
           canDeleteCompany={companyPerms?.can_delete ?? false}

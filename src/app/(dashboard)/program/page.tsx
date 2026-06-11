@@ -2,13 +2,16 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { ProgramTable } from "@/components/program/program-table";
-import { getProgramsForTable, getAllCategories, getInstructors, archiveExpiredBootcampWorkshops } from "@/data/programs";
+import { getProgramsForTablePaginated, getAllCategories, getInstructors, archiveExpiredBootcampWorkshops } from "@/data/programs";
 import { getAllBranches } from "@/data/branches";
 import {
   createProgramAction,
   updateProgramAction,
   deleteProgramAction,
   createCategoryAction,
+  updateCategoryAction,
+  deleteCategoryAction,
+  getCategoryUsageCountsAction,
   getProgramByIdAction,
   uploadCoverImageAction,
 } from "./actions";
@@ -30,19 +33,42 @@ export default async function ProgramsPage() {
   // Auto-archive bootcamp/workshop programs whose end_date has passed
   await archiveExpiredBootcampWorkshops();
 
-  // Fetch all required data
-  const [programs, branchesData, categoriesData, instructorsData, vouchersResult] = await Promise.all([
-    getProgramsForTable(user.email),
+  // Resolve current user's company id; super_admin sees all vouchers.
+  let userCompanyId: string | null = null;
+  {
+    const { getUserByEmail, isSuperAdmin } = await import("@/data/users");
+    if (!isSuperAdmin(user.email)) {
+      const u = await getUserByEmail(user.email);
+      if (u?.branch_id) {
+        const { data: b } = await supabaseAdmin
+          .from("branches")
+          .select("id, type, parent_id")
+          .eq("id", u.branch_id)
+          .maybeSingle();
+        if (b) userCompanyId = b.type === "company" ? b.id : b.parent_id;
+      }
+    }
+  }
+
+  // Fetch all required data — programs is now paginated (first 10 rows + total).
+  let voucherQuery = supabaseAdmin
+    .from("vouchers")
+    .select("id, code, discount_type, discount_value, expiry_type, expiry_date")
+    .is("deleted_at", null);
+  if (userCompanyId) {
+    voucherQuery = voucherQuery.eq("company_id", userCompanyId);
+  }
+  const [programsResult, branchesData, categoriesData, instructorsData, vouchersResult] = await Promise.all([
+    getProgramsForTablePaginated(user.email, { offset: 0, limit: 10 }),
     getAllBranches(),
-    getAllCategories(),
+    getAllCategories(user.email),
     getInstructors(),
-    supabaseAdmin.from("vouchers").select("id, code, discount_type, discount_value, expiry_type, expiry_date").is("deleted_at", null).order("code"),
+    voucherQuery.order("code"),
   ]);
 
   const today = new Date().toISOString().split("T")[0];
   const vouchers = (vouchersResult.data ?? [])
     .filter((v: any) => {
-      // Exclude date-based vouchers that have expired
       if (v.expiry_type === "date" && v.expiry_date && v.expiry_date < today) return false;
       return true;
     })
@@ -85,6 +111,12 @@ export default async function ProgramsPage() {
     name: c.name,
   }));
 
+  // How many programs use each category — drives delete-icon visibility
+  // (the icon hides when usage > 0).
+  const categoryUsage = await getCategoryUsageCountsAction(
+    categories.map((c) => c.id),
+  );
+
   const instructors = instructorsData.map((i) => ({
     id: i.id,
     name: i.name,
@@ -102,7 +134,8 @@ export default async function ProgramsPage() {
         />
 
         <ProgramTable
-          initialData={programs}
+          initialData={programsResult.rows}
+          totalCount={programsResult.total}
           branches={branches}
           hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           instructors={instructors}
@@ -112,6 +145,9 @@ export default async function ProgramsPage() {
           onEdit={perms?.can_edit ? updateProgramAction : undefined}
           onDelete={perms?.can_delete ? deleteProgramAction : undefined}
           onCreateCategory={perms?.can_create ? createCategoryAction : undefined}
+          onUpdateCategory={perms?.can_edit ? updateCategoryAction : undefined}
+          onDeleteCategory={perms?.can_delete ? deleteCategoryAction : undefined}
+          categoryUsage={categoryUsage}
           onFetchProgram={getProgramByIdAction}
           onUploadCoverImage={perms?.can_edit ? uploadCoverImageAction : undefined}
         />

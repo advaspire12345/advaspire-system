@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/db";
+import { getUserByEmail, isSuperAdmin } from "@/data/users";
+
+/** Resolve the company id for the current user (NULL for super_admin). */
+async function resolveCompanyId(email: string): Promise<string | null> {
+  if (isSuperAdmin(email)) return null;
+  const u = await getUserByEmail(email);
+  if (!u?.branch_id) return null;
+  const { data: b } = await supabaseAdmin
+    .from("branches")
+    .select("id, type, parent_id")
+    .eq("id", u.branch_id)
+    .maybeSingle();
+  if (!b) return null;
+  return b.type === "company" ? b.id : b.parent_id;
+}
 
 export async function POST(request: NextRequest) {
   const user = await getUser();
@@ -12,6 +27,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
+  // Stamp the creator's company on the voucher so it's only visible to that
+  // company on /voucher and in the program-pricing voucher dropdown.
+  const companyId = await resolveCompanyId(user.email);
+
   const { error } = await supabaseAdmin.from("vouchers").insert({
     code,
     discount_type: discountType,
@@ -19,6 +38,7 @@ export async function POST(request: NextRequest) {
     expiry_type: expiryType,
     expiry_months: expiryType === "monthly" ? expiryMonths : null,
     expiry_date: expiryType === "date" ? expiryDate : null,
+    company_id: companyId,
   });
 
   if (error) {

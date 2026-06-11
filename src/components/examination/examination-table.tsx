@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import {
   Pencil,
   Trash2,
@@ -120,44 +121,21 @@ export function ExaminationTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Progressive loading: start with server-provided first batch, load rest in background
+  // Bounded progressive loading via the shared hook.
   const [serverData, setServerData] = useState<ExaminationTableRow[]>(initialData);
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
-  const fetchedRef = useRef(false);
 
-  const fetchRemainingData = useCallback(async () => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
-    let offset = initialData.length;
-    const existingIds = new Set(initialData.map((r) => r.id));
-
-    while (offset < totalCount) {
-      try {
-        const res = await fetch(`/api/examination/table?offset=${offset}&limit=10`);
-        if (!res.ok) break;
-        const result: { rows: ExaminationTableRow[] } = await res.json();
-        if (!result.rows || result.rows.length === 0) break;
-
-        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
-        for (const r of result.rows) existingIds.add(r.id);
-
-        if (newRows.length > 0) {
-          setServerData((prev) => [...prev, ...newRows]);
-        }
-        offset += 10;
-      } catch {
-        break;
-      }
-    }
-    setIsLoadingMore(false);
-  }, [initialData, totalCount]);
-
-  useEffect(() => {
-    if (initialData.length < totalCount) {
-      fetchRemainingData();
-    }
-  }, [initialData.length, totalCount, fetchRemainingData]);
+  // Resync after router.refresh() so saved/edited/deleted rows appear without a manual reload.
+  useEffect(() => { setServerData(initialData); }, [initialData]);
+  const { isLoadingMore } = useBoundedLoader<ExaminationTableRow>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/examination/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: ExaminationTableRow) => r.id, []),
+    setData: setServerData,
+  });
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -283,7 +261,9 @@ export function ExaminationTable({
   }, [allData, searchQuery]);
 
   // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -637,7 +617,7 @@ export function ExaminationTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />

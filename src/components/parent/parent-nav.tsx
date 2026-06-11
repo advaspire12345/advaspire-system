@@ -4,12 +4,15 @@ import { useRouter } from "next/navigation";
 import { Coins, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { HelpButton } from "@/components/help/help-button";
 
 interface ParentNavProps {
   parentName: string;
+  /** Supabase auth user id — drives the per-user help-onboarding storage key. */
+  userId?: string | null;
 }
 
-export function ParentNav({ parentName }: ParentNavProps) {
+export function ParentNav({ parentName, userId = null }: ParentNavProps) {
   const router = useRouter();
   const supabase = createClient();
 
@@ -39,6 +42,7 @@ export function ParentNav({ parentName }: ParentNavProps) {
         <span className="hidden sm:block text-sm font-semibold text-white/90">
           {parentName}
         </span>
+        <HelpButton role="parent" userId={userId} className="h-8 w-8 text-white hover:bg-white/20 hover:text-white" />
         <Button
           variant="ghost"
           size="sm"

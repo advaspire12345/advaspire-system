@@ -113,21 +113,12 @@ export async function POST(request: NextRequest) {
       return `${prefix}${seq.toString().padStart(3, "0")}`;
     }
 
-    // Two-pass row order: process non-shared (individual) rows first, then
-    // shared rows. This way a `share_with_sibling=true` row always finds its
-    // sibling already in the DB regardless of CSV row order.
-    // We keep the original row index so error messages match the user's file.
-    const isShared = (r: Record<string, string>) => {
-      const v = (r.share_with_sibling ?? "").trim().toLowerCase();
-      return v === "true" || v === "yes" || v === "1" || v === "y";
-    };
-    const indexed = rows.map((row, i) => ({ row, originalIndex: i + 1 }));
-    const ordered = [
-      ...indexed.filter((x) => !isShared(x.row)),
-      ...indexed.filter((x) => isShared(x.row)),
-    ];
-
-    for (const { row, originalIndex: rowIndex } of ordered) {
+    // Process rows in their original CSV order. Sibling pooling is automatic
+    // (auto-detected after each enrollment insert by checking for existing
+    // enrollments under the same parent + course), so no two-pass ordering or
+    // share_with_sibling flag is needed.
+    for (const [i, row] of rows.entries()) {
+      const rowIndex = i + 1;
       if (isExampleRow(row)) {
         skipped++;
         continue;
@@ -179,85 +170,6 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Pre-validate share_with_sibling — if set, an existing sibling MUST
-        // exist for (parent_email, program). We check now (before any inserts)
-        // so a failing row doesn't leak a half-created student/parent row.
-        // The actual pool join happens later, after the enrollment insert.
-        const wantsShared = isShared(row);
-        if (wantsShared) {
-          if (!row.program_name?.trim()) {
-            throw new Error(
-              `share_with_sibling=true requires program_name (need the course to find the sibling's enrollment)`,
-            );
-          }
-          const programNameCheck = row.program_name.trim();
-          const { data: courseCheck } = await supabaseAdmin
-            .from("courses")
-            .select("id")
-            .ilike("name", programNameCheck)
-            .is("deleted_at", null)
-            .maybeSingle();
-          if (!courseCheck) {
-            throw new Error(`program_name "${programNameCheck}" not found`);
-          }
-          const parentEmailCheck = row.parent_email.trim().toLowerCase();
-          // Find the parent by email (may not exist yet — that's OK, it just
-          // means no siblings can exist either, so we reject).
-          const { data: parentCheck } = await supabaseAdmin
-            .from("parents")
-            .select("id")
-            .ilike("email", parentEmailCheck)
-            .is("deleted_at", null)
-            .maybeSingle();
-          if (!parentCheck) {
-            // Two common reasons this hits:
-            //   - The user filled parent_email with an example placeholder
-            //     (e.g. aiman.parent@example.com) and no row in the system
-            //     actually uses that address.
-            //   - Every row for this parent has share_with_sibling=true, so
-            //     nobody created the parent record yet. Need at least one
-            //     "anchor" row with share_with_sibling blank/false.
-            throw new Error(
-              `share_with_sibling=true but no parent found for "${parentEmailCheck}". ` +
-                `Make sure (a) the parent_email matches a real parent and isn't the example placeholder, and ` +
-                `(b) at least one row for this parent has share_with_sibling BLANK (the "anchor" sibling — ` +
-                `the others share with that one).`,
-            );
-          }
-          // Look for an existing pool OR an existing individual sibling under
-          // this parent + course. If neither exists, reject early.
-          const { findSiblingPool } = await import("@/data/pools");
-          const poolCheck = await findSiblingPool(parentCheck.id as string, courseCheck.id as string);
-          if (!poolCheck) {
-            // Two-step lookup: get all student_ids linked to this parent,
-            // then check enrollments for any individual (pool_id=null) row in
-            // the target course. PostgREST nested aliases were unreliable here.
-            const { data: stuLinks } = await supabaseAdmin
-              .from("parent_students")
-              .select("student_id")
-              .eq("parent_id", parentCheck.id);
-            const siblingStudentIds = (stuLinks ?? [])
-              .map((r) => r.student_id as string | null)
-              .filter((id): id is string => !!id);
-            let hasIndividualSibling = false;
-            if (siblingStudentIds.length > 0) {
-              const { count } = await supabaseAdmin
-                .from("enrollments")
-                .select("id", { count: "exact", head: true })
-                .in("student_id", siblingStudentIds)
-                .eq("course_id", courseCheck.id)
-                .is("pool_id", null)
-                .is("deleted_at", null);
-              hasIndividualSibling = (count ?? 0) > 0;
-            }
-            if (!hasIndividualSibling) {
-              throw new Error(
-                `share_with_sibling=true but no existing individual sibling found for "${parentEmailCheck}" + "${programNameCheck}". Either add the sibling as an individual row in the same CSV (with share_with_sibling BLANK), or pre-create them in the system.`,
-              );
-            }
-          }
-        }
-
         // 1. Parent (lookup-or-create by email)
         const parentEmail = row.parent_email.trim().toLowerCase();
         const { data: existingParent } = await supabaseAdmin
@@ -287,6 +199,18 @@ export async function POST(request: NextRequest) {
             throw new Error(`Failed to create parent: ${parentError?.message}`);
           }
           parentId = newParent.id as string;
+        }
+
+        // Parse `level` once — used on both student insert and enrollment
+        // insert. Blank defaults to 1 (beginner).
+        const levelRaw = row.level?.trim();
+        let level = 1;
+        if (levelRaw) {
+          const parsed = parseInt(levelRaw, 10);
+          if (isNaN(parsed) || parsed < 1) {
+            throw new Error(`level "${levelRaw}" must be a positive integer`);
+          }
+          level = parsed;
         }
 
         // 2. Lookup-or-create the student. The dedup key here is
@@ -340,7 +264,7 @@ export async function POST(request: NextRequest) {
                 gender: row.gender?.trim().toLowerCase() || null,
                 school_name: row.school_name?.trim() || null,
                 branch_id: branchId,
-                level: 1,
+                level,
                 adcoin_balance: 0,
               })
               .select("id")
@@ -381,7 +305,7 @@ export async function POST(request: NextRequest) {
                 gender: row.gender?.trim().toLowerCase() || null,
                 school_name: row.school_name?.trim() || null,
                 branch_id: branchId,
-                level: 1,
+                level,
                 adcoin_balance: 0,
               })
               .select("id")
@@ -518,6 +442,7 @@ export async function POST(request: NextRequest) {
               sessions_remaining: sessionsRemaining,
               day_of_week: day,
               start_time: time,
+              level,
             })
             .select("id")
             .single();
@@ -525,13 +450,13 @@ export async function POST(request: NextRequest) {
             throw new Error(`Failed to create enrollment: ${enrollErr?.message}`);
           }
 
-          // 6. Pool handling — if share_with_sibling=true, join (or create)
-          //    the pool for (parent, course). The two-pass ordering above
-          //    guarantees the sibling's individual enrollment is already in DB.
-          if (isShared(row)) {
+          // 6. Auto-pool — siblings (or multi-slot rows for the same student)
+          //    under the same parent + course always share. No flag from the
+          //    CSV; we detect by looking up an existing pool, or any other
+          //    enrollment under this parent in this course.
+          {
             const { findSiblingPool, createPoolWithSiblings, addStudentToPool } = await import("@/data/pools");
 
-            // Look for an existing pool first.
             const existingPool = await findSiblingPool(parentId, course.id);
             if (existingPool) {
               const joined = await addStudentToPool(
@@ -543,61 +468,51 @@ export async function POST(request: NextRequest) {
                 throw new Error("Failed to add student to existing pool");
               }
             } else {
-              // No pool yet — find the EARLIEST individual enrollment for any
-              // student under this parent in this course. We do NOT exclude
-              // the current student: their own prior individual enrollment is
-              // a valid anchor (the case when share=true is set on a student's
-              // second slot in the same course — both slots join the pool).
-              // We also exclude the just-created enrollment so it doesn't pick
-              // itself as the "other anchor".
-              const { data: sibEnrollment } = await supabaseAdmin
-                .from("enrollments")
-                .select("id, student_id, students!inner(id, name)")
-                .eq("course_id", course.id)
-                .is("deleted_at", null)
-                .neq("id", newEnrollment.id)
-                .in("student_id",
-                  (await supabaseAdmin
-                    .from("parent_students")
-                    .select("student_id")
-                    .eq("parent_id", parentId))
-                    .data?.map((r) => r.student_id as string) ?? []
-                )
-                .is("pool_id", null)
-                .order("created_at", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+              // No pool yet — look for the EARLIEST other enrollment under
+              // this parent in this course (any student, including the same
+              // one's prior slot). Exclude the just-created enrollment.
+              const { data: parentStudentRows } = await supabaseAdmin
+                .from("parent_students")
+                .select("student_id")
+                .eq("parent_id", parentId);
+              const siblingStudentIds = (parentStudentRows ?? [])
+                .map((r) => r.student_id as string | null)
+                .filter((id): id is string => !!id);
 
-              if (!sibEnrollment) {
-                throw new Error(
-                  `share_with_sibling=true but no existing individual sibling found for this parent + "${programName}". Make sure the sibling's row appears in the CSV (with share_with_sibling blank or false) — the import processes individuals first then shared.`,
-                );
-              }
+              if (siblingStudentIds.length > 0) {
+                const { data: sibEnrollment } = await supabaseAdmin
+                  .from("enrollments")
+                  .select("id, student_id")
+                  .eq("course_id", course.id)
+                  .is("deleted_at", null)
+                  .neq("id", newEnrollment.id)
+                  .in("student_id", siblingStudentIds)
+                  .is("pool_id", null)
+                  .order("created_at", { ascending: true })
+                  .limit(1)
+                  .maybeSingle();
 
-              // Look up parent + course names for the pool name field.
-              const { data: parentRow } = await supabaseAdmin
-                .from("parents")
-                .select("name")
-                .eq("id", parentId)
-                .single();
+                if (sibEnrollment) {
+                  const { data: parentRow } = await supabaseAdmin
+                    .from("parents").select("name").eq("id", parentId).single();
+                  const { data: courseRow } = await supabaseAdmin
+                    .from("courses").select("name").eq("id", course.id).single();
 
-              const { data: courseRow } = await supabaseAdmin
-                .from("courses")
-                .select("name")
-                .eq("id", course.id)
-                .single();
-
-              const pool = await createPoolWithSiblings(
-                parentId,
-                course.id,
-                packageId,
-                parentRow?.name ?? "Family",
-                courseRow?.name ?? programName,
-                { studentId: sibEnrollment.student_id as string, enrollmentId: sibEnrollment.id as string },
-                { studentId: newStudent.id, enrollmentId: newEnrollment.id },
-              );
-              if (!pool) {
-                throw new Error("Failed to create sibling pool");
+                  const pool = await createPoolWithSiblings(
+                    parentId,
+                    course.id,
+                    packageId,
+                    parentRow?.name ?? "Family",
+                    courseRow?.name ?? programName,
+                    { studentId: sibEnrollment.student_id as string, enrollmentId: sibEnrollment.id as string },
+                    { studentId: newStudent.id, enrollmentId: newEnrollment.id },
+                  );
+                  if (!pool) {
+                    throw new Error("Failed to create sibling pool");
+                  }
+                }
+                // If no sibling enrollment, this row stays individual —
+                // the first sibling for a (parent, course) is always individual.
               }
             }
           }

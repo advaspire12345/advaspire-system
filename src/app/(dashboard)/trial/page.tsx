@@ -2,7 +2,7 @@ import { getUser } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { TrialTable } from "@/components/trial/trial-table";
-import { getTrialsForTable } from "@/data/trial";
+import { getTrialsForTablePaginated } from "@/data/trial";
 import { getAllBranches } from "@/data/branches";
 import { getCoursesForUser } from "@/data/courses";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
@@ -19,8 +19,8 @@ export default async function TrialPage() {
   const perms = permData?.permissions.trials;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
-  const [trials, branchesData, coursesData] = await Promise.all([
-    getTrialsForTable(user.email),
+  const [trialsResult, branchesData, coursesData] = await Promise.all([
+    getTrialsForTablePaginated(user.email, { offset: 0, limit: 10 }),
     getAllBranches(),
     getCoursesForUser(user.email),
   ]);
@@ -69,7 +69,8 @@ export default async function TrialPage() {
         />
 
         <TrialTable
-          initialData={trials}
+          initialData={trialsResult.rows}
+          totalCount={trialsResult.total}
           branches={branches}
           hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           courses={courses}

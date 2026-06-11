@@ -18,6 +18,10 @@ export async function POST(request: NextRequest) {
     let failed = 0;
     let skipped = 0;
     const errors: string[] = [];
+    // Track enrollments touched by this import — after all rows are inserted
+    // we scan each one for level-up eligibility (handles "imported student
+    // had 47 sessions" case where the threshold is already crossed at import).
+    const touchedEnrollmentIds = new Set<string>();
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -149,6 +153,11 @@ export async function POST(request: NextRequest) {
             notes: absenceReason,
           });
 
+        // Even if attendance insert later fails for some downstream reason,
+        // recording the enrollment id here is safe — the level-up scan only
+        // counts rows that actually exist in `attendance`.
+        touchedEnrollmentIds.add(enrollment.id);
+
         if (attendanceError) {
           throw new Error(
             `Failed to insert attendance: ${attendanceError.message}`
@@ -172,6 +181,22 @@ export async function POST(request: NextRequest) {
           err instanceof Error ? err.message : "Unknown error";
         errors.push(`Row ${rowIndex}: ${message}`);
       }
+    }
+
+    // Level-up scan — for every enrollment touched by this import, check if
+    // the accumulated attendance just crossed sessions_to_level_up − 2 and
+    // create an "eligible" exam row if so. Idempotent: existing exams aren't
+    // duplicated. Failures don't fail the whole import.
+    if (touchedEnrollmentIds.size > 0) {
+      const { maybeCreateLevelUpExam } = await import("@/data/examinations");
+      for (const enrollmentId of touchedEnrollmentIds) {
+        try {
+          await maybeCreateLevelUpExam(enrollmentId);
+        } catch (err) {
+          console.warn(`[import attendance] level-up scan failed for enrollment ${enrollmentId}:`, err);
+        }
+      }
+      revalidatePath("/examination");
     }
 
     revalidatePath("/attendance-log");

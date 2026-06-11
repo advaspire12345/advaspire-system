@@ -1,0 +1,92 @@
+name: session-transfer-admin
+description: |
+  Verify Part C admin "New Session Transfer" UI end-to-end.
+
+  Set up two unrelated students in the same course with funded enrollments,
+  then have the admin create a transfer of 2 sessions. The transfer should
+  land in the DB with status='pending_sender' (parent A still needs to
+  approve before the receiving parent can accept).
+
+fixtures:
+  branch:
+    name: "Sim ST Branch"
+    code: "STB1"
+    parent: "ADS"
+  course:
+    name: "STCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # Family 1 — sender
+  - actor: aa
+    action: add_student
+    with:
+      name: "Sender1"
+      parent_name: "Family A"
+      parent_email: "famA@sim.local"
+      parent_phone: "0123450101"
+      course: "STCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Sender1"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Sender1"
+    observers: auto
+
+  # Family 2 — receiver (different parent, same course)
+  - actor: aa
+    action: add_student
+    with:
+      name: "Receiver1"
+      parent_name: "Family B"
+      parent_email: "famB@sim.local"
+      parent_phone: "0123450202"
+      course: "STCourse"
+      package: "4-session"
+      date_of_birth: "2016-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Receiver1"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Receiver1"
+    observers: auto
+
+  # Admin creates the transfer.
+  - actor: aa
+    action: create_session_transfer
+    with:
+      from_student: "Sender1"
+      to_student: "Receiver1"
+      sessions: 2
+      notes: "Cross-family transfer test"
+    observers: auto
+
+teardown: manual

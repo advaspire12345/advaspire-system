@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/db";
 import { notifyStaff, purgeOldNotifications } from "@/data/notifications";
+import { checkInactivityAndNotify } from "@/data/enrollments";
 
 /**
  * Vercel cron endpoint — invoked weekly. Configured in vercel.json.
@@ -74,56 +75,81 @@ export async function GET(req: NextRequest) {
     console.warn("[cron] trial_this_week:", err);
   }
 
-  // 2. This-week examination reminder → instructors + assistant_admin
-  try {
-    const { data: exams } = await supabaseAdmin
-      .from("examinations")
-      .select(`
-        id, exam_name, exam_date, reattempt_count,
-        student:students(id, name, branch_id, branch:branches!students_branch_id_branches_id_fk(parent_id, type))
-      `)
-      .gte("exam_date", mondayStr)
-      .lte("exam_date", sundayStr)
-      .in("status", ["scheduled", "in_progress"])
-      .is("deleted_at", null);
+  // 2. Examination prep reminders — fires for each week leading up to the
+  // exam so the instructor can plan exam-prep classes. Three buckets:
+  //   - this-week    (mon–sun, 0–6 days out)   → "exam scheduled this week"
+  //   - 1-week-out   (next mon–sun)            → "exam in 1 week"
+  //   - 2-weeks-out  (mon–sun two weeks ahead) → "exam in 2 weeks"
+  // Includes status='eligible' too — once auto-created, the instructor
+  // already needs to start prepping the student.
+  const addWeeks = (d: string, weeks: number) => {
+    const dt = new Date(d + "T00:00:00");
+    dt.setDate(dt.getDate() + weeks * 7);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  };
+  const examBuckets: Array<{
+    weeksOut: 0 | 1 | 2;
+    fromStr: string;
+    toStr: string;
+    notifType: string;
+    label: string;
+  }> = [
+    { weeksOut: 0, fromStr: mondayStr, toStr: sundayStr, notifType: "exam_this_week", label: "this week" },
+    { weeksOut: 1, fromStr: addWeeks(mondayStr, 1), toStr: addWeeks(sundayStr, 1), notifType: "exam_in_1_week", label: "in 1 week" },
+    { weeksOut: 2, fromStr: addWeeks(mondayStr, 2), toStr: addWeeks(sundayStr, 2), notifType: "exam_in_2_weeks", label: "in 2 weeks" },
+  ];
 
-    let examNotifs = 0;
-    let reattemptNotifs = 0;
-    for (const e of exams ?? []) {
-      const student = (e.student as any) ?? null;
-      const branch = (student?.branch as any) ?? null;
-      const companyId = branch?.type === "company" ? student?.branch_id : branch?.parent_id;
-      if (!companyId || !student) continue;
+  for (const bucket of examBuckets) {
+    try {
+      const { data: exams } = await supabaseAdmin
+        .from("examinations")
+        .select(`
+          id, exam_name, exam_date, reattempt_count,
+          student:students(id, name, branch_id, branch:branches!students_branch_id_branches_id_fk(parent_id, type))
+        `)
+        .gte("exam_date", bucket.fromStr)
+        .lte("exam_date", bucket.toStr)
+        .in("status", ["eligible", "scheduled", "in_progress"])
+        .is("deleted_at", null);
 
-      examNotifs += await notifyStaff(
-        { roles: ["instructor", "assistant_admin"], companyId },
-        {
-          type: "exam_this_week",
-          title: "Examination scheduled this week",
-          body: `${student.name}: ${e.exam_name} on ${e.exam_date}`,
-          link: `/examination`,
-          data: { examId: e.id, studentId: student.id },
-        },
-      );
+      let examNotifs = 0;
+      let reattemptNotifs = 0;
+      for (const e of exams ?? []) {
+        const student = (e.student as any) ?? null;
+        const branch = (student?.branch as any) ?? null;
+        const companyId = branch?.type === "company" ? student?.branch_id : branch?.parent_id;
+        if (!companyId || !student) continue;
 
-      // Reattempt: separate weekly nudge so instructor pays extra attention
-      if ((e.reattempt_count ?? 0) > 0) {
-        reattemptNotifs += await notifyStaff(
+        examNotifs += await notifyStaff(
           { roles: ["instructor", "assistant_admin"], companyId },
           {
-            type: "reattempt_weekly",
-            title: "Reattempt exam — extra attention needed",
-            body: `${student.name} (attempt #${(e.reattempt_count ?? 0) + 1}) — ${e.exam_name}`,
+            type: bucket.notifType,
+            title: `Exam ${bucket.label} — prep ${student.name}`,
+            body: `${student.name}: ${e.exam_name} on ${e.exam_date}. Plan an exam-prep class.`,
             link: `/examination`,
-            data: { examId: e.id, studentId: student.id },
+            data: { examId: e.id, studentId: student.id, weeksOut: bucket.weeksOut },
           },
         );
+
+        // Reattempt: extra weekly nudge for any attempt past the first
+        if ((e.reattempt_count ?? 0) > 0 && bucket.weeksOut === 0) {
+          reattemptNotifs += await notifyStaff(
+            { roles: ["instructor", "assistant_admin"], companyId },
+            {
+              type: "reattempt_weekly",
+              title: "Reattempt exam — extra attention needed",
+              body: `${student.name} (attempt #${(e.reattempt_count ?? 0) + 1}) — ${e.exam_name}`,
+              link: `/examination`,
+              data: { examId: e.id, studentId: student.id },
+            },
+          );
+        }
       }
+      summary[bucket.notifType] = examNotifs;
+      if (bucket.weeksOut === 0) summary.reattempt_weekly = reattemptNotifs;
+    } catch (err) {
+      console.warn(`[cron] ${bucket.notifType}:`, err);
     }
-    summary.exam_this_week = examNotifs;
-    summary.reattempt_weekly = reattemptNotifs;
-  } catch (err) {
-    console.warn("[cron] exam_this_week / reattempt_weekly:", err);
   }
 
   // 3. Unmarked attendance reminder → instructor + assistant_admin per branch
@@ -184,7 +210,15 @@ export async function GET(req: NextRequest) {
     console.warn("[cron] attendance_unmarked:", err);
   }
 
-  // 4. Cleanup: delete notifications older than 30 days
+  // 4. Inactivity reminders → assistant_admin + company_admin per branch.
+  // Non-destructive: never cancels or zeros sessions; admins decide.
+  try {
+    summary.inactivity_reminder = await checkInactivityAndNotify();
+  } catch (err) {
+    console.warn("[cron] inactivity_reminder:", err);
+  }
+
+  // 5. Cleanup: delete notifications older than 30 days
   try {
     summary.purged = await purgeOldNotifications();
   } catch (err) {

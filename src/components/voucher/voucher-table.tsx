@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Pencil, Trash2, Plus, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,11 +59,25 @@ function generateCode(): string {
 type ModalMode = "add" | "edit" | "delete";
 
 export function VoucherTable({ data, canAdd, canEdit, canDelete }: VoucherTableProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>("add");
   const [selectedVoucher, setSelectedVoucher] = useState<VoucherTableRow | null>(null);
+
+  // Auto-open the Add Voucher modal when navigated here from another page
+  // with `?add=1` (e.g. the Add Program pricing tab's "+ Add Voucher" option).
+  useEffect(() => {
+    if (searchParams?.get("add") === "1" && canAdd) {
+      setSelectedVoucher(null);
+      setModalMode("add");
+      setModalOpen(true);
+      // Strip the query param so a refresh doesn't keep reopening it.
+      router.replace("/voucher");
+    }
+  }, [searchParams, canAdd, router]);
 
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) return data;

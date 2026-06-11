@@ -1,0 +1,71 @@
+name: pool-slow-burn-uneven
+description: |
+  Two siblings in a pool. Only sibling A attends; B's per-student
+  count stays untouched. Verifies that per-student tracking isolates
+  burn per attendee.
+
+fixtures:
+  branch:
+    name: "SB Branch"
+    code: "SBB"
+    parent: "ADS"
+  course:
+    name: "SBCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 8
+    price: 400
+    max_students_per_pool: 2
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "SBAli"
+      parent_name: "SB Family"
+      parent_email: "sb@sim.local"
+      parent_phone: "0123450950"
+      course: "SBCourse"
+      package: "8-session"
+      date_of_birth: "2014-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "SBAli" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "SBAli" }
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "SBAbu"
+      parent_email: "sb@sim.local"
+      parent_existing: true
+      course: "SBCourse"
+      date_of_birth: "2016-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # Only Ali attends.
+  - actor: inst
+    action: mark_present
+    with: { student: "SBAli", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "SBAli", lesson: "Lesson 1", mission: "Level 2", activity: "loops" }
+    observers: auto
+
+teardown: manual

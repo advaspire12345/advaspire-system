@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import {
   Search,
   Pencil,
@@ -107,43 +108,17 @@ export function PendingPaymentTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Progressive loading: load remaining data in background
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
-  const fetchedRef = useRef(false);
-
-  const fetchRemainingData = useCallback(async () => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
-    let offset = initialData.length;
-    const existingIds = new Set(initialData.map((r) => r.id));
-
-    while (offset < totalCount) {
-      try {
-        const res = await fetch(`/api/pending-payments/table?offset=${offset}&limit=10`);
-        if (!res.ok) break;
-        const result: { rows: PendingPaymentRow[] } = await res.json();
-        if (!result.rows || result.rows.length === 0) break;
-
-        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
-        for (const r of result.rows) existingIds.add(r.id);
-
-        if (newRows.length > 0) {
-          setData((prev) => [...prev, ...newRows]);
-        }
-        offset += 10;
-      } catch {
-        break;
-      }
-    }
-    setIsLoadingMore(false);
-  }, [initialData, totalCount]);
-
-  useEffect(() => {
-    if (initialData.length < totalCount) {
-      fetchRemainingData();
-    }
-  }, [initialData.length, totalCount, fetchRemainingData]);
+  // Bounded progressive loading via the shared hook.
+  const { isLoadingMore } = useBoundedLoader<PendingPaymentRow>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/pending-payments/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: PendingPaymentRow) => r.id, []),
+    setData,
+  });
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -172,7 +147,9 @@ export function PendingPaymentTable({
   }, [data, searchQuery]);
 
   // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -285,6 +262,8 @@ export function PendingPaymentTable({
         paymentMethod: formData.paymentMethod,
         paidAt: formData.paidAt,
         receiptPhoto: formData.receiptPhoto,
+        customSessions: formData.customSessions ?? null,
+        paymentType: formData.paymentType ?? null,
       });
 
       if (result.success) {
@@ -722,7 +701,7 @@ export function PendingPaymentTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />

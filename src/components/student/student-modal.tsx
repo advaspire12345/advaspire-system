@@ -23,6 +23,7 @@ import type {
   BranchOption,
   CourseOption,
 } from "@/components/trial/trial-modal";
+import { CourseSwitchModal } from "@/components/student/course-switch-modal";
 
 export interface InstructorOption {
   id: string;
@@ -264,6 +265,9 @@ export interface SiblingPoolCheckResult {
     packageType: "monthly" | "session" | null;
     packageDuration: number | null;
     siblings: { studentId: string; studentName: string }[];
+    effectiveCapacity?: number;
+    currentMemberCount?: number;
+    canJoinExistingPool?: boolean;
   } | null;
   siblings?: { studentId: string; studentName: string; enrollmentId: string }[];
   siblingPackageInfo?: {
@@ -343,6 +347,7 @@ export function StudentModal({
   const [isCheckingPool, setIsCheckingPool] = useState(false);
   const [poolSiblings, setPoolSiblings] = useState<string[]>([]);
   const [isGeneratingId, setIsGeneratingId] = useState(false);
+  const [showSwitchCourse, setShowSwitchCourse] = useState(false);
 
   // Track whether user is adding a new student or editing existing
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -1465,10 +1470,19 @@ export function StudentModal({
 
                 {activeTab === "enrollment" && (
                   <div className="space-y-6">
-                    <div>
+                    <div className="flex items-center justify-between">
                       <h6 className="text-base font-bold">
                         Enrollment Details
                       </h6>
+                      {mode === "edit" && record?.enrollmentId && record?.courseId && (
+                        <button
+                          type="button"
+                          onClick={() => setShowSwitchCourse(true)}
+                          className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                        >
+                          Move to another course
+                        </button>
+                      )}
                     </div>
 
                     {/* Branch, Program, Instructor */}
@@ -1540,8 +1554,21 @@ export function StudentModal({
                       )}
                     </div>
 
-                    {/* Package Type Selection - Only show if program has pricing */}
-                    {formData.courseId && (hasMonthlyPricing || hasSessionPricing) ? (
+                    {/* Auto-join: when a sibling pool exists with room AND its package supports ≥2 students, the new sibling joins it without buying a new package. */}
+                    {mode === "add" && formData.courseId && siblingPoolCheck?.hasPool && siblingPoolCheck.poolInfo?.canJoinExistingPool ? (
+                      <div className="rounded-xl border-2 border-[#615DFA] bg-[#615DFA]/10 p-4 text-sm">
+                        <p className="font-semibold text-[#3F3BB8]">
+                          Joining existing sibling pool — no new package needed.
+                        </p>
+                        <p className="mt-1 text-xs text-[#3F3BB8]/80">
+                          This student will share sessions with{" "}
+                          {siblingPoolCheck.poolInfo.siblings.map((s) => s.studentName).join(", ")}{" "}
+                          ({siblingPoolCheck.poolInfo.currentMemberCount}/
+                          {siblingPoolCheck.poolInfo.effectiveCapacity} slots filled).
+                          The pool&apos;s sessions will redistribute evenly across all members.
+                        </p>
+                      </div>
+                    ) : formData.courseId && (hasMonthlyPricing || hasSessionPricing) ? (
                       <div className="space-y-4">
                         <div className="flex items-center gap-2">
                           <label className="text-sm font-bold text-foreground">
@@ -1551,188 +1578,66 @@ export function StudentModal({
                             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                           )}
                         </div>
-                        {/* Show 3 columns if siblings detected or student is pooled */}
-                        <div className={cn(
-                          "grid gap-4",
-                          (siblingPoolCheck && (
-                            (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
-                            || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
-                          ))
-                            || (mode === "edit" && record?.isPooled)
-                            ? "grid-cols-3"
-                            : "grid-cols-2"
-                        )}>
-                          {hasMonthlyPricing && (() => {
-                            // Disable Monthly when sibling sharing is available (session-based siblings detected)
-                            const siblingCanShare = siblingPoolCheck && (
-                              (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
-                              || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
-                            );
-                            return (
+                        <div className="grid gap-4 grid-cols-2">
+                          {hasMonthlyPricing && (
                             <button
                               type="button"
-                              disabled={!!siblingCanShare}
                               onClick={() => {
-                                if (siblingCanShare) return;
-                                // If sibling has monthly package, restore it
-                                if (formData.shareWithSibling && siblingPackage?.packageType === "monthly") {
-                                  setFormData({
-                                    ...formData,
-                                    packageType: "monthly",
-                                    numberOfSessions: null,
-                                    numberOfMonths: siblingPackage.packageDuration,
-                                    packageId: siblingPackage.packageId,
-                                  });
-                                } else {
-                                  setFormData({
-                                    ...formData,
-                                    packageType: "monthly",
-                                    numberOfSessions: null,
-                                  });
-                                }
-                              }}
-                              className={cn(
-                                "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
-                                siblingCanShare
-                                  ? "border-border opacity-40 cursor-not-allowed"
-                                  : formData.packageType === "monthly"
-                                    ? "border-[#23D2E2] bg-[#23D2E2]/10"
-                                    : "border-border hover:border-[#23D2E2]/50",
-                              )}
-                            >
-                              <span className="text-2xl mb-2">📅</span>
-                              <span className="font-bold">Monthly</span>
-                              <span className="text-xs text-muted-foreground">
-                                {siblingCanShare ? "Not available for shared" : "Pay per month"}
-                              </span>
-                            </button>
-                            );
-                          })()}
-                          {hasSessionPricing && (() => {
-                            // When shared=ON, session is the only valid type and cannot be deactivated.
-                            const sessionLockedActive = formData.shareWithSibling;
-                            return (
-                              <button
-                                type="button"
-                                disabled={sessionLockedActive}
-                                onClick={() => {
-                                  if (sessionLockedActive) return;
-                                  // If sibling has session package, restore it
-                                  if (formData.shareWithSibling && siblingPackage?.packageType === "session") {
-                                    setFormData({
-                                      ...formData,
-                                      packageType: "session",
-                                      numberOfMonths: null,
-                                      numberOfSessions: siblingPackage.packageDuration,
-                                      packageId: siblingPackage.packageId,
-                                    });
-                                  } else {
-                                    setFormData({
-                                      ...formData,
-                                      packageType: "session",
-                                      numberOfMonths: null,
-                                    });
-                                  }
-                                }}
-                                className={cn(
-                                  "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
-                                  sessionLockedActive
-                                    ? "border-[#23D2E2] bg-[#23D2E2]/10 cursor-not-allowed"
-                                    : formData.packageType === "session"
-                                      ? "border-[#23D2E2] bg-[#23D2E2]/10"
-                                      : "border-border hover:border-[#23D2E2]/50",
-                                )}
-                                title={sessionLockedActive ? "Required for shared package" : undefined}
-                              >
-                                <span className="text-2xl mb-2">🎫</span>
-                                <span className="font-bold">Session</span>
-                                <span className="text-xs text-muted-foreground">
-                                  {sessionLockedActive ? "Required for shared" : "Pay per session"}
-                                </span>
-                              </button>
-                            );
-                          })()}
-                          {/* Shared button - show when siblings exist in same course, or student is already pooled */}
-                          {((siblingPoolCheck && (
-                            (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
-                            || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
-                          ))
-                            || (mode === "edit" && record?.isPooled)) && (() => {
-                            // Sc 8b: dissolution is only allowed when pool sessions are depleted (≤ 0).
-                            // Disable the toggle-off path when the current pool still has active sessions.
-                            const poolSessionsLeft = (mode === "edit" && record?.isPooled)
-                              ? (record?.sessionsRemaining ?? 0)
-                              : (siblingPoolCheck?.poolInfo?.sessionsRemaining ?? 0);
-                            const dissolutionBlocked = formData.shareWithSibling && poolSessionsLeft > 0;
-                            return (
-                            <button
-                              type="button"
-                              disabled={dissolutionBlocked}
-                              title={dissolutionBlocked ? "Cannot unshare while pool has active sessions" : undefined}
-                              onClick={() => {
-                                // Toggle shared off if already active (blocked when pool has active sessions — Sc 8b)
-                                if (formData.shareWithSibling) {
-                                  if (poolSessionsLeft > 0) return;
-                                  setFormData({
-                                    ...formData,
-                                    shareWithSibling: false,
-                                    existingPoolId: null,
-                                  });
-                                  return;
-                                }
-
-                                // For edit mode with pooled student
-                                if (mode === "edit" && record?.isPooled) {
-                                  setFormData({
-                                    ...formData,
-                                    shareWithSibling: true,
-                                    existingPoolId: record.poolId,
-                                  });
-                                  return;
-                                }
-
-                                // Get sibling's package info from pool or from siblingPackageInfo
-                                const siblingPackageId = siblingPoolCheck?.poolInfo?.packageId
-                                  || siblingPoolCheck?.siblingPackageInfo?.packageId
-                                  || null;
-                                const siblingPackageType = siblingPoolCheck?.poolInfo?.packageType
-                                  || siblingPoolCheck?.siblingPackageInfo?.packageType
-                                  || "session";
-                                const siblingPackageDuration = siblingPoolCheck?.poolInfo?.packageDuration
-                                  || siblingPoolCheck?.siblingPackageInfo?.packageDuration
-                                  || null;
-
                                 setFormData({
                                   ...formData,
-                                  packageType: siblingPackageType as "monthly" | "session",
-                                  numberOfMonths: siblingPackageType === "monthly" ? siblingPackageDuration : null,
-                                  numberOfSessions: siblingPackageType === "session" ? siblingPackageDuration : null,
-                                  packageId: siblingPackageId,
-                                  shareWithSibling: true,
-                                  existingPoolId: siblingPoolCheck?.poolInfo?.poolId || null,
+                                  packageType: "monthly",
+                                  numberOfSessions: null,
                                 });
                               }}
                               className={cn(
                                 "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
-                                formData.shareWithSibling
-                                  ? "border-[#615DFA] bg-[#615DFA]/10"
-                                  : "border-border hover:border-[#615DFA]/50",
-                                dissolutionBlocked && "opacity-50 cursor-not-allowed",
+                                formData.packageType === "monthly"
+                                  ? "border-[#23D2E2] bg-[#23D2E2]/10"
+                                  : "border-border hover:border-[#23D2E2]/50",
                               )}
                             >
-                              <Users className="h-6 w-6 mb-2 text-[#615DFA]" />
-                              <span className="font-bold">Shared</span>
-                              <span className="text-xs text-muted-foreground text-center truncate max-w-full">
-                                ({mode === "edit" && record?.isPooled
-                                  ? poolSiblings.join(", ") || "Loading..."
-                                  : siblingPoolCheck?.hasPool && siblingPoolCheck?.poolInfo
-                                    ? siblingPoolCheck.poolInfo.siblings.map(s => s.studentName).join(", ")
-                                    : siblingPoolCheck?.siblings?.map(s => s.studentName).join(", ") || ""})
-                              </span>
+                              <span className="text-2xl mb-2">📅</span>
+                              <span className="font-bold">Monthly</span>
+                              <span className="text-xs text-muted-foreground">Pay per month</span>
                             </button>
-                            );
-                          })()}
+                          )}
+                          {hasSessionPricing && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData({
+                                  ...formData,
+                                  packageType: "session",
+                                  numberOfMonths: null,
+                                });
+                              }}
+                              className={cn(
+                                "flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all",
+                                formData.packageType === "session"
+                                  ? "border-[#23D2E2] bg-[#23D2E2]/10"
+                                  : "border-border hover:border-[#23D2E2]/50",
+                              )}
+                            >
+                              <span className="text-2xl mb-2">🎫</span>
+                              <span className="font-bold">Session</span>
+                              <span className="text-xs text-muted-foreground">Pay per session</span>
+                            </button>
+                          )}
                         </div>
+                        {/* Pooling is automatic for same-parent + same-course siblings; no explicit toggle. */}
+                        {((siblingPoolCheck && (
+                          (siblingPoolCheck.hasPool && (siblingPoolCheck.poolInfo?.siblings?.length ?? 0) > 0)
+                          || (siblingPoolCheck.hasSiblingInCourse && (siblingPoolCheck.siblings?.length ?? 0) > 0)
+                        )) || (mode === "edit" && record?.isPooled)) && (
+                          <div className="rounded-lg bg-[#615DFA]/10 px-3 py-2 text-xs text-[#3F3BB8]">
+                            <span className="font-semibold">Auto-pooled</span> with{" "}
+                            {mode === "edit" && record?.isPooled
+                              ? poolSiblings.join(", ") || "siblings"
+                              : siblingPoolCheck?.hasPool && siblingPoolCheck?.poolInfo
+                                ? siblingPoolCheck.poolInfo.siblings.map(s => s.studentName).join(", ")
+                                : siblingPoolCheck?.siblings?.map(s => s.studentName).join(", ") || "siblings"}
+                          </div>
+                        )}
                       </div>
                     ) : formData.courseId ? (
                       <div className="bg-muted/30 p-4 rounded-xl border border-border">
@@ -1995,6 +1900,18 @@ export function StudentModal({
           </div>
         </div>
       </DialogContent>
+      {mode === "edit" && record?.enrollmentId && record?.courseId && (
+        <CourseSwitchModal
+          open={showSwitchCourse}
+          onOpenChange={setShowSwitchCourse}
+          enrollmentId={record.enrollmentId}
+          currentCourseId={record.courseId}
+          currentCourseName={record.programName}
+          sessionsRemaining={record.sessionsRemaining ?? 0}
+          courses={courses}
+          onSwitched={() => onOpenChange(false)}
+        />
+      )}
     </Dialog>
   );
 }

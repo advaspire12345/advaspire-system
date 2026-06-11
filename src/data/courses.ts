@@ -6,6 +6,7 @@ export interface CourseOption {
   name: string;
   numberOfLevels: number | null;
   programType?: string | null;
+  status?: string | null;
 }
 
 export interface PackageOption {
@@ -40,7 +41,7 @@ export interface CourseSlotOption {
 export async function getAllCourses(): Promise<CourseOption[]> {
   const { data, error } = await supabaseAdmin
     .from("courses")
-    .select("id, name, number_of_levels, program_type")
+    .select("id, name, number_of_levels, program_type, status")
     .is("deleted_at", null)
     .order("name");
 
@@ -54,6 +55,7 @@ export async function getAllCourses(): Promise<CourseOption[]> {
     name: c.name,
     numberOfLevels: c.number_of_levels,
     programType: c.program_type ?? null,
+    status: c.status ?? null,
   }));
 }
 
@@ -83,7 +85,7 @@ export async function getCoursesByBranchIds(branchIds: string[]): Promise<Course
 
   const { data, error } = await supabaseAdmin
     .from("courses")
-    .select("id, name, number_of_levels, program_type, course_branches!inner(branch_id)")
+    .select("id, name, number_of_levels, program_type, status, course_branches!inner(branch_id)")
     .in("course_branches.branch_id", branchIds)
     .is("deleted_at", null)
     .order("name");
@@ -103,6 +105,7 @@ export async function getCoursesByBranchIds(branchIds: string[]): Promise<Course
       name: c.name,
       numberOfLevels: c.number_of_levels,
       programType: (c as { program_type?: string | null }).program_type ?? null,
+      status: (c as { status?: string | null }).status ?? null,
     });
   }
   return out;

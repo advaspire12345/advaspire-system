@@ -1,0 +1,59 @@
+name: adcoin-instructor-award
+description: |
+  Instructor marks attendance present with an adcoin amount —
+  triggers an instructor→student adcoin transfer.
+
+fixtures:
+  branch:
+    name: "AdAwd Branch"
+    code: "AAB"
+    parent: "ADS"
+  course:
+    name: "AdAwdCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "AwdStu"
+      parent_name: "Awd Parent"
+      parent_email: "awd@sim.local"
+      parent_phone: "0123450910"
+      course: "AdAwdCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "AwdStu" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "AwdStu" }
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "AwdStu"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+      adcoin: 50
+    observers: auto
+
+teardown: manual

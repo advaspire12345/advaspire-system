@@ -21,7 +21,7 @@ export default async function DashboardLayout({
   return (
     <SidebarProvider>
       <div className="flex min-h-svh w-full flex-col">
-        <TopMenuBar />
+        <TopMenuBar role={permData?.role ?? null} userId={permData?.userId ?? null} />
         <div className="flex flex-1 pt-14">
           <AppSidebar
             permissions={permData?.permissions ?? null}

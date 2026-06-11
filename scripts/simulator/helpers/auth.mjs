@@ -31,7 +31,12 @@ export async function createTestUser({ runId, handle, role, branchId, inChargeCo
   });
   if (aErr) throw new Error(`createTestUser auth ${email}: ${aErr.message}`);
 
-  // 2. public.users row
+  // 2. public.users row.  Seed adcoin_balance for staff roles so transfer /
+  // award flows have something to spend — instructors need balance to grant
+  // adcoin via mark_present's adcoin field, admins need balance for the
+  // leaderboard transfer modal.  Real users typically run with 500–1000;
+  // 5000 gives sim scenarios plenty of headroom.
+  const adcoinSeed = role === "instructor" || role === "company_admin" || role === "group_admin" || role === "assistant_admin" || role === "super_admin" ? 5000 : 0;
   const { data: row, error: uErr } = await supabase
     .from("users")
     .insert({
@@ -42,6 +47,7 @@ export async function createTestUser({ runId, handle, role, branchId, inChargeCo
       branch_id: branchId,
       status: "active",
       employed_date: new Date().toISOString().slice(0, 10),
+      adcoin_balance: adcoinSeed,
     })
     .select("id, email, role")
     .single();

@@ -33,13 +33,21 @@ export default async function TeamPage() {
   const perms = permData?.permissions.team;
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
-  const [teamMembers, branchesData, dbUser, customRoles, coursesData] = await Promise.all([
+  const [teamMembersAll, branchesData, dbUser, customRoles, coursesData] = await Promise.all([
     getTeamMembersForTable(user.email),
     getAllBranches(),
     getUserByAuthId(user.id),
     getCustomRolesAction(),
     getCoursesForUser(user.email),
   ]);
+
+  // Never let any user see their own row in /team — own info lives in
+  // /profile. This also blocks accidental self-demote or self-delete, which
+  // would otherwise wipe their public.users row and cause the dashboard ↔
+  // /login redirect loop (auth session still valid, no public row to match).
+  const teamMembers = dbUser?.id
+    ? teamMembersAll.filter((m) => m.id !== dbUser.id)
+    : teamMembersAll;
 
   // Companies the current user can assign a group_admin to. Super admin sees all
   // companies, group_admin only their own (rare — typically you don't assign
@@ -91,11 +99,17 @@ export default async function TeamPage() {
   const branches = filteredBranches.map((b) => ({
     id: b.id,
     name: useCityName ? (b.city || b.name) : b.name,
+    type: b.type,
   }));
 
-  // Show Edit Permissions button for group_admin and company_admin only
+  // Edit Permissions button visible to:
+  //   - super_admin (manages Group Admin globally)
+  //   - group_admin (manages Company Admin / Assistant / Instructor company-wide)
+  //   - company_admin (manages Assistant / Instructor at their own branch)
   const canEditRolePermissions =
-    permData!.role === "group_admin" || permData!.role === "company_admin";
+    permData!.role === "super_admin" ||
+    permData!.role === "group_admin" ||
+    permData!.role === "company_admin";
 
   return (
     <main className="flex-1 overflow-auto px-6 py-12 bg-[#f6f6fb]">

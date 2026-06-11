@@ -24,6 +24,10 @@ interface SlotOption {
   day: string;
   time: string;
   limit_student: number;
+  /** Branch name shown next to the slot row when the importer can see more
+   *  than one branch (group_admin / super_admin). NULL for company_admin and
+   *  other single-branch users — the branch label would be redundant noise. */
+  branch?: string | null;
 }
 interface ProgramSlots {
   program: string;
@@ -32,6 +36,10 @@ interface ProgramSlots {
 interface InstructorOption {
   name: string;
   email: string;
+  /** Branch label shown when the importer sees more than one branch
+   *  (group_admin / super_admin). NULL for single-branch users — the label
+   *  would be redundant noise in that case. */
+  branch?: string | null;
 }
 
 interface ImportPageProps {
@@ -41,6 +49,11 @@ interface ImportPageProps {
   programPackages?: ProgramPackages[];
   programSlots?: ProgramSlots[];
   instructorOptions?: InstructorOption[];
+  /** When true (company_admin / single-branch importer), the Students CSV
+   *  drops the `branch_name` column — the server fills in the importer's own
+   *  branch automatically. group_admin / super_admin keep the column so they
+   *  can target a specific branch per row. */
+  hideStudentBranchColumn?: boolean;
 }
 
 type ImportType = "students" | "attendance" | "payments" | "transactions" | "trials" | "examinations";
@@ -53,7 +66,7 @@ interface ImportSection {
   /** Sample data rows shipped with the template. Auto-skipped server-side by
    *  the EXAMPLE marker prefix on each row's id field — the user can delete
    *  them or leave them. Multiple rows can demo different features (e.g. one
-   *  individual + one with share_with_sibling for the Students template). */
+   *  individual + one sibling auto-pooled for the Students template). */
   exampleRows?: string[][];
 }
 
@@ -65,7 +78,7 @@ const STUDENT_COLUMNS = [
   "program_name", "package_type", "package_duration",
   "schedule_day", "schedule_time",
   "enrollment_status", "sessions_remaining",
-  "share_with_sibling",
+  "level",
 ];
 
 // Example rows shipped with each template. They're a live format hint right
@@ -76,9 +89,10 @@ const STUDENT_COLUMNS = [
 // The Students template ships with FOUR sample rows covering the most
 // common patterns:
 //   1) New student, individual enrollment
-//   2) Sibling of (1), shared pool via share_with_sibling=true
-//   3) Same student as (1), enrolled in a SECOND program (multi-enrollment
-//      per student — different program → new enrollment under same student)
+//   2) Sibling of (1) — same parent_email + same program_name → auto-pools
+//      with row 1 (no flag needed)
+//   3) Same student as (1), enrolled in a SECOND program (different program
+//      → new enrollment under same student, stays individual)
 //   4) Same student as (1), SAME program but a SECOND weekly slot — note
 //      sessions_remaining is 0 because slot A (row 1) already counted those
 //      sessions; the system would otherwise double-count
@@ -102,11 +116,11 @@ const STUDENT_EXAMPLE_ROWS = [
     "14:00",
     "active",
     "8",
-    "",  // share_with_sibling — blank = individual
+    "1",  // level — current course level (1 = beginner; blank treated as 1)
   ],
   [
     "",  // student_id — same convention; existing IDs look like ADV-001-25004
-    "EXAMPLE 2 — sibling of EXAMPLE 1, shared (delete or leave)",
+    "EXAMPLE 2 — sibling of EXAMPLE 1, auto-pooled (delete or leave)",
     "2020-06-22",
     "female",
     "SK Taman Hijau",
@@ -116,14 +130,14 @@ const STUDENT_EXAMPLE_ROWS = [
     "12 Jalan Hijau",
     "Semenyih",
     "Advaspire Robotics & Coding Academy Semenyih",
-    "Junior Robotics",  // SAME program as row 1 — required for sibling pool
+    "Junior Robotics",  // SAME program as row 1 — auto-pools with row 1
     "session",
     "12",
     "tuesday",
     "14:00",
     "active",
     "0",
-    "true",  // share_with_sibling — joins / creates pool with row 1's student
+    "1",  // level
   ],
   [
     "",  // student_id — blank again; the student will be matched by name + parent
@@ -144,7 +158,7 @@ const STUDENT_EXAMPLE_ROWS = [
     "16:00",
     "active",
     "4",
-    "",  // share_with_sibling — blank, this is a fresh enrollment for the same student
+    "3",  // level — same student may be at a different level in a different program
   ],
   [
     "",  // student_id — blank; matches existing EXAMPLE 1 student by name+parent
@@ -165,7 +179,7 @@ const STUDENT_EXAMPLE_ROWS = [
     "10:00",      // (or different time same day, etc)
     "active",
     "0",          // sessions_remaining=0 because row 1 already counted this student's Junior Robotics sessions; non-zero here would double-count
-    "true",       // share_with_sibling=true — joins the same pool created by EXAMPLE 2; both slots end up in the family Junior Robotics pool
+    "1",          // level — same value as row 1 for this program
   ],
 ];
 
@@ -222,25 +236,54 @@ const TRIALS_EXAMPLE_ROWS = [[
   "Interested after seeing FB ad",
 ]];
 
-const EXAMINATIONS_EXAMPLE_ROWS = [[
-  "EXAMPLE-ADV-001-25001",
-  "Junior Robotics Level 1",
-  "1",
-  "2026-04-15",
-  "pass",
-  "85",
-  "0",
-  "instructor@example.com",
-  "CERT-2026-001",
-  "Strong performance on the practical task",
-]];
+const EXAMINATIONS_EXAMPLE_ROWS = [
+  // 1) First attempt — FAILED. No certificate number (only awarded on pass).
+  [
+    "EXAMPLE-ADV-001-25001",
+    "Junior Robotics Level 1",
+    "1",
+    "2026-03-10",
+    "fail",
+    "42",
+    "0",
+    "instructor@example.com",
+    "",
+    "Missed timing on the line follower section",
+  ],
+  // 2) Reattempt — also FAILED. reattempt_count incremented. Still no cert.
+  [
+    "EXAMPLE-ADV-001-25001",
+    "Junior Robotics Level 1",
+    "1",
+    "2026-03-24",
+    "fail",
+    "58",
+    "1",
+    "instructor@example.com",
+    "",
+    "Better, but mission 3 still incomplete",
+  ],
+  // 3) Reattempt — PASSED. reattempt_count further incremented. Cert assigned.
+  [
+    "EXAMPLE-ADV-001-25001",
+    "Junior Robotics Level 1",
+    "1",
+    "2026-04-15",
+    "pass",
+    "85",
+    "2",
+    "instructor@example.com",
+    "CERT-2026-001",
+    "Cleared all missions within the time limit",
+  ],
+];
 
 const SECTIONS: ImportSection[] = [
   {
     id: "students",
     title: "Students & Parents",
     description:
-      "Import students with parent info and enrollment — works for new sign-ups AND migrating existing rosters with their original IDs. student_id can be blank (system auto-generates) OR your own value (used as-is — useful when bringing students over from a previous system). The first four rows are samples (individual, shared-sibling, multi-program, multi-slot-same-program); they're auto-skipped because student_name starts with \"EXAMPLE\". One student can have multiple rows (same student_name + parent_email) to create additional enrollments — different program, day, or time. For multi-slot rows of the SAME program, put sessions_remaining on the FIRST row only; subsequent rows should be 0 (slot is added but sessions already counted).",
+      "Import students with parent info and enrollment — works for new sign-ups AND migrating existing rosters with their original IDs. student_id can be blank (system auto-generates) OR your own value (used as-is — useful when bringing students over from a previous system). `level` is the student's current course level (integer, blank defaults to 1) — also stamped on the new enrollment so the level shown in /attendance and /examinations reflects the import. The first four rows are samples (individual, auto-pooled sibling, multi-program, multi-slot-same-program); they're auto-skipped because student_name starts with \"EXAMPLE\". Siblings auto-pool — any two rows with the same parent_email + program_name are joined into a shared pool automatically (no flag needed). One student can have multiple rows (same student_name + parent_email) to create additional enrollments — different program, day, or time. For multi-slot rows of the SAME program, put sessions_remaining on the FIRST row only; subsequent rows should be 0 (slot is added but sessions already counted).",
     templateColumns: STUDENT_COLUMNS,
     exampleRows: STUDENT_EXAMPLE_ROWS,
   },
@@ -293,7 +336,7 @@ const SECTIONS: ImportSection[] = [
     id: "examinations",
     title: "Examinations",
     description:
-      "Import examination records (typically migration history — past exam attempts and certifications). `student_id` matches an existing student. `status` is the outcome: eligible / scheduled / in_progress / pass / fail / absent. `mark` and `reattempt_count` are optional (reattempt defaults to 0). `examiner_email` is optional — looks up the instructor by email. `certificate_number` is whatever ID was issued in your old system. The first row is a sample — auto-skipped (student_id starts with \"EXAMPLE\").",
+      "Import examination records (typically migration history — past exam attempts and certifications). `student_id` matches an existing student. `status` is the outcome: eligible / scheduled / in_progress / pass / fail / absent. `mark` and `reattempt_count` are optional (reattempt defaults to 0). `examiner_email` is optional — looks up the instructor by email. `certificate_number` is the cert ID issued for THIS exam — only allowed when status=pass, must be unique (server checks both the existing table AND other rows in the upload, case-insensitive). The first three rows are samples showing a fail → reattempt → pass arc; all auto-skipped because student_id starts with \"EXAMPLE\".",
     templateColumns: [
       "student_id", "exam_name", "exam_level", "exam_date", "status",
       "mark", "reattempt_count", "examiner_email", "certificate_number", "notes",
@@ -323,12 +366,31 @@ export function ImportPage({
   programPackages = [],
   programSlots = [],
   instructorOptions = [],
+  hideStudentBranchColumn = false,
 }: ImportPageProps) {
   const [activeSection, setActiveSection] = useState<ImportType | null>(null);
   const [parsedData, setParsedData] = useState<Record<string, string>[]>([]);
   const [fileName, setFileName] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+
+  // For single-branch importers, strip the branch_name column from the
+  // Students template + example rows. The server will fall back to the
+  // importer's own branch.
+  const branchColIndex = STUDENT_COLUMNS.indexOf("branch_name");
+  const sections = hideStudentBranchColumn
+    ? SECTIONS.map((s) =>
+        s.id !== "students" || branchColIndex < 0
+          ? s
+          : {
+              ...s,
+              templateColumns: s.templateColumns.filter((c) => c !== "branch_name"),
+              exampleRows: (s.exampleRows ?? []).map((r) =>
+                r.filter((_, i) => i !== branchColIndex),
+              ),
+            },
+      )
+    : SECTIONS;
 
   const downloadTemplateCsv = (section: ImportSection) => {
     const lines = [section.templateColumns.map(csvEscape).join(",")];
@@ -609,7 +671,7 @@ export function ImportPage({
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {SECTIONS.map((section) => (
+            {sections.map((section) => (
               <div
                 key={section.id}
                 className="rounded-xl border border-border hover:border-[#23D2E2] hover:bg-[#23D2E2]/5 transition"
@@ -786,47 +848,70 @@ export function ImportPage({
                   </div>
                 )}
 
-                {/* All-share-with-sibling warning. Sibling pools need at
-                    least one "anchor" individual row per parent — the others
-                    join into that one. If every row for a given parent is
-                    shared, the server can't create the pool from nothing. */}
-                {(() => {
-                  const sharedRows = parsedData.filter((r) =>
-                    !(r.student_name ?? "").trim().toUpperCase().startsWith("EXAMPLE") &&
-                    ["true","yes","1","y"].includes((r.share_with_sibling ?? "").trim().toLowerCase()),
-                  );
-                  if (sharedRows.length === 0) return null;
-                  // Group by (parent_email, program_name); flag groups with no individual anchor.
-                  const groups = new Map<string, { shared: number; individual: number }>();
-                  for (const r of parsedData) {
-                    if ((r.student_name ?? "").trim().toUpperCase().startsWith("EXAMPLE")) continue;
-                    const key = `${(r.parent_email ?? "").trim().toLowerCase()}|${(r.program_name ?? "").trim()}`;
-                    if (!groups.has(key)) groups.set(key, { shared: 0, individual: 0 });
-                    const g = groups.get(key)!;
-                    if (["true","yes","1","y"].includes((r.share_with_sibling ?? "").trim().toLowerCase())) {
-                      g.shared++;
-                    } else {
-                      g.individual++;
-                    }
-                  }
-                  const orphaned = Array.from(groups.entries()).filter(([, v]) => v.shared > 0 && v.individual === 0);
-                  if (orphaned.length === 0) return null;
+                {/* In-file certificate_number duplicate detection
+                    (Examinations only) — flag before sending to the server. */}
+                {section.id === "examinations" && (() => {
+                  const certRowMap = new Map<string, number[]>();
+                  parsedData.forEach((r, i) => {
+                    const v = (r.certificate_number ?? "").trim();
+                    if (!v) return;
+                    if ((r.student_id ?? "").trim().toUpperCase().startsWith("EXAMPLE")) return;
+                    const key = v.toUpperCase();
+                    if (!certRowMap.has(key)) certRowMap.set(key, []);
+                    certRowMap.get(key)!.push(i + 1);
+                  });
+                  const dupes = Array.from(certRowMap.entries()).filter(([, rows]) => rows.length > 1);
+                  if (dupes.length === 0) return null;
                   return (
                     <div className="rounded-lg p-4 bg-red-50 border border-red-200">
                       <div className="flex items-start gap-2">
                         <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
                         <div>
                           <p className="font-bold text-sm text-red-900 mb-1">
-                            Sibling pool needs an &ldquo;anchor&rdquo; sibling
+                            Duplicate certificate_number within this file
                           </p>
                           <p className="text-xs text-red-800 mb-2">
-                            These parent + program groups have <span className="font-mono">share_with_sibling=true</span> on every row, with no individual sibling for them to share with. Set <span className="font-mono">share_with_sibling</span> to blank on ONE row per group — that row becomes the anchor, and the others join its pool.
+                            Each certificate number must be unique. These cert numbers appear on more than one row:
                           </p>
                           <ul className="text-xs font-mono text-red-700 space-y-0.5">
-                            {orphaned.map(([key]) => {
-                              const [email, prog] = key.split("|");
-                              return <li key={key}>• {email || "(no email)"} / {prog || "(no program)"}</li>;
-                            })}
+                            {dupes.map(([cert, rows]) => (
+                              <li key={cert}>• {cert} — rows {rows.join(", ")}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* In-file cert-on-fail detection (Examinations only) —
+                    fail/absent/scheduled etc. should NOT carry a cert number. */}
+                {section.id === "examinations" && (() => {
+                  const offenders = parsedData
+                    .map((r, i) => ({ r, idx: i + 1 }))
+                    .filter(({ r }) =>
+                      !(r.student_id ?? "").trim().toUpperCase().startsWith("EXAMPLE") &&
+                      (r.certificate_number ?? "").trim() !== "" &&
+                      (r.status ?? "").trim().toLowerCase() !== "pass"
+                    );
+                  if (offenders.length === 0) return null;
+                  return (
+                    <div className="rounded-lg p-4 bg-red-50 border border-red-200">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-sm text-red-900 mb-1">
+                            Certificate number on a non-pass row
+                          </p>
+                          <p className="text-xs text-red-800 mb-2">
+                            Certificate numbers are only awarded when status=pass. Clear the cert number on these rows OR change their status to pass:
+                          </p>
+                          <ul className="text-xs font-mono text-red-700 space-y-0.5">
+                            {offenders.map(({ r, idx }) => (
+                              <li key={idx}>
+                                • row {idx}: status=<strong>{r.status || "(blank)"}</strong>, cert=<strong>{r.certificate_number}</strong>
+                              </li>
+                            ))}
                           </ul>
                         </div>
                       </div>
@@ -886,28 +971,93 @@ export function ImportPage({
                       </thead>
                       <tbody>
                         {(() => {
-                          // Parse the server's error messages for row indices
-                          // — format is "Row N (...): ..." where N is the
-                          // original 1-based row position. After an import,
-                          // we show ALL rows colored: red for failed, green
-                          // for everything else (success or skipped). Before
-                          // an import, just preview the first 5 in neutral.
+                          // Build the set of "bad" row numbers from TWO sources:
+                          //   1. Server result (after Import is clicked) — parse
+                          //      the "Row N: ..." prefix from each error.
+                          //   2. Client-side pre-flight checks — same checks the
+                          //      red banners above the preview run; we surface
+                          //      them here too so the preview rows go red as
+                          //      soon as the user can SEE them, not only after
+                          //      Import is clicked.
                           const failedRows = new Set<number>();
                           if (result) {
                             for (const err of result.errors ?? []) {
                               const m = err.match(/^Row (\d+)\b/);
                               if (m) failedRows.add(parseInt(m[1], 10));
                             }
+                          } else {
+                            const isExample = (r: Record<string, string>) => {
+                              const v = (r.student_id ?? r.student_name ?? r.sender_id ?? r.child_name ?? "").trim().toUpperCase();
+                              return v.startsWith("EXAMPLE");
+                            };
+
+                            // Per-section pre-flight detectors. Each adds the
+                            // offending row numbers to the failedRows set.
+                            if (section.id === "students") {
+                              parsedData.forEach((r, i) => {
+                                if (isExample(r)) return;
+                                if ((r.parent_email ?? "").trim().toLowerCase() === "aiman.parent@example.com") {
+                                  failedRows.add(i + 1);
+                                }
+                              });
+                            }
+
+                            if (section.id === "payments") {
+                              const seqMap = new Map<string, number[]>();
+                              parsedData.forEach((r, i) => {
+                                if (isExample(r)) return;
+                                const v = (r.receipt_seq ?? "").trim();
+                                if (!v) return;
+                                if (!seqMap.has(v)) seqMap.set(v, []);
+                                seqMap.get(v)!.push(i + 1);
+                              });
+                              for (const rows of seqMap.values()) {
+                                if (rows.length > 1) rows.forEach((rn) => failedRows.add(rn));
+                              }
+                            }
+
+                            if (section.id === "examinations") {
+                              const certMap = new Map<string, number[]>();
+                              parsedData.forEach((r, i) => {
+                                if (isExample(r)) return;
+                                const v = (r.certificate_number ?? "").trim();
+                                if (v) {
+                                  const key = v.toUpperCase();
+                                  if (!certMap.has(key)) certMap.set(key, []);
+                                  certMap.get(key)!.push(i + 1);
+                                  // cert on non-pass
+                                  if ((r.status ?? "").trim().toLowerCase() !== "pass") {
+                                    failedRows.add(i + 1);
+                                  }
+                                }
+                              });
+                              for (const rows of certMap.values()) {
+                                if (rows.length > 1) rows.forEach((rn) => failedRows.add(rn));
+                              }
+                            }
                           }
-                          const rowsToShow = result ? parsedData : parsedData.slice(0, 5);
+                          // Show all rows after import AND when pre-flight
+                          // found problems — otherwise the user can't see the
+                          // colored failures past row 5. Neutral previews
+                          // still stay capped at 5 for compactness.
+                          const expandPreview = !!result || failedRows.size > 0;
+                          const rowsToShow = expandPreview ? parsedData : parsedData.slice(0, 5);
                           return rowsToShow.map((row, idx) => {
                             const rowNum = idx + 1;
                             const failed = failedRows.has(rowNum);
+                            // Coloring rules:
+                            //   - after import (result set): red for failed,
+                            //     green for everything else (success/skipped)
+                            //   - before import: red ONLY for pre-flight
+                            //     failures, others stay neutral so the user
+                            //     focuses on the problem rows
                             const rowClass = result
                               ? failed
                                 ? "border-t bg-red-50"
                                 : "border-t bg-green-50"
-                              : "border-t";
+                              : failed
+                                ? "border-t bg-red-50"
+                                : "border-t";
                             return (
                               <tr key={idx} className={rowClass}>
                                 <td className="px-3 py-2 text-muted-foreground">{rowNum}</td>
@@ -920,11 +1070,50 @@ export function ImportPage({
                         })()}
                       </tbody>
                     </table>
-                    {!result && parsedData.length > 5 && (
-                      <div className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/30">
-                        ... and {parsedData.length - 5} more rows
-                      </div>
-                    )}
+                    {/* "more rows" hint — shown only when the preview was
+                        actually capped at 5. We recompute the same condition
+                        used inside the renderer. */}
+                    {!result && parsedData.length > 5 && (() => {
+                      // If any pre-flight failed row exists, the table is
+                      // already expanded — no hint needed.
+                      const anyFailedRowKnown = (() => {
+                        const isExample = (r: Record<string, string>) => {
+                          const v = (r.student_id ?? r.student_name ?? r.sender_id ?? r.child_name ?? "").trim().toUpperCase();
+                          return v.startsWith("EXAMPLE");
+                        };
+                        if (section.id === "payments") {
+                          const seqMap = new Map<string, number>();
+                          for (const r of parsedData) {
+                            if (isExample(r)) continue;
+                            const v = (r.receipt_seq ?? "").trim();
+                            if (!v) continue;
+                            seqMap.set(v, (seqMap.get(v) ?? 0) + 1);
+                          }
+                          if (Array.from(seqMap.values()).some((n) => n > 1)) return true;
+                        }
+                        if (section.id === "examinations") {
+                          const certMap = new Map<string, number>();
+                          for (const r of parsedData) {
+                            if (isExample(r)) continue;
+                            const v = (r.certificate_number ?? "").trim();
+                            if (!v) continue;
+                            certMap.set(v.toUpperCase(), (certMap.get(v.toUpperCase()) ?? 0) + 1);
+                            if ((r.status ?? "").trim().toLowerCase() !== "pass") return true;
+                          }
+                          if (Array.from(certMap.values()).some((n) => n > 1)) return true;
+                        }
+                        if (section.id === "students") {
+                          if (parsedData.some((r) => !isExample(r) && (r.parent_email ?? "").trim().toLowerCase() === "aiman.parent@example.com")) return true;
+                        }
+                        return false;
+                      })();
+                      if (anyFailedRowKnown) return null;
+                      return (
+                        <div className="px-3 py-2 text-xs text-muted-foreground border-t bg-muted/30">
+                          ... and {parsedData.length - 5} more rows
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -1208,7 +1397,10 @@ function StudentsFieldReference({
                 <div className="text-xs font-bold text-[#3e3f5e] mb-1 truncate">{ps.program}</div>
                 <ul className="text-xs space-y-0.5">
                   {ps.slots.map((s, idx) => (
-                    <li key={`${s.day}-${s.time}-${idx}`} className="text-muted-foreground">
+                    <li key={`${s.branch ?? ''}-${s.day}-${s.time}-${idx}`} className="text-muted-foreground">
+                      {s.branch && (
+                        <span className="text-[#615DFA] font-semibold">{s.branch} · </span>
+                      )}
                       {s.day} {s.time}
                       <span className="text-[#3e3f5e]"> (cap {s.limit_student})</span>
                     </li>
@@ -1263,12 +1455,10 @@ function StudentsFieldReference({
         <span className="font-mono">/attendance</span>. Stick to the slots above for clean grouping.
       </p>
       <p className="text-[11px] text-muted-foreground mt-2">
-        <strong>Sibling sharing:</strong> set <span className="font-mono">share_with_sibling=true</span>{" "}
-        (also accepts <span className="font-mono">yes</span>, <span className="font-mono">1</span>, <span className="font-mono">y</span>)
-        to join the student into the existing sibling pool for the same parent + program. Leave blank or
-        set <span className="font-mono">false</span> for individual enrollment. Row order doesn&apos;t matter — the import
-        processes all individual rows first, then the shared ones, so every <span className="font-mono">share_with_sibling=true</span>{" "}
-        row will find its already-imported sibling. If no individual sibling exists for that parent + program, the shared row is rejected with an explanatory error.
+        <strong>Sibling sharing is automatic:</strong> any two rows with the same{" "}
+        <span className="font-mono">parent_email</span> + <span className="font-mono">program_name</span> get pooled together —
+        no flag required. The first row of the pair becomes the anchor; the second auto-joins. This also covers
+        a single student with multiple slots in the same program: the second slot auto-joins the family pool.
       </p>
       <p className="text-[11px] text-muted-foreground mt-2">
         Tip — for students who <strong>already paid</strong> and still have unused sessions: set <span className="font-mono">enrollment_status=active</span> and <span className="font-mono">sessions_remaining</span> to whatever count they have left. No payment row is generated by this import, so they won&apos;t be double-charged. To record the historical payment / attendance / adcoin, use the Payments / Attendance / Transactions imports next.
@@ -1294,7 +1484,10 @@ function AttendanceFieldReference({ instructorOptions }: { instructorOptions: In
     {
       title: "Instructors (for instructor_name)",
       emptyText: "No instructors available.",
-      items: instructorOptions.map((u) => ({ primary: u.name, secondary: `(${u.email})` })),
+      items: instructorOptions.map((u) => ({
+        primary: u.name,
+        secondary: u.branch ? `(${u.email}) · ${u.branch}` : `(${u.email})`,
+      })),
     },
   ];
   return (
@@ -1355,7 +1548,10 @@ function TransactionsFieldReference({ instructorOptions }: { instructorOptions: 
     {
       title: "Team members (for user emails)",
       emptyText: "No team members available.",
-      items: instructorOptions.map((u) => ({ primary: u.email, secondary: `(${u.name})` })),
+      items: instructorOptions.map((u) => ({
+        primary: u.email,
+        secondary: u.branch ? `(${u.name}) · ${u.branch}` : `(${u.name})`,
+      })),
     },
   ];
   return (

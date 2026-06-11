@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Check, X as XIcon, Download } from "lucide-react";
@@ -29,6 +29,9 @@ const STATUS_STYLES: Record<string, string> = {
 export function MarketplaceTable({ initialData, showActions, approverName }: MarketplaceTableProps) {
   const router = useRouter();
   const [data, setData] = useState(initialData);
+
+  // Resync after router.refresh() so saved/edited/deleted rows appear without a manual reload.
+  useEffect(() => { setData(initialData); }, [initialData]);
   const [approveOpen, setApproveOpen] = useState(false);
   const [selected, setSelected] = useState<TopupRequestRow | null>(null);
   const [invoiceOpen, setInvoiceOpen] = useState(false);

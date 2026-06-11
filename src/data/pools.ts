@@ -284,10 +284,15 @@ export async function addStudentToPool(
     return existing as PoolStudent;
   }
 
+  // Seed pool_students.sessions_remaining with the leftover the student brought
+  // in — that's how the per-student tracking knows about absorbed sessions.
+  // Without this, R1 redistribution on the next payment sees the contributing
+  // member at 0 instead of their actual balance.
   const insertData: PoolStudentInsert = {
     pool_id: poolId,
     student_id: studentId,
     enrollment_id: enrollmentId,
+    sessions_remaining: leftover,
   };
 
   const { data, error } = await supabaseAdmin
@@ -828,5 +833,274 @@ export async function restoreStudentToPool(
       .from('enrollments')
       .update({ sessions_remaining: 0 })
       .eq('id', otherEnroll.id);
+  }
+}
+
+// ============================================
+// AUTO-POOL + PER-STUDENT TRACKING (migration 027 era)
+// ============================================
+
+/**
+ * Find an existing live pool for this parent+course pair, or null. Used by
+ * the auto-pool logic on add-student and on payment approval to route
+ * sessions into the shared bucket.
+ */
+export async function findPoolForParentCourse(
+  parentId: string,
+  courseId: string,
+): Promise<SharedSessionPool | null> {
+  const { data } = await supabaseAdmin
+    .from('shared_session_pools')
+    .select('*')
+    .eq('parent_id', parentId)
+    .eq('course_id', courseId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  return (data as SharedSessionPool | null) ?? null;
+}
+
+/**
+ * Pool's effective capacity = MAX(max_students_per_pool) across all
+ * pricing rows that have ever contributed sessions to this pool. Reads from
+ * the payments table joined to course_pricing.
+ */
+export async function getPoolEffectiveCapacity(poolId: string): Promise<number> {
+  const { data: payments } = await supabaseAdmin
+    .from('payments')
+    .select('package_id, status')
+    .eq('pool_id', poolId)
+    .eq('status', 'paid');
+  const pkgIds = Array.from(new Set((payments ?? []).map((p) => p.package_id).filter((x): x is string => Boolean(x))));
+  if (pkgIds.length === 0) return 1;
+  const { data: pricings } = await supabaseAdmin
+    .from('course_pricing')
+    .select('max_students_per_pool')
+    .in('id', pkgIds);
+  let max = 1;
+  for (const p of (pricings ?? []) as { max_students_per_pool: number | null }[]) {
+    if ((p.max_students_per_pool ?? 1) > max) max = p.max_students_per_pool ?? 1;
+  }
+  return max;
+}
+
+/**
+ * Credit N sessions into a pool using R1 redistribution:
+ *   total = sum(pool_students.sessions_remaining) + N
+ *   each member gets floor(total / member_count)
+ *   remainder one-by-one starting from payerStudentId
+ *
+ * Also updates `current_window_pricing_id` to the source pricing (the window
+ * length goes by whatever was most recently credited) and clears
+ * `window_started_at` so the next attendance will re-arm it.
+ */
+export async function creditSessionsToPool(
+  poolId: string,
+  sessionsToAdd: number,
+  payerStudentId: string,
+  sourcePricingId: string | null,
+): Promise<void> {
+  const { data: members } = await supabaseAdmin
+    .from('pool_students')
+    .select('id, student_id, sessions_remaining, joined_at')
+    .eq('pool_id', poolId)
+    .order('joined_at', { ascending: true });
+
+  const memberRows = (members ?? []) as Array<{
+    id: string;
+    student_id: string;
+    sessions_remaining: number;
+    joined_at: string;
+  }>;
+  if (memberRows.length === 0) return;
+
+  const currentTotal = memberRows.reduce((s, m) => s + (m.sessions_remaining ?? 0), 0);
+  const total = currentTotal + sessionsToAdd;
+  const memberCount = memberRows.length;
+  const share = Math.floor(total / memberCount);
+  let remainder = total - share * memberCount;
+
+  // Order remainder distribution: payer first, then joined_at oldest → newest.
+  const ordered = [...memberRows].sort((a, b) => {
+    if (a.student_id === payerStudentId && b.student_id !== payerStudentId) return -1;
+    if (a.student_id !== payerStudentId && b.student_id === payerStudentId) return 1;
+    return a.joined_at.localeCompare(b.joined_at);
+  });
+
+  for (const m of ordered) {
+    const bonus = remainder > 0 ? 1 : 0;
+    if (bonus > 0) remainder -= 1;
+    await supabaseAdmin
+      .from('pool_students')
+      .update({ sessions_remaining: share + bonus })
+      .eq('id', m.id);
+  }
+
+  // Mirror the pool-wide bucket so legacy code paths still see the total.
+  await supabaseAdmin
+    .from('shared_session_pools')
+    .update({
+      sessions_remaining: total,
+      total_sessions: total,
+      current_window_pricing_id: sourcePricingId,
+      window_started_at: null, // re-arm; first attendance starts the clock
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', poolId);
+}
+
+/**
+ * Deduct one session from a specific student's count inside the pool, and
+ * arm the completion/expiry window if it isn't already (the rule: window
+ * starts on the first attendance after the latest package credit).
+ */
+export async function deductPoolSessionForStudent(
+  poolId: string,
+  studentId: string,
+  attendanceDate: string,
+): Promise<void> {
+  const { data: row } = await supabaseAdmin
+    .from('pool_students')
+    .select('id, sessions_remaining')
+    .eq('pool_id', poolId)
+    .eq('student_id', studentId)
+    .maybeSingle();
+  if (!row) return;
+
+  await supabaseAdmin
+    .from('pool_students')
+    .update({ sessions_remaining: (row.sessions_remaining ?? 0) - 1 })
+    .eq('id', row.id);
+
+  // Mirror the pool-wide bucket — keeps reporting/legacy queries consistent.
+  const pool = await getPoolById(poolId);
+  if (pool) {
+    await supabaseAdmin
+      .from('shared_session_pools')
+      .update({
+        sessions_remaining: pool.sessions_remaining - 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', poolId);
+
+    // Start the window on first attendance after credit.
+    if (!pool.window_started_at) {
+      await supabaseAdmin
+        .from('shared_session_pools')
+        .update({ window_started_at: attendanceDate })
+        .eq('id', poolId);
+    }
+  }
+}
+
+/**
+ * If the pool now has exactly 1 active member, dissolve it: copy the
+ * survivor's per-student count back onto enrollment.sessions_remaining,
+ * clear pool_id, and soft-delete the pool row. Used after a sibling cancel.
+ *
+ * Re-pooling on restoration is handled by `restoreStudentToPool`.
+ */
+export async function dissolvePoolIfOneMember(poolId: string): Promise<boolean> {
+  const { data: members } = await supabaseAdmin
+    .from('pool_students')
+    .select('id, student_id, enrollment_id, sessions_remaining')
+    .eq('pool_id', poolId);
+  const live = (members ?? []) as Array<{
+    id: string;
+    student_id: string;
+    enrollment_id: string;
+    sessions_remaining: number;
+  }>;
+  if (live.length !== 1) return false;
+
+  const sole = live[0];
+  await supabaseAdmin
+    .from('enrollments')
+    .update({
+      sessions_remaining: sole.sessions_remaining,
+      pool_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sole.enrollment_id);
+  await supabaseAdmin.from('pool_students').delete().eq('id', sole.id);
+  await supabaseAdmin
+    .from('shared_session_pools')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', poolId);
+  return true;
+}
+
+/**
+ * Voucher award + session expiry sweep for a pool. Called from the
+ * attendance-mark route and from the daily cron.
+ *
+ *   - If pool sessions_remaining = 0 and within completion window → award
+ *     per-member voucher (one row in `vouchers` per member, sourced from
+ *     pricing.voucher_id / voucher_amount). No-op if voucher_id is null.
+ *   - If past expiry window with sessions still > 0 → zero out remaining.
+ *
+ * Idempotent: vouchers are deduplicated by (student_id, source_pool_id, level).
+ */
+export async function checkPoolCompletionOrExpiry(poolId: string): Promise<void> {
+  const pool = await getPoolById(poolId);
+  if (!pool || !pool.window_started_at) return;
+  if (!pool.current_window_pricing_id) return;
+
+  const { data: pricing } = await supabaseAdmin
+    .from('course_pricing')
+    .select('expiry_weeks, completion_months, voucher_id, voucher_amount')
+    .eq('id', pool.current_window_pricing_id)
+    .maybeSingle();
+  if (!pricing) return;
+
+  const start = new Date(pool.window_started_at + 'T00:00:00');
+  const now = new Date();
+
+  // Completion: if pool fully consumed AND within completion_months → voucher.
+  if (pool.sessions_remaining <= 0 && pricing.completion_months) {
+    const deadline = new Date(start);
+    deadline.setMonth(deadline.getMonth() + pricing.completion_months);
+    if (now <= deadline && pricing.voucher_id) {
+      const { data: members } = await supabaseAdmin
+        .from('pool_students')
+        .select('student_id, enrollment_id')
+        .eq('pool_id', poolId);
+      for (const m of (members ?? []) as { student_id: string; enrollment_id: string }[]) {
+        // Dedup: one earned voucher per (student, pricing, enrollment).
+        const { data: existing } = await supabaseAdmin
+          .from('vouchers')
+          .select('id')
+          .eq('student_id', m.student_id)
+          .eq('pricing_id', pool.current_window_pricing_id)
+          .eq('enrollment_id', m.enrollment_id)
+          .is('deleted_at', null)
+          .maybeSingle();
+        if (existing) continue;
+        await supabaseAdmin.from('vouchers').insert({
+          student_id: m.student_id,
+          enrollment_id: m.enrollment_id,
+          pricing_id: pool.current_window_pricing_id,
+          course_id: pool.course_id,
+          amount: pricing.voucher_amount ?? null,
+          status: 'earned',
+          earned_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  // Expiry: if past expiry_weeks and still has unused sessions → forfeit.
+  if (pricing.expiry_weeks && pool.sessions_remaining > 0) {
+    const expiryDeadline = new Date(start);
+    expiryDeadline.setDate(expiryDeadline.getDate() + pricing.expiry_weeks * 7);
+    if (now > expiryDeadline) {
+      await supabaseAdmin
+        .from('pool_students')
+        .update({ sessions_remaining: 0 })
+        .eq('pool_id', poolId);
+      await supabaseAdmin
+        .from('shared_session_pools')
+        .update({ sessions_remaining: 0, updated_at: new Date().toISOString() })
+        .eq('id', poolId);
+    }
   }
 }

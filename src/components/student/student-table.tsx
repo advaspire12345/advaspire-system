@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -75,8 +76,6 @@ const ENROLLMENT_STATUS_LABELS: Record<string, string> = {
   expired: "Expired",
 };
 
-const BATCH_SIZE = 10;
-
 export function StudentTable({
   initialData,
   totalStudents,
@@ -94,48 +93,21 @@ export function StudentTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Progressive loading: start with server-provided first batch, load rest in background
+  // Bounded progressive loading via the shared hook.
   const [allData, setAllData] = useState<StudentTableRow[]>(initialData);
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalStudents);
-  const fetchedRef = useRef(false);
 
-  const fetchRemainingStudents = useCallback(async () => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
-    let offset = initialData.length;
-    // Deduplicate: track unique student IDs we already have from initialData
-    // (initialData is paginated by students, but one student can produce multiple rows)
-    const initialStudentIds = new Set(initialData.map((r) => r.id));
-
-    while (offset < totalStudents) {
-      try {
-        const res = await fetch(`/api/student/table?offset=${offset}&limit=${BATCH_SIZE}`);
-        if (!res.ok) break;
-        const data: { rows: StudentTableRow[] } = await res.json();
-        if (!data.rows || data.rows.length === 0) break;
-
-        // Filter out any rows for students we already have (overlap from enrollment expansion)
-        const newRows = data.rows.filter((r) => !initialStudentIds.has(r.id));
-        // Track the new student IDs
-        for (const r of data.rows) initialStudentIds.add(r.id);
-
-        if (newRows.length > 0) {
-          setAllData((prev) => [...prev, ...newRows]);
-        }
-        offset += BATCH_SIZE;
-      } catch {
-        break;
-      }
-    }
-    setIsLoadingMore(false);
-  }, [initialData, totalStudents]);
-
-  useEffect(() => {
-    if (initialData.length < totalStudents) {
-      fetchRemainingStudents();
-    }
-  }, [initialData.length, totalStudents, fetchRemainingStudents]);
+  // Resync after router.refresh() so saved/edited/deleted rows appear without a manual reload.
+  useEffect(() => { setAllData(initialData); }, [initialData]);
+  const { isLoadingMore } = useBoundedLoader<StudentTableRow>({
+    initialData,
+    totalCount: totalStudents,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/student/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: StudentTableRow) => r.id, []),
+    setData: setAllData,
+  });
 
   // Build student select options from allData (deduplicated by student id)
   const studentSelectOptions: StudentSelectOption[] = useMemo(() => {
@@ -280,8 +252,12 @@ export function StudentTable({
     return [...directMatches, ...siblings];
   }, [allData, searchQuery]);
 
-  // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  // Pagination — when not searching, total pages reflects the *server-side*
+  // total so the user can paginate past the bounded-loaded window. The
+  // progressive loader expands as needed when the page crosses a 100-block.
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalStudents / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -785,7 +761,7 @@ export function StudentTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalStudents}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />

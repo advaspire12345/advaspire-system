@@ -68,35 +68,43 @@ export function RolePermissionModal({
   onUpdateCustomRoleName,
   onDeleteCustomRole,
 }: RolePermissionModalProps) {
+  const isSuperAdmin = currentUserRole === "super_admin";
   const isGroupAdmin = currentUserRole === "group_admin";
+  const isCompanyAdmin = currentUserRole === "company_admin";
 
-  // Build tabs based on current user's role
+  // Build tabs based on current user's role.
+  //   super_admin   → manages Group Admin permissions only (global).
+  //   group_admin   → manages Company Admin / Assistant / Instructor (company-wide).
+  //   company_admin → manages Assistant / Instructor (own branch only).
   const buildTabs = useCallback((): RoleTab[] => {
     const tabs: RoleTab[] = [];
 
-    if (isGroupAdmin) {
+    if (isSuperAdmin) {
       tabs.push({ id: "group_admin", label: "Group Admin", editable: true, isCustom: false });
     }
     if (isGroupAdmin) {
       tabs.push({ id: "company_admin", label: "Company Admin", editable: true, isCustom: false });
     }
-    // Both group_admin and company_admin can see assistant + instructor
-    tabs.push({ id: "assistant_admin", label: "Assistant", editable: true, isCustom: false });
-    tabs.push({ id: "instructor", label: "Instructor", editable: true, isCustom: false });
+    if (isGroupAdmin || isCompanyAdmin) {
+      tabs.push({ id: "assistant_admin", label: "Assistant", editable: true, isCustom: false });
+      tabs.push({ id: "instructor", label: "Instructor", editable: true, isCustom: false });
+    }
 
-    // Custom role tabs
-    for (const cr of customRoles) {
-      tabs.push({
-        id: `custom:${cr.id}`,
-        label: cr.name,
-        editable: isGroupAdmin,
-        isCustom: true,
-        customRoleId: cr.id,
-      });
+    // Custom role tabs (only meaningful for group/company admins)
+    if (isGroupAdmin || isCompanyAdmin) {
+      for (const cr of customRoles) {
+        tabs.push({
+          id: `custom:${cr.id}`,
+          label: cr.name,
+          editable: true,
+          isCustom: true,
+          customRoleId: cr.id,
+        });
+      }
     }
 
     return tabs;
-  }, [isGroupAdmin, customRoles]);
+  }, [isSuperAdmin, isGroupAdmin, isCompanyAdmin, customRoles]);
 
   const [tabs, setTabs] = useState<RoleTab[]>([]);
   const [activeTab, setActiveTab] = useState<string>("");
@@ -265,7 +273,11 @@ export function RolePermissionModal({
               Role Permissions
             </DialogTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              Configure permissions for each role. Changes apply to all users with this role under your company.
+              {isCompanyAdmin
+                ? "Configure permissions for each role at your branch. Changes apply only to this branch."
+                : isSuperAdmin
+                  ? "Group Admin permissions apply globally to every Group Admin user."
+                  : "Configure permissions for each role. Changes apply to all users with this role across your company."}
             </p>
           </DialogHeader>
 
@@ -456,7 +468,11 @@ export function RolePermissionModal({
                 {isSaving ? "Saving..." : "Save Permissions"}
               </Button>
               <span className="text-center block mt-2 text-xs text-muted-foreground">
-                Changes apply to all {activeTabData.label} users under your company
+                {isCompanyAdmin
+                  ? `Changes apply to all ${activeTabData.label} users at your branch.`
+                  : isSuperAdmin
+                    ? `Changes apply to all ${activeTabData.label} users globally.`
+                    : `Changes apply to all ${activeTabData.label} users under your company.`}
               </span>
             </div>
           )}

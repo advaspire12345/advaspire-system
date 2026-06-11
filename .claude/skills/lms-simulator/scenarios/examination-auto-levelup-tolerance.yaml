@@ -1,0 +1,76 @@
+name: examination-auto-levelup-tolerance
+description: |
+  Verifies the new examination auto-level-up logic with the lowered threshold
+  (sessions_to_level_up − 2).
+
+  Setup: course with sessions_to_level_up=2 and levels=4 — so the auto-create
+  threshold is max(1, 2 − 2) = 1. A single mark_present via the real UI path
+  (POST /api/attendance/mark) crosses the threshold and the
+  maybeCreateLevelUpExam helper should insert an "eligible" exam row at
+  exam_level=1, dated to the next class day.
+
+  We can't use the production-realistic value (48) because that'd need 46
+  attendances driven through the UI. The threshold-tolerance logic itself
+  doesn't care about the absolute number — sessions_to_level_up=2 lets us
+  exercise the same code path with one click.
+
+fixtures:
+  branch:
+    name: "Sim Exam Branch"
+    code: "SEB1"
+    parent: "ADS"
+  course:
+    name: "ExamCourse"
+    levels: 4
+    sessions_to_level_up: 2
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Add Aiman (4-session package) + pay + approve so sessions_remaining = 4
+  - actor: aa
+    action: add_student
+    with:
+      name: "Aiman"
+      parent_name: "Exam Parent"
+      parent_email: "examp@sim.local"
+      parent_phone: "0123450099"
+      course: "ExamCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Aiman"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Aiman"
+    observers: auto
+
+  # 2. Single live attendance — crosses threshold = max(1, 2−2) = 1.
+  # The mark-attendance endpoint fires maybeCreateLevelUpExam, which sees
+  # 1 present attendance ≥ 1, inserts an "eligible" exam row at level=1.
+  # After-snapshot's examinations table should include this row.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Aiman"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+teardown: auto

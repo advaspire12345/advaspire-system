@@ -33,39 +33,324 @@ export async function archiveExpiredBootcampWorkshops(): Promise<void> {
     .is("deleted_at", null);
 }
 
-export async function getAllCategories(): Promise<CourseCategory[]> {
-  const { data, error } = await supabaseAdmin
+/** Resolve the company id for a user (uses their branch's parent or self). */
+async function resolveUserCompanyId(userEmail: string): Promise<string | null> {
+  const { getUserByEmail, isSuperAdmin } = await import("./users");
+  const u = await getUserByEmail(userEmail);
+  if (!u || isSuperAdmin(userEmail) || u.role === "super_admin") return null;
+  if (!u.branch_id) return null;
+  const { data: b } = await supabaseAdmin
+    .from("branches")
+    .select("id, type, parent_id")
+    .eq("id", u.branch_id)
+    .maybeSingle();
+  if (!b) return null;
+  return b.type === "company" ? b.id : b.parent_id;
+}
+
+export async function getAllCategories(userEmail?: string): Promise<CourseCategory[]> {
+  let query = supabaseAdmin
     .from("course_categories")
     .select("*")
-    .is("deleted_at", null)
-    .order("name");
+    .is("deleted_at", null);
 
+  // Scope to user's company (super_admin sees everything via companyId=null).
+  if (userEmail) {
+    const companyId = await resolveUserCompanyId(userEmail);
+    if (companyId) {
+      // Include this company's categories + legacy global ones (NULL company_id).
+      query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+    }
+  }
+
+  const { data, error } = await query.order("name");
   if (error) {
     console.error("Error fetching categories:", error);
     return [];
   }
-
   return data ?? [];
 }
 
-export async function createCategory(categoryData: CourseCategoryInsert): Promise<CourseCategory | null> {
+export async function createCategory(
+  categoryData: CourseCategoryInsert,
+  userEmail?: string,
+): Promise<CourseCategory | null> {
+  const companyId = userEmail ? await resolveUserCompanyId(userEmail) : null;
+  const insert = { ...categoryData, company_id: companyId ?? (categoryData as any).company_id ?? null };
   const { data, error } = await supabaseAdmin
     .from("course_categories")
-    .insert(categoryData)
+    .insert(insert)
     .select()
     .single();
-
   if (error) {
     console.error("Error creating category:", error);
     return null;
   }
-
   return data;
+}
+
+export async function updateCategory(
+  id: string,
+  patch: Partial<CourseCategoryInsert>,
+): Promise<CourseCategory | null> {
+  const { data, error } = await supabaseAdmin
+    .from("course_categories")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) {
+    console.error("Error updating category:", error);
+    return null;
+  }
+  return data;
+}
+
+/** Returns the count of programs currently using this category. */
+export async function countProgramsUsingCategory(categoryId: string): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from("courses")
+    .select("id", { count: "exact", head: true })
+    .eq("category_id", categoryId)
+    .is("deleted_at", null);
+  if (error) {
+    console.error("Error counting programs for category:", error);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+/**
+ * Soft-delete a category. Refuses to delete if at least one program is using
+ * it — caller is expected to surface the returned `inUse: true` message.
+ */
+export async function deleteCategory(
+  id: string,
+): Promise<{ ok: boolean; inUse?: boolean; error?: string }> {
+  const usage = await countProgramsUsingCategory(id);
+  if (usage > 0) return { ok: false, inUse: true };
+  const { error } = await supabaseAdmin
+    .from("course_categories")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 // ============================================
 // PROGRAM TABLE VIEW
 // ============================================
+
+export interface PaginatedPrograms {
+  rows: ProgramTableRow[];
+  total: number;
+}
+
+export async function getProgramsForTablePaginated(
+  userEmail: string,
+  opts: { offset: number; limit: number },
+): Promise<PaginatedPrograms> {
+  const { offset, limit } = opts;
+  const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
+  let branchIds = await getUserBranchIds(userEmail);
+  const currentUser = await getUserByEmail(userEmail);
+  const useCityName = !(isSuperAdmin(userEmail) || currentUser?.role === "super_admin");
+
+  if (branchIds && branchIds.length > 0 && currentUser?.role === "group_admin") {
+    const { data: assigned } = await supabaseAdmin
+      .from("branches")
+      .select("id, type, parent_id")
+      .in("id", branchIds)
+      .is("deleted_at", null);
+    const companyIds = new Set<string>();
+    for (const b of assigned ?? []) {
+      if (b.type === "company") companyIds.add(b.id);
+      else if (b.parent_id) companyIds.add(b.parent_id);
+    }
+    if (companyIds.size > 0) {
+      const { data: children } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      branchIds = (children ?? []).map((b) => b.id);
+    }
+  }
+
+  // Scope courses by the user's accessible branches. branchIds=null means
+  // super_admin → show all.  Empty array means user has no accessible
+  // branches → show nothing.  Otherwise: include courses whose branch_id
+  // matches one of the accessible branches, whose company (parent of one
+  // of those branches) matches, OR whose course_branches junction links
+  // them to one of the accessible branches. Plus include sibling branches
+  // under the same company so a Semenyih admin can see a program owned by
+  // Kepong (both belong to the same company).
+  let courseScopeIds: string[] | null = null;
+  let extraCourseIds: Set<string> | null = null;
+  if (branchIds !== null) {
+    if (branchIds.length === 0) {
+      return { rows: [], total: 0 };
+    }
+    const { data: parentRows } = await supabaseAdmin
+      .from("branches")
+      .select("id, parent_id, type")
+      .in("id", branchIds);
+    const ids = new Set<string>(branchIds);
+    const companyIds = new Set<string>();
+    for (const b of parentRows ?? []) {
+      if (b.parent_id) {
+        ids.add(b.parent_id);
+        companyIds.add(b.parent_id);
+      } else if (b.type === "company") {
+        ids.add(b.id);
+        companyIds.add(b.id);
+      }
+    }
+    // Pull in sibling hq/branch rows under the same company so a program
+    // owned by a sibling branch (courses.branch_id pointing at the sibling)
+    // is still visible.
+    if (companyIds.size > 0) {
+      const { data: siblings } = await supabaseAdmin
+        .from("branches")
+        .select("id")
+        .in("parent_id", [...companyIds])
+        .in("type", ["hq", "branch"])
+        .is("deleted_at", null);
+      for (const s of siblings ?? []) ids.add(s.id);
+    }
+    courseScopeIds = [...ids];
+
+    // Also include courses linked to any of these branches via the
+    // course_branches junction (so a company-level course that wasn't
+    // primary-scoped here still shows up if the junction reaches the user).
+    const { data: junctionRows } = await supabaseAdmin
+      .from("course_branches")
+      .select("course_id")
+      .in("branch_id", courseScopeIds);
+    extraCourseIds = new Set<string>((junctionRows ?? []).map((r) => r.course_id as string));
+  }
+
+  let coursesQuery = supabaseAdmin
+    .from("courses")
+    .select(`
+      id,
+      name,
+      code,
+      short_description,
+      category_id,
+      number_of_levels,
+      sessions_to_level_up,
+      program_type,
+      status,
+      cover_image_url,
+      assessment_enabled,
+      levelling_time_minutes,
+      branch_id,
+      course_categories(name),
+      course_branches(branch_id, branches(id, name, city)),
+      course_sections(
+        id,
+        course_lessons(id)
+      ),
+      course_pricing(*)
+    `, { count: "exact" })
+    .is("deleted_at", null);
+
+  if (courseScopeIds) {
+    const scopeCsv = courseScopeIds.join(",");
+    const extras = extraCourseIds && extraCourseIds.size > 0 ? [...extraCourseIds].join(",") : null;
+    coursesQuery = extras
+      ? coursesQuery.or(`branch_id.in.(${scopeCsv}),id.in.(${extras})`)
+      : coursesQuery.in("branch_id", courseScopeIds);
+  }
+
+  const { data: programs, error, count } = await coursesQuery
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    console.error("Error fetching programs (paginated):", error);
+    return { rows: [], total: 0 };
+  }
+
+  const rows = await assembleProgramRows(programs ?? [], useCityName);
+  return { rows, total: count ?? 0 };
+}
+
+// Shared post-processing for both the legacy non-paginated fetcher and the
+// new paginated one: looks up enrollment counts + slot counts and maps rows.
+async function assembleProgramRows(
+  programs: any[],
+  useCityName: boolean,
+): Promise<ProgramTableRow[]> {
+  const courseIds = programs.map((p) => p.id);
+  if (courseIds.length === 0) return [];
+
+  const { data: enrollmentCounts } = await supabaseAdmin
+    .from("enrollments")
+    .select("course_id")
+    .in("course_id", courseIds)
+    .is("deleted_at", null);
+  const enrollmentCountMap = new Map<string, number>();
+  enrollmentCounts?.forEach((e) => {
+    enrollmentCountMap.set(e.course_id, (enrollmentCountMap.get(e.course_id) || 0) + 1);
+  });
+
+  const { data: slotsData } = await supabaseAdmin
+    .from("course_slots")
+    .select("course_id, branch_id, branches(name, city)")
+    .in("course_id", courseIds)
+    .is("deleted_at", null);
+
+  const slotCountsMap = new Map<string, { branch_name: string; count: number }[]>();
+  (slotsData ?? []).forEach((slot: any) => {
+    const courseId = slot.course_id;
+    const branchName = useCityName
+      ? (slot.branches?.city || slot.branches?.name || "Unknown")
+      : (slot.branches?.name || "Unknown");
+    if (!slotCountsMap.has(courseId)) slotCountsMap.set(courseId, []);
+    const courseSlots = slotCountsMap.get(courseId)!;
+    const existing = courseSlots.find((s) => s.branch_name === branchName);
+    if (existing) existing.count++;
+    else courseSlots.push({ branch_name: branchName, count: 1 });
+  });
+
+  return programs.map((program: any) => {
+    const branchNames = program.course_branches
+      ?.map((cb: any) => useCityName ? (cb.branches?.city || cb.branches?.name) : cb.branches?.name)
+      .filter(Boolean) ?? [];
+    const lessonCount = program.course_sections?.reduce(
+      (sum: number, section: any) => sum + (section.course_lessons?.length ?? 0),
+      0
+    ) ?? 0;
+    const activePricing = (program.course_pricing ?? []).filter((p: any) => !p.deleted_at);
+    const monthlyPackageCount = activePricing.filter((p: any) => p.package_type === "monthly").length;
+    const sessionPackageCount = activePricing.filter((p: any) => p.package_type === "session").length;
+
+    return {
+      id: program.id,
+      name: program.name,
+      code: program.code || null,
+      short_description: program.short_description,
+      category_id: program.category_id,
+      category_name: program.course_categories?.name || null,
+      number_of_levels: program.number_of_levels,
+      sessions_to_level_up: program.sessions_to_level_up,
+      program_type: program.program_type,
+      status: program.status || "active",
+      cover_image_url: program.cover_image_url,
+      assessment_enabled: program.assessment_enabled || false,
+      levelling_time_minutes: program.levelling_time_minutes,
+      enrolled_count: enrollmentCountMap.get(program.id) || 0,
+      lesson_count: lessonCount,
+      branch_names: branchNames,
+      monthly_package_count: monthlyPackageCount,
+      session_package_count: sessionPackageCount,
+      slot_counts: slotCountsMap.get(program.id) || [],
+    };
+  });
+}
 
 export async function getProgramsForTable(userEmail: string): Promise<ProgramTableRow[]> {
   const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
@@ -338,9 +623,10 @@ export interface CreateProgramPayload {
     duration: number;
     description: string | null;
     is_default: boolean;
-    expiry_months: number | null;
+    expiry_weeks: number | null;
     completion_months: number | null;
     voucher_id: string | null;
+    max_students_per_pool?: number | null;
   }[];
 
   // Slots
@@ -501,9 +787,10 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
       duration: p.duration,
       description: p.description,
       is_default: p.is_default,
-      expiry_months: p.expiry_months,
+      expiry_weeks: p.expiry_weeks,
       completion_months: p.completion_months,
       voucher_id: p.voucher_id,
+      max_students_per_pool: p.max_students_per_pool ?? 1,
     }));
     await supabaseAdmin.from("course_pricing").insert(pricingInserts);
   }
@@ -704,9 +991,10 @@ export async function updateProgram(
         duration: p.duration,
         description: p.description,
         is_default: p.is_default,
-        expiry_months: p.expiry_months,
+        expiry_weeks: p.expiry_weeks,
         completion_months: p.completion_months,
         voucher_id: p.voucher_id,
+        max_students_per_pool: p.max_students_per_pool ?? 1,
       }))
     );
   }

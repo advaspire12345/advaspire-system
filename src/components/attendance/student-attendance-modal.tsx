@@ -202,24 +202,60 @@ export function StudentAttendanceModal({
   // Ref to skip mission reset when lesson is pre-filled on modal open
   const skipMissionResetRef = useRef(false);
 
+  // Async student search results — populated lazily as the user types in
+  // the student dropdown's search box (mode === "add"). Replaces the old
+  // bulk pre-load of every active enrollment in the system.
+  const [searchedStudents, setSearchedStudents] = useState<AttendanceRow[]>([]);
+  const [isSearchingStudents, setIsSearchingStudents] = useState(false);
+  const studentSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const studentSearchSeqRef = useRef(0);
+
+  const handleStudentSearchChange = useCallback((term: string) => {
+    if (studentSearchTimerRef.current) clearTimeout(studentSearchTimerRef.current);
+    const trimmed = term.trim();
+    if (!trimmed) {
+      setSearchedStudents([]);
+      setIsSearchingStudents(false);
+      return;
+    }
+    setIsSearchingStudents(true);
+    studentSearchTimerRef.current = setTimeout(async () => {
+      const seq = ++studentSearchSeqRef.current;
+      try {
+        const res = await fetch(`/api/attendance/student-search?q=${encodeURIComponent(trimmed)}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { rows: AttendanceRow[] };
+        if (seq !== studentSearchSeqRef.current) return; // stale
+        setSearchedStudents(json.rows ?? []);
+      } finally {
+        if (seq === studentSearchSeqRef.current) setIsSearchingStudents(false);
+      }
+    }, 250);
+  }, []);
+
+  // In add mode, the student dropdown operates over fetched results.
+  // In present/absent/edit modes, it operates over the current page's data
+  // (already loaded). Same shape so downstream memos don't care which one.
+  const effectiveAllStudents = mode === "add" ? searchedStudents : allStudents;
+
   // Check if the selected row is a trial
   const isTrial = selectedRow?.type === 'trial';
 
   // Get unique students for dropdown
   const uniqueStudents = useMemo(() => {
     const seen = new Set<string>();
-    return allStudents.filter((row) => {
+    return effectiveAllStudents.filter((row) => {
       if (seen.has(row.studentId)) return false;
       seen.add(row.studentId);
       return true;
     });
-  }, [allStudents]);
+  }, [effectiveAllStudents]);
 
   // Get enrollments for selected student
   const studentEnrollments = useMemo(() => {
     if (!selectedStudentId) return [];
-    return allStudents.filter((row) => row.studentId === selectedStudentId);
-  }, [allStudents, selectedStudentId]);
+    return effectiveAllStudents.filter((row) => row.studentId === selectedStudentId);
+  }, [effectiveAllStudents, selectedStudentId]);
 
   // Get selected enrollment details - find by course name for selected student
   const selectedEnrollment = useMemo(() => {
@@ -229,8 +265,8 @@ export function StudentAttendanceModal({
       return studentEnrollments.find((row) => row.courseName === selectedEnrollmentId);
     }
     // For present/absent mode, find by enrollment id
-    return allStudents.find((row) => row.enrollmentId === selectedEnrollmentId);
-  }, [allStudents, studentEnrollments, selectedEnrollmentId, selectedStudentId, mode]);
+    return effectiveAllStudents.find((row) => row.enrollmentId === selectedEnrollmentId);
+  }, [effectiveAllStudents, studentEnrollments, selectedEnrollmentId, selectedStudentId, mode]);
 
   // Reset form when modal opens or mode/selectedRow changes
   useEffect(() => {
@@ -387,7 +423,7 @@ export function StudentAttendanceModal({
       const currentAttendanceId = selectedRow?.existingAttendance?.id;
       const normalizeTime = (t: string) => t.split(':').slice(0, 2).join(':');
 
-      const duplicate = allStudents.find(row => {
+      const duplicate = effectiveAllStudents.find(row => {
         if (row.studentId !== studentId) return false;
         if (!row.existingAttendance) return false;
         // Skip the current record being edited
@@ -470,7 +506,7 @@ export function StudentAttendanceModal({
   const allUniquePrograms = useMemo(() => {
     const seen = new Set<string>();
     const programs: { enrollmentId: string; courseName: string }[] = [];
-    for (const row of allStudents) {
+    for (const row of effectiveAllStudents) {
       // Use courseName as key to get unique courses
       if (seen.has(row.courseName)) continue;
       seen.add(row.courseName);
@@ -480,7 +516,7 @@ export function StudentAttendanceModal({
       });
     }
     return programs;
-  }, [allStudents]);
+  }, [effectiveAllStudents]);
 
   // Get programs for selected student (for filtering after selection)
   const studentPrograms = useMemo(() => {
@@ -595,11 +631,13 @@ export function StudentAttendanceModal({
               <FloatingSelect
                 id="select-student"
                 label="Student"
-                placeholder="Choose a student..."
+                placeholder={mode === "add" ? (isSearchingStudents ? "Searching…" : "Type to search students…") : "Choose a student..."}
                 searchable
                 value={selectedStudentId}
                 onChange={setSelectedStudentId}
                 options={studentOptions}
+                onSearchChange={mode === "add" ? handleStudentSearchChange : undefined}
+                disableClientFilter={mode === "add"}
               />
             ) : (
               <div className="relative">

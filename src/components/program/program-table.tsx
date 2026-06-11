@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import Image from "next/image";
 import { Pencil, Trash2, Plus, Users, BookOpen } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -33,6 +34,7 @@ interface VoucherOption {
 
 interface ProgramTableProps {
   initialData: ProgramTableRow[];
+  totalCount: number;
   branches: BranchOption[];
   instructors: InstructorOption[];
   categories: CategoryOption[];
@@ -42,6 +44,9 @@ interface ProgramTableProps {
   onEdit?: (programId: string, payload: ProgramFormPayload) => Promise<{ success: boolean; error?: string }>;
   onDelete?: (programId: string) => Promise<{ success: boolean; error?: string }>;
   onCreateCategory?: (name: string) => Promise<{ success: boolean; categoryId?: string; error?: string }>;
+  onUpdateCategory?: (id: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  onDeleteCategory?: (id: string) => Promise<{ success: boolean; inUse?: boolean; error?: string }>;
+  categoryUsage?: Record<string, number>;
   onFetchProgram: (programId: string) => Promise<{ success: boolean; data?: ProgramFull; error?: string }>;
   onUploadCoverImage?: (formData: FormData) => Promise<{ success: boolean; url?: string; error?: string }>;
 }
@@ -91,7 +96,12 @@ const BRANCH_COLORS = [
 // Get consistent color for a branch name
 function getBranchColor(branchName: string, allBranches: string[]) {
   const index = allBranches.indexOf(branchName);
-  return BRANCH_COLORS[index % BRANCH_COLORS.length];
+  // -1 happens when the slot's branch isn't in the row's branch_names list
+  // (e.g. a slot pointing at a branch that's since been removed from the
+  // program's branch set). Fall back to the first colour rather than
+  // indexing BRANCH_COLORS with -1 (which returns undefined).
+  const safeIndex = index < 0 ? 0 : index % BRANCH_COLORS.length;
+  return BRANCH_COLORS[safeIndex];
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -100,8 +110,12 @@ const STATUS_LABELS: Record<string, string> = {
   archived: "Archived",
 };
 
+const BATCH_SIZE = 10;
+const INITIAL_LOAD_CAP = 100;
+
 export function ProgramTable({
   initialData,
+  totalCount,
   branches,
   instructors,
   categories,
@@ -111,12 +125,38 @@ export function ProgramTable({
   onEdit,
   onDelete,
   onCreateCategory,
+  onUpdateCategory,
+  onDeleteCategory,
+  categoryUsage = {},
   onFetchProgram,
   onUploadCoverImage,
 }: ProgramTableProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Bounded progressive loading via the shared hook.
+  const [allData, setAllData] = useState<ProgramTableRow[]>(initialData);
+
+  // After a save (router.refresh() in handleAdd / handleEdit / handleDelete)
+  // the server returns fresh initialData but the local allData state is
+  // only seeded once on mount, so it would stay stale.  Resync on every
+  // initialData change so newly-saved rows appear without a hard refresh.
+  useEffect(() => {
+    setAllData(initialData);
+  }, [initialData]);
+  useBoundedLoader<ProgramTableRow>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/program/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: ProgramTableRow) => r.id, []),
+    setData: setAllData,
+    batchSize: BATCH_SIZE,
+    initialLoadCap: INITIAL_LOAD_CAP,
+  });
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -154,19 +194,24 @@ export function ProgramTable({
 
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return initialData;
+    if (!searchQuery.trim()) return allData;
 
     const query = searchQuery.toLowerCase();
-    return initialData.filter(
+    return allData.filter(
       (row) =>
         row.name.toLowerCase().includes(query) ||
         row.category_name?.toLowerCase().includes(query) ||
         row.branch_names.some((b) => b.toLowerCase().includes(query))
     );
-  }, [initialData, searchQuery]);
+  }, [allData, searchQuery]);
 
-  // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  // Pagination — when not searching, total pages reflects the *server-side*
+  // total (not just rows loaded so far). That way the user can paginate past
+  // the loaded window; the bounded fetcher (above) loads the next 100-block
+  // when they cross into it.
+  const totalPages = searchQuery.trim()
+    ? Math.ceil(filteredData.length / ITEMS_PER_PAGE)
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -475,7 +520,7 @@ export function ProgramTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />
@@ -496,6 +541,9 @@ export function ProgramTable({
         onEdit={handleEdit}
         onDelete={handleDelete}
         onCreateCategory={onCreateCategory}
+        onUpdateCategory={onUpdateCategory}
+        onDeleteCategory={onDeleteCategory}
+        categoryUsage={categoryUsage}
         onFetchProgram={onFetchProgram}
         onUploadCoverImage={onUploadCoverImage}
       />

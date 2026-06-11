@@ -1,0 +1,71 @@
+name: individual-multi-slot
+description: |
+  One student with two scheduled-day enrollments on the same course
+  (effectively two weekly slots). Verifies multiple attendances per
+  week deduct correctly without false errors.
+
+fixtures:
+  branch:
+    name: "MS Branch"
+    code: "MSB"
+    parent: "ADS"
+  course:
+    name: "MSCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 8
+    price: 400
+  slots:
+    - { day: "monday", time: "10:00", duration: 60, limit: 10 }
+    - { day: "thursday", time: "14:00", duration: 60, limit: 10 }
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "MSStu"
+      parent_name: "MS Parent"
+      parent_email: "ms@sim.local"
+      parent_phone: "0123450970"
+      course: "MSCourse"
+      package: "8-session"
+      schedule_day: "monday"
+      schedule_time: "10:00"
+      date_of_birth: "2014-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "MSStu" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "MSStu" }
+    observers: auto
+
+  # Same-week multi-attendance via take_extra_attendance (one of the
+  # existing actions) — simulates the second slot in the same week.
+  - actor: inst
+    action: mark_present
+    with: { student: "MSStu", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: inst
+    action: take_extra_attendance
+    with:
+      student: "MSStu"
+      course: "MSCourse"
+      day: "Thursday"
+      time: "14:00"
+      lesson: "Lesson 1"
+      mission: "Level 2"
+      activity: "loops"
+    observers: auto
+
+teardown: manual

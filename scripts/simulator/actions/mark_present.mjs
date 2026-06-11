@@ -14,6 +14,7 @@ export default {
     mission: { type: "string", required: true, example: "Level 1" },
     activity: { type: "string", required: true, example: "intro coding", desc: "Activity Completed text" },
     adcoin: { type: "number", required: false, default: 0 },
+    password: { type: "string", required: false, example: "simpass", desc: "Required when adcoin > 0 — instructor's password for the adcoin transfer." },
   },
   defaultExpectations: ({ student }) => ({
     actor: [
@@ -38,7 +39,12 @@ export default {
     browser.selectByLabel("Lesson", args.lesson);
     browser.selectByLabel("Mission", args.mission);
     browser.fillLabel("Activity Completed", args.activity);
-    if (args.adcoin) browser.fillLabel("Adcoin", String(args.adcoin));
+    if (args.adcoin) {
+      browser.fillLabel("Adcoin", String(args.adcoin));
+      // Adcoin transfers require the instructor's password before save.
+      // Default to the simulator's "simpass" — overridable via args.password.
+      browser.fillLabel("Password to Transfer Adcoin", args.password || "simpass");
+    }
     // Submit — the mark-present modal's button reads "Save & Mark Present".
     browser.clickDialogButton("Save & Mark Present");
   },

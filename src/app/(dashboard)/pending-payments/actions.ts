@@ -12,6 +12,11 @@ export interface UpdatePaymentData {
   paymentMethod: PaymentMethod | null;
   paidAt: string | null;
   receiptPhoto: string | null;
+  // Settle-deficit toggle (modal). When customSessions is set we also stamp
+  // payment_type='settle_deficit' so the approve flow knows to credit
+  // exactly that count instead of the package's full duration.
+  customSessions?: number | null;
+  paymentType?: "settle_deficit" | null;
 }
 
 export interface AddPaymentData {
@@ -33,14 +38,22 @@ export async function updatePendingPaymentAction(
   try {
     await authorizeAction('pending_payments', 'can_edit');
 
-    const result = await updatePayment(paymentId, {
+    const updateBody: Record<string, unknown> = {
       course_id: data.courseId,
       package_id: data.packageId,
       amount: data.price,
       payment_method: data.paymentMethod,
       paid_at: data.paidAt || null,
       receipt_photo: data.receiptPhoto || null,
-    });
+    };
+    if (data.customSessions != null) {
+      updateBody.custom_sessions = data.customSessions;
+      updateBody.payment_type = data.paymentType ?? "settle_deficit";
+    } else if (data.paymentType === null && data.customSessions === null) {
+      // Toggle was explicitly turned OFF — clear stale settle markers.
+      updateBody.custom_sessions = null;
+    }
+    const result = await updatePayment(paymentId, updateBody as Parameters<typeof updatePayment>[1]);
 
     if (!result) {
       return { success: false, error: "Failed to update payment" };

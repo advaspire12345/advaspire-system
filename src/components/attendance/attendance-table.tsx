@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import {
   Search,
   UserCheck,
@@ -92,8 +93,6 @@ interface CurriculumLesson {
 interface AttendanceTableProps {
   initialData: AttendanceRow[];
   totalCount: number;
-  /** All active students for manual "Take Attendance" search (not filtered by slot completion) */
-  allStudentsForManualAdd?: AttendanceRow[];
   instructors?: InstructorOption[];
   /** Function to fetch curriculum lessons for a course */
   fetchCurriculumLessons?: (courseId: string) => Promise<CurriculumLesson[]>;
@@ -129,7 +128,6 @@ const columns = [
 export function AttendanceTable({
   initialData,
   totalCount,
-  allStudentsForManualAdd,
   instructors = [],
   fetchCurriculumLessons,
   canCreate = true,
@@ -141,43 +139,17 @@ export function AttendanceTable({
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Progressive loading: load remaining data in background
-  const [isLoadingMore, setIsLoadingMore] = useState(initialData.length < totalCount);
-  const fetchedRef = useRef(false);
-
-  const fetchRemainingData = useCallback(async () => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
-    let offset = initialData.length;
-    const existingIds = new Set(initialData.map((r) => r.id));
-
-    while (offset < totalCount) {
-      try {
-        const res = await fetch(`/api/attendance/table?offset=${offset}&limit=10`);
-        if (!res.ok) break;
-        const result: { rows: AttendanceRow[] } = await res.json();
-        if (!result.rows || result.rows.length === 0) break;
-
-        const newRows = result.rows.filter((r) => !existingIds.has(r.id));
-        for (const r of result.rows) existingIds.add(r.id);
-
-        if (newRows.length > 0) {
-          setData((prev) => [...prev, ...newRows]);
-        }
-        offset += 10;
-      } catch {
-        break;
-      }
-    }
-    setIsLoadingMore(false);
-  }, [initialData, totalCount]);
-
-  useEffect(() => {
-    if (initialData.length < totalCount) {
-      fetchRemainingData();
-    }
-  }, [initialData.length, totalCount, fetchRemainingData]);
+  // Bounded progressive loading via the shared hook.
+  const { isLoadingMore } = useBoundedLoader<AttendanceRow>({
+    initialData,
+    totalCount,
+    currentPage,
+    searchTerm: searchQuery,
+    itemsPerPage: ITEMS_PER_PAGE,
+    apiUrl: useCallback((offset, limit) => `/api/attendance/table?offset=${offset}&limit=${limit}`, []),
+    getId: useCallback((r: AttendanceRow) => r.id, []),
+    setData,
+  });
 
   // Sync data state when initialData changes (after page refresh)
   useEffect(() => {
@@ -236,7 +208,9 @@ export function AttendanceTable({
   }, [data, searchQuery]);
 
   // Pagination
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+  const totalPages = searchQuery.trim()
+    ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
+    : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -716,7 +690,7 @@ export function AttendanceTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={filteredData.length}
+            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />
@@ -728,7 +702,7 @@ export function AttendanceTable({
         open={modalOpen}
         onOpenChange={setModalOpen}
         mode={modalMode}
-        allStudents={modalMode === 'add' ? (allStudentsForManualAdd ?? data) : data}
+        allStudents={data}
         selectedRow={selectedRow}
         instructors={instructors}
         onSubmit={handleModalSubmit}
