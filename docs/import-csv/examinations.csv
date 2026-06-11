@@ -1,0 +1,134 @@
+student_id,exam_name,exam_level,exam_date,status,mark,reattempt_count,examiner_email,certificate_number,notes
+ADV23011,EV3 Robotics Beginner,1,2022-12-03,pass,76,0,,EV3-BGN-12P2212032490,Program: EV3-BGN-12P | Grade: D
+ADV23087,EV3 Robotics Beginner,1,2022-12-03,pass,73,0,,EV3-BGN-12P2212034875,Program: EV3-BGN-12P | Grade: P
+ADV23029,Scratch Beginner,1,2022-12-06,pass,60,0,,SCR-BGN-12P2212069236,Program: SCR-BGN-12P | Grade: P
+ADV23010,EV3 Robotics Beginner,1,2022-12-10,pass,60,0,,EV3-BGN-12P2212101941,Program: EV3-BGN-12P | Grade: P
+ADV23088,EV3 Robotics Beginner,1,2022-12-10,pass,66,0,,EV3-BGN-12P2212105959,Program: EV3-BGN-12P | Grade: P
+ADV0056,EV3 Robotics Beginner,1,2022-12-10,pass,72,0,,EV3-BGN-12P2212103090,Program: EV3-BGN-12P | Grade: P
+ADV23007,EV3 Robotics Beginner,1,2022-12-10,pass,60,0,,EV3-BGN-12P2212103280,Program: EV3-BGN-12P | Grade: P
+ADV23086,EV3 Robotics Beginner,1,2022-12-10,pass,66,0,,EV3-BGN-12P2212101018,Program: EV3-BGN-12P | Grade: P
+ADV23018,EV3 Robotics Junior,0,2023-04-09,pass,,0,,EV3-JNR-12P2304093238,Program: EV3-JNR-12P | Grade: P
+ADV23008,EV3 Robotics Beginner,1,2023-05-13,pass,60,0,,EV3-BGN1-12P2305130406,Program: EV3-BGN1-12P | Grade: P
+ADV23019,EV3 Robotics Beginner,1,2023-08-06,pass,60,0,,EV3-BGN-24P2308064126-P,Program: EV3-BGN-24P | Grade: P
+ADV23020,EV3 Robotics Beginner,1,2023-08-06,pass,60,0,,EV3-BGN-24P2308066707-P,Program: EV3-BGN-24P | Grade: P
+ADV23029,Scratch Intermediate,2,2023-12-26,pass,65,0,,SCR-INT-12P2312263052,Program: SCR-INT-12P | Grade: P
+ADV23018,Minecraft Beginner,1,2023-12-28,pass,,0,,MC-BGN-4W2312281425,Program: MC-BGN-4W | Grade: C
+ADV23023,Minecraft Beginner,1,2023-12-28,pass,,0,,MC-BGN-4W2312281220,Program: MC-BGN-4W | Grade: C
+ADV23024,Minecraft Beginner,1,2023-12-28,pass,,0,,MC-BGN-4W2312285990,Program: MC-BGN-4W | Grade: C
+ADV23083,Minecraft Beginner,1,2023-12-28,pass,,0,,MC-BGN-4W2312285026,Program: MC-BGN-4W | Grade: C
+ADV23084,Minecraft Beginner,1,2023-12-28,pass,,0,,MC-BGN-4W2312284013,Program: MC-BGN-4W | Grade: C
+ADV23013,EV3 Robotics Beginner,1,2024-01-13,pass,66,0,,EV3-BGN-24P2401136924-P,Program: EV3-BGN-24P | Grade: P
+ADV23004,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402236441,Program: MC-BGN-2B | Grade: C
+ADV23005,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402230379,Program: MC-BGN-2B | Grade: C
+ADV23007,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402234047,Program: MC-BGN-2B | Grade: C
+ADV23008,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402230963,Program: MC-BGN-2B | Grade: C
+ADV24011,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402233280,Program: MC-BGN-2B | Grade: C
+ADV24012,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402231534,Program: MC-BGN-2B | Grade: C
+ADV24014,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402239421,Program: MC-BGN-2B | Grade: C
+ADV0056,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402231988,Program: MC-BGN-2B | Grade: C
+ADV0045,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402238569,Program: MC-BGN-2B | Grade: C
+ADV23063,Minecraft Beginner,1,2024-02-23,pass,,0,,MC-BGN-2B2402238432,Program: MC-BGN-2B | Grade: C
+ADV23007,Scratch Beginner,1,2024-02-29,pass,,0,,SCR-BGN-2B2402290873,Program: SCR-BGN-2B | Grade: C
+ADV0056,Scratch Beginner,1,2024-02-29,pass,,0,,SCR-BGN-2B2402291567,Program: SCR-BGN-2B | Grade: C
+ADV0045,Scratch Beginner,1,2024-02-29,pass,,0,,SCR-BGN-2B2402290805,Program: SCR-BGN-2B | Grade: C
+ADV23004,EV3 Robotics Beginner,1,2024-03-07,pass,,0,,EV3-BGN-2B2403072126,Program: EV3-BGN-2B | Grade: C
+ADV23005,EV3 Robotics Beginner,1,2024-03-07,pass,,0,,EV3-BGN-2B2403074041,Program: EV3-BGN-2B | Grade: C
+ADV23007,EV3 Robotics Beginner,1,2024-03-07,pass,,0,,EV3-BGN-2B2403079541,Program: EV3-BGN-2B | Grade: C
+ADV23012,EV3 Robotics Beginner,1,2024-03-07,pass,,0,,EV3-BGN-2B2403078720,Program: EV3-BGN-2B | Grade: C
+ADV23013,EV3 Robotics Beginner,1,2024-03-07,pass,,0,,EV3-BGN-2B2403078003,Program: EV3-BGN-2B | Grade: C
+ADV0056,EV3 Robotics Beginner,1,2024-03-07,pass,,0,,EV3-BGN-2B2403075766,Program: EV3-BGN-2B | Grade: C
+ADV24013,EV3 Robotics Beginner,1,2024-03-07,pass,,0,,EV3-BGN-2B2403078322,Program: EV3-BGN-2B | Grade: C
+ADV24069,EV3 Robotics Beginner,1,2024-03-31,pass,70,0,,EV3-BGN-12P2403314231,Program: EV3-BGN-12P | Grade: P
+ADV24070,EV3 Robotics Beginner,1,2024-03-31,pass,80,0,,EV3-BGN-12P2403314960,Program: EV3-BGN-12P | Grade: D
+ADV24071,EV3 Robotics Beginner,1,2024-03-31,pass,85,0,,EV3-BGN-12P2403315813,Program: EV3-BGN-12P | Grade: D
+ADV24072,EV3 Robotics Beginner,1,2024-03-31,pass,90,0,,EV3-BGN-12P2403310280,Program: EV3-BGN-12P | Grade: D
+ADV24073,EV3 Robotics Beginner,1,2024-03-31,pass,90,0,,EV3-BGN-12P2403313409,Program: EV3-BGN-12P | Grade: D
+ADV24074,EV3 Robotics Beginner,1,2024-03-31,pass,60,0,,EV3-BGN-12P2403315887,Program: EV3-BGN-12P | Grade: P
+ADV24075,EV3 Robotics Beginner,1,2024-03-31,pass,80,0,,EV3-BGN-12P2403314181,Program: EV3-BGN-12P | Grade: D
+ADV24076,EV3 Robotics Beginner,1,2024-03-31,pass,90,0,,EV3-BGN-12P2403312859,Program: EV3-BGN-12P | Grade: D
+ADV24077,EV3 Robotics Beginner,1,2024-03-31,pass,70,0,,EV3-BGN-12P2403312489,Program: EV3-BGN-12P | Grade: P
+ADV24078,EV3 Robotics Beginner,1,2024-03-31,pass,90,0,,EV3-BGN-12P2403316214,Program: EV3-BGN-12P | Grade: D
+ADV24079,EV3 Robotics Beginner,1,2024-03-31,pass,60,0,,EV3-BGN-12P2403313285,Program: EV3-BGN-12P | Grade: P
+ADV23008,EV3 Robotics Intermediate,2,2024-05-31,pass,,0,,EV3-INT1-12P2405316551-P,Program: EV3-INT1-12P | Grade: P
+ADV24026,EV3 Robotics Beginner,1,2024-08-25,pass,96,0,,EV3-BGN-24P2408253924-D,Program: EV3-BGN-24P | Grade: D
+ADV24025,EV3 Robotics Beginner,1,2024-09-27,pass,68,0,,EV3-BGN-24P2409276208-P,Program: EV3-BGN-24P | Grade: P
+ADV24018,EV3 Robotics Beginner,1,2024-10-04,pass,76,0,,EV3-BGN-24P2410044042-P,Program: EV3-BGN-24P | Grade: P
+ADV24064,EV3 Robotics Beginner,1,2024-10-04,pass,96,0,,EV3-BGN-24P2410041347-D,Program: EV3-BGN-24P | Grade: D
+ADV23048,EV3 Robotics Beginner,1,2024-10-05,pass,66,0,,EV3-BGN-24P2410058574-P,Program: EV3-BGN-24P | Grade: P
+ADV23049,EV3 Robotics Beginner,1,2024-10-05,pass,92,0,,EV3-BGN-24P2410059214-D,Program: EV3-BGN-24P | Grade: D
+ADV24021,EV3 Robotics Beginner,1,2024-10-12,pass,100,0,,EV3-BGN-24P2410128031-D,Program: EV3-BGN-24P | Grade: D
+ADV24047,EV3 Robotics Beginner,1,2024-10-10,pass,96,0,,EV3-BGN-24P2410102117-D,Program: EV3-BGN-24P | Grade: D
+ADV24046,EV3 Robotics Beginner,1,2024-10-10,pass,66,0,,EV3-BGN-24P2410106935-P,Program: EV3-BGN-24P | Grade: P
+ADV23041,EV3 Robotics Beginner,1,2024-10-06,pass,76,0,,EV3-BGN-24P2410069775-P,Program: EV3-BGN-24P | Grade: P
+ADV24040,EV3 Robotics Beginner,1,2024-10-18,pass,87,0,,EV3-BGN-24P2410182232-D,Program: EV3-BGN-24P | Grade: D
+ADV0056,EV3 Robotics Intermediate,2,2024-10-19,pass,68,0,,EV3-INT1-12P2410196629-P,Program: EV3-INT1-12P | Grade: P
+ADV24031,EV3 Robotics Beginner,1,2024-10-19,pass,68,0,,EV3-BGN-24P2410197297-P,Program: EV3-BGN-24P | Grade: P
+ADV24030,EV3 Robotics Beginner,1,2024-10-20,pass,70,0,,EV3-BGN-24P2410207329-P,Program: EV3-BGN-24P | Grade: P
+ADV23042,EV3 Robotics Beginner,1,2024-10-20,pass,78,0,,EV3-BGN-24P2410202774-P,Program: EV3-BGN-24P | Grade: P
+ADV23004,EV3 Robotics Intermediate,2,2024-12-14,pass,92,0,,EV3-INT1-24P2412142909-D,Program: EV3-INT1-24P | Grade: D
+ADV23005,EV3 Robotics Intermediate,2,2024-11-02,pass,86,0,,EV3-INT1-24P2411021533-D,Program: EV3-INT1-24P | Grade: D
+ADV24056,EV3 Robotics Beginner,1,2024-12-21,pass,96,0,,EV3-BGN-24P2412215467-D,Program: EV3-BGN-24P | Grade: D
+ADV24055,EV3 Robotics Beginner,1,2024-12-21,pass,100,0,,EV3-BGN-24P2412215480-D,Program: EV3-BGN-24P | Grade: D
+ADV24024,EV3 Robotics Beginner,1,2024-12-29,pass,73,0,,EV3-BGN-24P2412294386-P,Program: EV3-BGN-24P | Grade: P
+ADV24047,EV3 Robotics Intermediate,2,2025-01-09,pass,96,0,,EV3-INT1-24P2501097137-D,Program: EV3-INT1-24P | Grade: D
+ADV23038,EV3 Robotics Beginner,1,2025-01-11,pass,72,0,,EV3-BGN-24P2501110085-P,Program: EV3-BGN-24P | Grade: P
+ADV24026,EV3 Robotics Intermediate,2,2025-01-18,pass,64,0,,EV3-INT1-24P2501186158-P,Program: EV3-INT1-24P | Grade: P
+ADV23012,EV3 Robotics Beginner,1,2025-01-19,pass,73,0,,EV3-BGN-24P2501196720-P,Program: EV3-BGN-24P | Grade: P
+ADV23011,EV3 Robotics Intermediate,2,2025-01-25,pass,94,0,,EV3-INT1-24P2501259104-D,Program: EV3-INT1-24P | Grade: D
+ADV23084,EV3 Robotics Beginner,1,2025-01-25,pass,84,0,,EV3-BGN-24P2501259490-D,Program: EV3-BGN-24P | Grade: D
+ADV0047,EV3 Robotics Intermediate,2,2025-02-07,pass,90,0,,EV3-INT1-24P2502075608-D,Program: EV3-INT1-24P | Grade: D
+ADV24064,EV3 Robotics Intermediate,2,2025-02-14,pass,83,0,,EV3-INT1-24P2502146327-D,Program: EV3-INT1-24P | Grade: D
+ADV24066,EV3 Robotics Beginner,1,2025-02-22,pass,100,0,,EV3-BGN-24P2502229964-D,Program: EV3-BGN-24P | Grade: D
+ADV24005,Scratch Beginner,1,2025-02-23,pass,85,0,,SCR-BGN-24P2502235062-D,Program: SCR-BGN-24P | Grade: D
+ADV23019,Scratch Beginner,1,2025-02-23,pass,82,0,,SCR-BGN-24P2502239809-D,Program: SCR-BGN-24P | Grade: D
+ADV23020,Scratch Beginner,1,2025-02-23,pass,64,0,,SCR-BGN-24P2502237182-P,Program: SCR-BGN-24P | Grade: P
+ADV24009,Scratch Beginner,1,2025-02-23,pass,76,0,,SCR-BGN-24P2502233146-P,Program: SCR-BGN-24P | Grade: P
+ADV23022,Scratch Beginner,1,2025-02-23,pass,79,0,,SCR-BGN-24P2502231020-P,Program: SCR-BGN-24P | Grade: P
+ADV24061,EV3 Robotics Beginner,1,2025-02-28,pass,87,0,,EV3-BGN-24P2502281680-D,Program: EV3-BGN-24P | Grade: D
+ADV23075,EV3 Robotics Beginner,1,2025-03-01,pass,100,0,,EV3-BGN-24P2503014201-D,Program: EV3-BGN-24P | Grade: D
+ADV24081,EV3 Robotics Beginner,1,2025-03-07,pass,79,0,,EV3-BGN-24P2503079789-P,Program: EV3-BGN-24P | Grade: P
+ADV24033,EV3 Robotics Beginner,1,2025-03-08,pass,64,0,,EV3-BGN-24P2503089210-P,Program: EV3-BGN-24P | Grade: P
+ADV24021,EV3 Robotics Intermediate,2,2025-03-08,pass,82,0,,EV3-INT1-24P2503089061-D,Program: EV3-INT1-24P | Grade: D
+ADV24059,EV3 Robotics Beginner,1,2025-03-09,pass,88,0,,EV3-BGN-24P2503094510-D,Program: EV3-BGN-24P | Grade: D
+ADV24066,EV3 Robotics Intermediate,2,2025-03-15,pass,90,0,,EV3-INT1-24P2503151937-D,Program: EV3-INT1-24P | Grade: D
+ADV0011,EV3 Robotics Intermediate,2,2025-03-22,pass,62,0,,EV3-INT1-24P2503229641-P,Program: EV3-INT1-24P | Grade: P
+ADV24057,Scratch Beginner,1,2025-04-12,pass,67,0,,SCR-BGN-24P2504125347-P,Program: SCR-BGN-24P | Grade: P
+ADV23075,EV3 Robotics Intermediate,2,2025-04-12,pass,94,0,,EV3-INT1-24P2504120277-D,Program: EV3-INT1-24P | Grade: D
+ADV23034,Scratch Beginner,1,2025-04-12,pass,100,0,,SCR-BGN-24P2504122384-D,Program: SCR-BGN-24P | Grade: D
+ADV23022,Scratch Intermediate,2,2025-04-13,pass,92,0,,SCR-INT1-24P2504137679-D,Program: SCR-INT1-24P | Grade: D
+ADV24011,Scratch Beginner,1,2025-04-18,pass,77,0,,SCR-BGN-24P2504188520-P,Program: SCR-BGN-24P | Grade: P
+ADV25009,Scratch Beginner,1,2025-04-18,pass,70,0,,SCR-BGN-24P2504189454-P,Program: SCR-BGN-24P | Grade: P
+ADV25016,EV3 Robotics Beginner,1,2025-04-20,pass,88,0,,EV3-BGN-24P2504205771-D,Program: EV3-BGN-24P | Grade: D
+ADV23084,Scratch Beginner,1,2025-04-20,pass,78,0,,SCR-BGN-24P2504205826-P,Program: SCR-BGN-24P | Grade: P
+ADV24087,Scratch Beginner,1,2025-04-20,pass,74,0,,SCR-BGN-24P2504203350-P,Program: SCR-BGN-24P | Grade: P
+ADV25013,Scratch Beginner,1,2025-04-25,pass,86,0,,SCR-BGN-24P2504250392-D,Program: SCR-BGN-24P | Grade: D
+ADV23034,Scratch Intermediate,2,2025-04-26,pass,83,0,,SCR-INT1-24P2504261869-D,Program: SCR-INT1-24P | Grade: D
+ADV24046,EV3 Robotics Intermediate,2,2025-06-11,pass,78,0,,EV3-INT1-24P2506112245-P,Program: EV3-INT1-24P | Grade: P
+ADV0027,Python Beginner,1,2025-07-12,pass,76,0,,PY-BGN-24P2507125707-P,Program: PY-BGN-24P | Grade: P
+ADV0012,Python Beginner,1,2025-07-12,pass,70,0,,PY-BGN-24P2507127575-P,Program: PY-BGN-24P | Grade: P
+ADV25016,EV3 Robotics Intermediate,2,2025-05-25,pass,73,0,,EV3-INT1-24P2505254482-P,Program: EV3-INT1-24P | Grade: P
+ADV25012,EV3 Robotics Beginner,1,2025-08-02,pass,91,0,,EV3-BGN-24P2508020281-D,Program: EV3-BGN-24P | Grade: D
+ADV25039,EV3 Robotics Beginner,1,2025-08-09,pass,100,0,,EV3-BGN-24P2508097371-D,Program: EV3-BGN-24P | Grade: D
+ADV25020,EV3 Robotics Beginner,1,2025-08-16,pass,80,0,,EV3-BGN-24P2508168997-D,Program: EV3-BGN-24P | Grade: D
+ADV25039,EV3 Robotics Intermediate,2,2025-08-23,pass,92,0,,EV3-INT1-24P2508237249-D,Program: EV3-INT1-24P | Grade: D
+ADV25020,EV3 Robotics Intermediate,2,2025-08-23,pass,62,0,,EV3-INT1-24P2508232251-P,Program: EV3-INT1-24P | Grade: P
+ADV25039,EV3 Robotics Advanced,3,2025-12-06,pass,86,0,,EV3-ADV-48P2512068694-D,Program: EV3-ADV-48P | Grade: D
+ADV25001,EV3 Robotics Beginner,1,2025-12-06,pass,78,0,,EV3-BGN-24P2512065553-P,Program: EV3-BGN-24P | Grade: P
+ADV0056,EV3 Robotics Advanced,3,2025-12-13,pass,81,0,,EV3-ADV-48P2512138886-D,Program: EV3-ADV-48P | Grade: D
+ADV25013,EV3 Robotics Intermediate,2,2025-12-19,pass,68,0,,EV3-INT1-24P2512196495-P,Program: EV3-INT1-24P | Grade: P
+ADV23038,EV3 Robotics Beginner,1,2025-12-20,pass,86,0,,EV3-BGN-24P2512209089-D,Program: EV3-BGN-24P | Grade: D
+ADV25027,EV3 Robotics Beginner,1,2025-12-28,pass,84,0,,EV3-BGN-24P2512288271-D,Program: EV3-BGN-24P | Grade: D
+ADV24038,EV3 Robotics Beginner,1,2025-12-28,pass,82,0,,EV3-BGN-24P2512285969-D,Program: EV3-BGN-24P | Grade: D
+ADV25069,EV3 Robotics Beginner,1,2026-01-03,pass,96,0,,EV3-BGN-24P2601033058-D,Program: EV3-BGN-24P | Grade: D
+ADV25026,Robotics Beginner,1,2025-12-24,pass,,0,,RBT-BC-2D2512247076-A,Program: RBT-BC-2D | Grade: A
+ADV25069,Robotics Beginner,1,2025-12-24,pass,,0,,RBT-BC-2D2512246351-A,Program: RBT-BC-2D | Grade: A
+ADV0056,Robotics Beginner,1,2025-12-24,pass,,0,,RBT-BC-2D2512243939-A,Program: RBT-BC-2D | Grade: A
+ADV23012,Robotics Beginner,1,2025-12-24,pass,,0,,RBT-BC-2D2512243534-A,Program: RBT-BC-2D | Grade: A
+ADV25043,EV3 Robotics Beginner,1,2026-01-10,pass,80,0,,EV3-BGN-24P2601105986-D,Program: EV3-BGN-24P | Grade: D
+ADV23038,EV3 Robotics Intermediate,2,2026-01-10,pass,68,0,,EV3-INT1-24P2601105754-P,Program: EV3-INT1-24P | Grade: P
+ADV25048,EV3 Robotics Beginner,1,2026-01-10,pass,70,0,,EV3-BGN-24P2601101593-P,Program: EV3-BGN-24P | Grade: P
+ADV25026,EV3 Robotics Beginner,1,2026-01-11,pass,100,0,,EV3-BGN-24P2601110868-D,Program: EV3-BGN-24P | Grade: D
+ADV25069,EV3 Robotics Level 2,2,2026-01-24,pass,82,0,,EV3-L02-A2601248692-D,Program: EV3-L02-A | Grade: D
+ADV25049,Scratch Level 2,2,2026-02-28,pass,76,0,,SCR-L02-A2602280357-P,Program: SCR-L02-A | Grade: P
+ADV24031,EV3 Robotics Level 2,2,2026-05-02,pass,64,0,,EV3-L02-A2605024321-P,Program: EV3-L02-A | Grade: P
+ADV25068,Scratch Level 1,1,2026-05-17,pass,82,0,,SCR-L01-A2605177162-D,Program: SCR-L01-A | Grade: D

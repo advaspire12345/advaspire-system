@@ -1,0 +1,1706 @@
+student_id,amount,status,payment_method,paid_at,program_name,package_type,package_duration,receipt_seq,notes
+ADV0057,70.00,paid,,2023-02-17,Scratch,,,,old ticket TK-230217-001
+ADV23030,202.50,paid,,2023-02-18,Scratch,,,,old ticket TK-230218-001
+ADV23012,513.00,paid,,2023-02-20,Lego EV3 Robotics,,,,old ticket TK-230220-001
+ADV0075,90.00,paid,,2023-02-24,Scratch,,,,old ticket TK-230224-001
+ADV23001,180.00,paid,,2023-02-25,Lego EV3 Robotics,,,,old ticket TK-230225-001
+ADV23036,240.00,paid,,2023-02-25,Scratch,,,,old ticket TK-230225-002
+ADV0045,150.00,paid,,2023-02-27,Lego EV3 Robotics,,,,old ticket TK-230227-001
+ADV23004,324.00,paid,,2023-02-28,Lego EV3 Robotics,,,,old ticket TK-230228-001
+ADV23005,324.00,paid,,2023-02-28,Lego EV3 Robotics,,,,old ticket TK-230228-002
+ADV23006,324.00,paid,,2023-02-28,Lego EV3 Robotics,,,,old ticket TK-230228-003
+ADV23035,120.00,paid,,2023-03-01,Scratch,,,,old ticket TK-230301-001
+ADV23011,180.00,paid,,2023-03-01,Lego EV3 Robotics,,,,old ticket TK-230301-002
+ADV23053,600.00,paid,,2023-03-02,,,,,old ticket TK-230302-001
+ADV23019,180.00,paid,,2023-03-03,Lego EV3 Robotics,,,,old ticket TK-230303-001
+ADV23020,180.00,paid,,2023-03-03,Lego EV3 Robotics,,,,old ticket TK-230303-002
+ADV23018,180.00,paid,,2023-03-05,Lego EV3 Robotics,,,,old ticket TK-230305-001
+ADV23021,360.00,paid,,2023-03-05,Lego EV3 Robotics,,,,old ticket TK-230305-002
+ADV23021,120.00,paid,,2023-03-05,Scratch,,,,old ticket TK-230305-003
+ADV23008,180.00,paid,,2023-03-05,Lego EV3 Robotics,,,,old ticket TK-230305-004
+ADV23007,160.00,paid,,2023-03-12,Lego EV3 Robotics,,,,old ticket TK-230312-001
+ADV23013,180.00,paid,,2023-03-20,Lego EV3 Robotics,,,,old ticket TK-230320-001
+ADV23029,240.00,paid,,2023-03-25,Scratch,,,,old ticket TK-230325-001
+ADV0045,150.00,paid,,2023-03-28,Lego EV3 Robotics,,,,old ticket TK-230328-001
+ADV0057,70.00,paid,,2023-03-31,Scratch,,,,old ticket TK-230331-001
+ADV0075,90.00,paid,,2023-04-01,Scratch,,,,old ticket TK-230401-001
+ADV23030,45.00,paid,,2023-04-02,Scratch,,,,old ticket TK-230402-001
+ADV23035,120.00,paid,,2023-04-03,Scratch,,,,old ticket TK-230403-001
+ADV23034,114.00,paid,,2023-04-04,Scratch,,,,old ticket TK-230404-001
+ADV23001,180.00,paid,,2023-04-05,Lego EV3 Robotics,,,,old ticket TK-230405-001
+ADV23011,180.00,paid,,2023-04-07,Lego EV3 Robotics,,,,old ticket TK-230407-001
+ADV23008,180.00,paid,,2023-04-08,Lego EV3 Robotics,,,,old ticket TK-230408-001
+ADV23019,180.00,paid,,2023-04-08,Lego EV3 Robotics,,,,old ticket TK-230408-002
+ADV23020,180.00,paid,,2023-04-08,Lego EV3 Robotics,,,,old ticket TK-230408-003
+ADV23018,180.00,paid,,2023-04-09,Lego EV3 Robotics,,,,old ticket TK-230409-001
+ADV23052,85.50,paid,,2023-04-10,Scratch,,,,old ticket TK-230410-001
+ADV23034,114.00,paid,,2023-04-17,Scratch,,,,old ticket TK-230417-001
+ADV0075,90.00,paid,,2023-04-21,Scratch,,,,old ticket TK-230421-002
+ADV0045,150.00,paid,,2023-04-26,Lego EV3 Robotics,,,,old ticket TK-230426-001
+ADV23036,120.00,paid,,2023-04-27,Scratch,,,,old ticket TK-230427-001
+ADV0057,70.00,paid,,2023-04-28,Scratch,,,,old ticket TK-230428-001
+ADV23014,256.50,paid,,2023-04-28,Lego EV3 Robotics,,,,old ticket TK-230428-002
+ADV23015,256.50,paid,,2023-04-28,Lego EV3 Robotics,,,,old ticket TK-230428-003
+ADV23035,120.00,paid,,2023-05-02,Scratch,,,,old ticket TK-230502-001
+ADV23011,180.00,paid,,2023-05-02,Lego EV3 Robotics,,,,old ticket TK-230502-002
+ADV23016,180.00,paid,,2023-05-02,Lego EV3 Robotics,,,,old ticket TK-230502-003
+ADV23017,180.00,paid,,2023-05-02,Lego EV3 Robotics,,,,old ticket TK-230502-004
+ADV23001,180.00,paid,,2023-05-03,Lego EV3 Robotics,,,,old ticket TK-230503-001
+ADV23022,120.00,paid,,2023-05-08,Scratch,,,,old ticket TK-230508-001
+ADV23078,180.00,paid,,2023-05-08,Lego EV3 Robotics,,,,old ticket TK-230508-002
+ADV23004,324.00,paid,,2023-05-10,Lego EV3 Robotics,,,,old ticket TK-230510-001
+ADV23005,324.00,paid,,2023-05-10,Lego EV3 Robotics,,,,old ticket TK-230510-002
+ADV23006,324.00,paid,,2023-05-10,Lego EV3 Robotics,,,,old ticket TK-230510-003
+ADV23032,270.00,paid,,2023-05-11,Scratch,,,,old ticket TK-230511-001
+ADV23013,360.00,paid,,2023-05-13,Lego EV3 Robotics,,,,old ticket TK-230513-001
+ADV23007,160.00,paid,,2023-05-14,Lego EV3 Robotics,,,,old ticket TK-230514-001
+ADV23034,114.00,paid,,2023-05-15,Scratch,,,,old ticket TK-230515-001
+ADV0075,90.00,paid,,2023-05-19,Scratch,,,,old ticket TK-230519-001
+ADV23044,50.00,paid,,2023-05-19,,,,,old ticket TK-230519-002
+ADV23046,50.00,paid,,2023-05-20,,,,,old ticket TK-230520-001
+ADV23047,50.00,paid,,2023-05-20,,,,,old ticket TK-230520-002
+ADV23054,98.00,paid,,2023-05-20,,,,,old ticket TK-230520-003
+ADV23002,513.00,paid,,2023-05-20,Lego EV3 Robotics,,,,old ticket TK-230520-004
+ADV23018,180.00,paid,,2023-05-21,Lego EV3 Robotics,,,,old ticket TK-230521-001
+ADV23066,288.00,paid,,2023-05-22,,,,,old ticket TK-230522-001
+ADV23064,50.00,paid,,2023-05-22,,,,,old ticket TK-230522-002
+ADV23065,50.00,paid,,2023-05-22,,,,,old ticket TK-230522-003
+ADV23056,98.00,paid,,2023-05-23,,,,,old ticket TK-230523-001
+ADV23057,98.00,paid,,2023-05-23,,,,,old ticket TK-230523-002
+ADV23058,98.00,paid,,2023-05-23,,,,,old ticket TK-230523-003
+ADV23055,288.00,paid,,2023-05-23,,,,,old ticket TK-230523-004
+ADV23059,98.00,paid,,2023-05-23,,,,,old ticket TK-230523-005
+ADV23060,98.00,paid,,2023-05-23,,,,,old ticket TK-230523-006
+ADV23061,98.00,paid,,2023-05-23,,,,,old ticket TK-230523-007
+ADV23062,98.00,paid,,2023-05-24,,,,,old ticket TK-230524-001
+ADV23069,288.00,paid,,2023-05-25,,,,,old ticket TK-230525-001
+ADV23023,120.00,paid,,2023-05-25,Scratch,,,,old ticket TK-230525-002
+ADV23073,98.00,paid,,2023-05-25,,,,,old ticket TK-230525-003
+ADV23071,98.00,paid,,2023-05-25,,,,,old ticket TK-230525-004
+ADV23072,98.00,paid,,2023-05-26,,,,,old ticket TK-230526-001
+ADV23070,98.00,paid,,2023-05-26,,,,,old ticket TK-230526-002
+ADV0045,98.00,paid,,2023-05-26,,,,,old ticket TK-230526-003
+ADV0045,150.00,paid,,2023-05-28,Lego EV3 Robotics,,,,old ticket TK-230528-001
+ADV23029,240.00,paid,,2023-05-31,Scratch,,,,old ticket TK-230531-001
+ADV23011,180.00,paid,,2023-06-02,Lego EV3 Robotics,,,,old ticket TK-230602-001
+ADV23009,513.00,paid,,2023-06-03,Lego EV3 Robotics,,,,old ticket TK-230603-001
+ADV23001,180.00,paid,,2023-06-05,Lego EV3 Robotics,,,,old ticket TK-230605-001
+ADV23035,120.00,paid,,2023-06-06,Scratch,,,,old ticket TK-230606-001
+ADV23034,120.00,paid,,2023-06-07,Scratch,,,,old ticket TK-230607-001
+ADV23014,256.50,paid,,2023-06-09,Lego EV3 Robotics,,,,old ticket TK-230609-001
+ADV23015,256.50,paid,,2023-06-09,Lego EV3 Robotics,,,,old ticket TK-230609-002
+ADV23013,180.00,paid,,2023-06-10,Lego EV3 Robotics,,,,old ticket TK-230610-001
+ADV23030,90.00,paid,,2023-06-10,Scratch,,,,old ticket TK-230610-002
+ADV23007,160.00,paid,,2023-06-12,Lego EV3 Robotics,,,,old ticket TK-230612-001
+ADV23036,240.00,paid,,2023-06-15,Scratch,,,,old ticket TK-230615-001
+ADV23024,120.00,paid,,2023-06-20,Scratch,,,,old ticket TK-230620-001
+ADV23003,180.00,paid,,2023-06-23,Lego EV3 Robotics,,,,old ticket TK-230623-001
+ADV23018,180.00,paid,,2023-06-24,Lego EV3 Robotics,,,,old ticket TK-230624-001
+ADV23012,513.00,paid,,2023-06-30,Lego EV3 Robotics,,,,old ticket TK-230630-001
+ADV23008,180.00,paid,,2023-07-01,Lego EV3 Robotics,,,,old ticket TK-230701-001
+ADV23023,120.00,paid,,2023-07-02,Scratch,,,,old ticket TK-230702-001
+ADV23035,120.00,paid,,2023-07-03,Scratch,,,,old ticket TK-230703-001
+ADV23034,120.00,paid,,2023-07-03,Scratch,,,,old ticket TK-230703-002
+ADV0045,150.00,paid,,2023-07-03,Lego EV3 Robotics,,,,old ticket TK-230703-003
+ADV23030,90.00,paid,,2023-07-04,Scratch,,,,old ticket TK-230704-001
+ADV23001,180.00,paid,,2023-07-04,Lego EV3 Robotics,,,,old ticket TK-230704-002
+ADV0056,240.00,paid,,2023-07-05,Lego EV3 Robotics,,,,old ticket TK-230705-001
+ADV23011,180.00,paid,,2023-07-06,Lego EV3 Robotics,,,,old ticket TK-230706-001
+ADV23013,180.00,paid,,2023-07-07,Lego EV3 Robotics,,,,old ticket TK-230707-001
+ADV23022,75.00,paid,,2023-07-09,Scratch,,,,old ticket TK-230709-001
+ADV23025,120.00,paid,,2023-07-10,Scratch,,,,old ticket TK-230710-001
+ADV23026,120.00,paid,,2023-07-10,Scratch,,,,old ticket TK-230710-002
+ADV23027,120.00,paid,,2023-07-10,Scratch,,,,old ticket TK-230710-003
+ADV23028,120.00,paid,,2023-07-10,Scratch,,,,old ticket TK-230710-004
+ADV23024,120.00,paid,,2023-07-10,Scratch,,,,old ticket TK-230710-005
+ADV23052,172.60,paid,,2023-07-21,Scratch,,,,old ticket TK-230721-001
+ADV23007,160.00,paid,,2023-07-22,Lego EV3 Robotics,,,,old ticket TK-230722-001
+ADV23033,900.00,paid,,2023-07-23,Scratch,,,,old ticket TK-230723-001
+ADV23016,256.00,paid,,2023-07-24,Lego EV3 Robotics,,,,old ticket TK-230724-001
+ADV23017,256.00,paid,,2023-07-24,Lego EV3 Robotics,,,,old ticket TK-230724-002
+ADV23036,120.00,paid,,2023-07-25,Scratch,,,,old ticket TK-230725-001
+ADV23018,180.00,paid,,2023-07-28,Lego EV3 Robotics,,,,old ticket TK-230728-001
+ADV23006,324.00,paid,,2023-07-29,Lego EV3 Robotics,,,,old ticket TK-230729-001
+ADV23005,324.00,paid,,2023-07-29,Lego EV3 Robotics,,,,old ticket TK-230729-002
+ADV23004,324.00,paid,,2023-07-29,Lego EV3 Robotics,,,,old ticket TK-230729-003
+ADV0045,150.00,paid,,2023-08-02,Lego EV3 Robotics,,,,old ticket TK-230802-001
+ADV23034,120.00,paid,,2023-08-02,Scratch,,,,old ticket TK-230802-002
+ADV23022,90.00,paid,,2023-08-02,Scratch,,,,old ticket TK-230802-003
+ADV23030,90.00,paid,,2023-08-02,Scratch,,,,old ticket TK-230802-004
+ADV23021,900.00,paid,,2023-08-03,Lego EV3 Robotics,,,,old ticket TK-230803-001
+ADV23035,120.00,paid,,2023-08-03,Scratch,,,,old ticket TK-230803-002
+ADV23037,697.40,paid,,2023-08-03,Scratch,,,,old ticket TK-230803-003
+ADV23031,86.30,paid,,2023-08-03,Scratch,,,,old ticket TK-230803-004
+ADV23031,464.60,paid,,2023-08-03,Scratch,,,,old ticket TK-230803-005
+ADV23011,180.00,paid,,2023-08-04,Lego EV3 Robotics,,,,old ticket TK-230804-001
+ADV23001,180.00,paid,,2023-08-05,Lego EV3 Robotics,,,,old ticket TK-230805-001
+ADV23029,240.00,paid,,2023-08-05,Scratch,,,,old ticket TK-230805-002
+ADV23025,240.00,paid,,2023-08-06,Scratch,,,,old ticket TK-230806-001
+ADV23026,240.00,paid,,2023-08-06,Scratch,,,,old ticket TK-230806-002
+ADV0014,180.00,paid,cash,2023-08-06,Lego EV3 Robotics,,,,old ticket TK-230806-003 | Cash
+ADV23008,180.00,paid,,2023-08-07,Lego EV3 Robotics,,,,old ticket TK-230807-001
+ADV23028,120.00,paid,,2023-08-09,Scratch,,,,old ticket TK-230809-001
+ADV23027,120.00,paid,,2023-08-09,Scratch,,,,old ticket TK-230809-002
+ADV23007,160.00,paid,,2023-08-12,Lego EV3 Robotics,,,,old ticket TK-230812-001
+ADV23039,180.00,paid,,2023-08-12,Lego EV3 Robotics,,,,old ticket TK-230812-002
+ADV23023,240.00,paid,,2023-08-13,Scratch,,,,old ticket TK-230813-001
+ADV23024,240.00,paid,,2023-08-14,Scratch,,,,old ticket TK-230814-001
+ADV23025,120.00,paid,,2023-08-17,Scratch,,,,old ticket TK-230817-002
+ADV23026,120.00,paid,,2023-08-17,Scratch,,,,old ticket TK-230817-003
+ADV23040,90.00,paid,,2023-08-20,Scratch,,,,old ticket TK-230820-001
+ADV23032,270.00,paid,,2023-08-25,Scratch,,,,old ticket TK-230825-001
+ADV23014,256.50,paid,,2023-08-26,Lego EV3 Robotics,,,,old ticket TK-230826-001
+ADV23015,256.50,paid,,2023-08-26,Lego EV3 Robotics,,,,old ticket TK-230826-002
+ADV0045,150.00,paid,,2023-08-29,Lego EV3 Robotics,,,,old ticket TK-230829-001
+ADV23018,180.00,paid,,2023-09-01,Lego EV3 Robotics,,,,old ticket TK-230901-001
+ADV23011,180.00,paid,,2023-09-01,Lego EV3 Robotics,,,,old ticket TK-230901-002
+ADV0055,120.00,paid,cash,2023-09-01,Scratch,,,,old ticket TK-230901-003 | Cash
+ADV0057,90.00,paid,,2023-09-02,Scratch,,,,old ticket TK-230902-001
+ADV23034,120.00,paid,,2023-09-02,Scratch,,,,old ticket TK-230902-002
+ADV23030,90.00,paid,,2023-09-02,Scratch,,,,old ticket TK-230902-003
+ADV23040,120.00,paid,,2023-09-03,Scratch,,,,old ticket TK-230903-001
+ADV23022,70.00,paid,,2023-09-04,Scratch,,,,old ticket TK-230904-001
+ADV23001,180.00,paid,,2023-09-04,Lego EV3 Robotics,,,,old ticket TK-230904-002
+ADV23008,180.00,paid,,2023-09-04,Lego EV3 Robotics,,,,old ticket TK-230904-003
+ADV23035,120.00,paid,,2023-09-05,Scratch,,,,old ticket TK-230905-001
+ADV23013,180.00,paid,,2023-09-06,Lego EV3 Robotics,,,,old ticket TK-230906-001
+ADV23003,972.00,paid,,2023-09-09,Lego EV3 Robotics,,,,old ticket TK-230909-001
+ADV23027,120.00,paid,,2023-09-10,Scratch,,,,old ticket TK-230910-001
+ADV23028,120.00,paid,,2023-09-10,Scratch,,,,old ticket TK-230910-002
+ADV23007,160.00,paid,,2023-09-11,Lego EV3 Robotics,,,,old ticket TK-230911-001
+ADV23025,120.00,paid,,2023-09-11,Scratch,,,,old ticket TK-230911-002
+ADV23026,120.00,paid,,2023-09-11,Scratch,,,,old ticket TK-230911-003
+ADV23041,180.00,paid,cash,2023-09-23,Lego EV3 Robotics,,,,old ticket TK-230923-001 | Cash
+ADV23023,240.00,paid,,2023-09-24,Scratch,,,,old ticket TK-230924-001
+ADV23042,180.00,paid,,2023-09-24,Lego EV3 Robotics,,,,old ticket TK-230924-002
+ADV23008,180.00,paid,,2023-09-30,Lego EV3 Robotics,,,,old ticket TK-230930-001
+ADV0045,150.00,paid,,2023-09-30,Lego EV3 Robotics,,,,old ticket TK-230930-002
+ADV0055,120.00,paid,cash,2023-10-01,Scratch,,,,old ticket TK-231001-001 | Cash
+ADV23032,90.00,paid,,2023-10-02,Scratch,,,,old ticket TK-231002-001
+ADV23034,120.00,paid,,2023-10-02,Scratch,,,,old ticket TK-231002-002
+ADV23024,180.00,paid,,2023-10-02,Lego EV3 Robotics,,,,old ticket TK-231002-003
+ADV23024,120.00,paid,,2023-10-02,Scratch,,,,old ticket TK-231002-004
+ADV23022,120.00,paid,,2023-10-02,Scratch,,,,old ticket TK-231002-005
+ADV23035,120.00,paid,,2023-10-04,Scratch,,,,old ticket TK-231004-001
+ADV23050,180.00,paid,,2023-10-06,Lego EV3 Robotics,,,,old ticket TK-231006-001
+ADV23050,150.00,paid,,2023-10-06,Scratch,,,,old ticket TK-231006-002
+ADV23001,180.00,paid,,2023-10-06,Lego EV3 Robotics,,,,old ticket TK-231006-003
+ADV23011,180.00,paid,,2023-10-07,Lego EV3 Robotics,,,,old ticket TK-231007-001
+ADV0014,180.00,paid,,2023-10-08,Lego EV3 Robotics,,,,old ticket TK-231008-001
+ADV23048,256.50,paid,,2023-10-09,Lego EV3 Robotics,,,,old ticket TK-231009-001
+ADV23049,256.50,paid,,2023-10-09,Lego EV3 Robotics,,,,old ticket TK-231009-002
+ADV23027,180.00,paid,,2023-10-11,Lego EV3 Robotics,,,,old ticket TK-231011-001
+ADV23027,120.00,paid,,2023-10-11,Scratch,,,,old ticket TK-231011-002
+ADV23028,180.00,paid,,2023-10-11,Lego EV3 Robotics,,,,old ticket TK-231011-003
+ADV23028,120.00,paid,,2023-10-11,Scratch,,,,old ticket TK-231011-004
+ADV23019,180.00,paid,,2023-10-12,Lego EV3 Robotics,,,,old ticket TK-231012-001
+ADV23020,180.00,paid,,2023-10-12,Lego EV3 Robotics,,,,old ticket TK-231012-002
+ADV23005,324.00,paid,,2023-10-13,Lego EV3 Robotics,,,,old ticket TK-231013-001
+ADV23004,324.00,paid,,2023-10-13,Lego EV3 Robotics,,,,old ticket TK-231013-002
+ADV23006,324.00,paid,,2023-10-13,Lego EV3 Robotics,,,,old ticket TK-231013-003
+ADV23007,180.00,paid,,2023-10-14,Lego EV3 Robotics,,,,old ticket TK-231014-001
+ADV23014,256.50,paid,,2023-10-14,Lego EV3 Robotics,,,,old ticket TK-231014-002
+ADV23015,256.50,paid,,2023-10-14,Lego EV3 Robotics,,,,old ticket TK-231014-003
+ADV0057,90.00,paid,,2023-10-14,Scratch,,,,old ticket TK-231014-004
+ADV23040,120.00,paid,,2023-10-15,Scratch,,,,old ticket TK-231015-001
+ADV23013,180.00,paid,,2023-10-16,Lego EV3 Robotics,,,,old ticket TK-231016-001
+ADV23045,150.00,paid,,2023-10-18,Scratch,,,,old ticket TK-231018-001
+ADV23037,173.60,paid,,2023-10-19,Scratch,,,,old ticket TK-231019-001
+ADV23025,120.00,paid,,2023-10-19,Scratch,,,,old ticket TK-231019-002
+ADV23026,120.00,paid,,2023-10-19,Scratch,,,,old ticket TK-231019-003
+ADV23023,180.00,paid,,2023-10-21,Lego EV3 Robotics,,,,old ticket TK-231021-001
+ADV23023,120.00,paid,,2023-10-21,Scratch,,,,old ticket TK-231021-002
+ADV23018,180.00,paid,,2023-10-22,Lego EV3 Robotics,,,,old ticket TK-231022-001
+ADV23043,145.50,paid,,2023-10-23,Scratch,,,,old ticket TK-231023-001
+ADV23021,540.00,paid,,2023-10-26,Lego EV3 Robotics,,,,old ticket TK-231026-001
+ADV0045,150.00,paid,,2023-10-28,Lego EV3 Robotics,,,,old ticket TK-231028-001
+ADV23045,150.00,paid,,2023-10-28,Scratch,,,,old ticket TK-231028-002
+ADV23016,256.50,paid,,2023-10-29,Lego EV3 Robotics,,,,old ticket TK-231029-001
+ADV23017,256.50,paid,,2023-10-29,Lego EV3 Robotics,,,,old ticket TK-231029-002
+ADV23050,180.00,paid,,2023-10-30,Lego EV3 Robotics,,,,old ticket TK-231030-001
+ADV23050,150.00,paid,,2023-10-30,Scratch,,,,old ticket TK-231030-002
+ADV23051,180.00,paid,,2023-10-30,Lego EV3 Robotics,,,,old ticket TK-231030-003
+ADV23036,240.00,paid,,2023-10-30,Scratch,,,,old ticket TK-231030-004
+ADV23029,360.00,paid,,2023-10-30,Scratch,,,,old ticket TK-231030-005
+ADV23021,180.00,paid,,2023-11-01,Lego EV3 Robotics,,,,old ticket TK-231101-001
+ADV23001,180.00,paid,,2023-11-01,Lego EV3 Robotics,,,,old ticket TK-231101-002
+ADV0055,120.00,paid,cash,2023-11-01,Scratch,,,,old ticket TK-231101-003 | Cash
+ADV23030,112.50,paid,,2023-11-02,Scratch,,,,old ticket TK-231102-001
+ADV23034,120.00,paid,,2023-11-03,Scratch,,,,old ticket TK-231103-001
+ADV23035,120.00,paid,,2023-11-03,Scratch,,,,old ticket TK-231103-002
+ADV23008,180.00,paid,,2023-11-04,Lego EV3 Robotics,,,,old ticket TK-231104-001
+ADV23041,360.00,paid,,2023-11-04,Lego EV3 Robotics,,,,old ticket TK-231104-002
+ADV23025,120.00,paid,,2023-11-05,Scratch,,,,old ticket TK-231105-001
+ADV23026,120.00,paid,,2023-11-05,Scratch,,,,old ticket TK-231105-002
+ADV23022,120.00,paid,,2023-11-05,Scratch,,,,old ticket TK-231105-003
+ADV23007,160.00,paid,,2023-11-11,Lego EV3 Robotics,,,,old ticket TK-231111-001
+ADV0056,240.00,paid,,2023-11-13,Lego EV3 Robotics,,,,old ticket TK-231113-001
+ADV23024,180.00,paid,,2023-11-14,Lego EV3 Robotics,,,,old ticket TK-231114-001
+ADV23024,120.00,paid,,2023-11-14,Scratch,,,,old ticket TK-231114-002
+ADV23012,513.00,paid,,2023-11-15,Lego EV3 Robotics,,,,old ticket TK-231115-001
+ADV23031,171.80,paid,,2023-11-15,Scratch,,,,old ticket TK-231115-002
+ADV23027,180.00,paid,,2023-11-16,Lego EV3 Robotics,,,,old ticket TK-231116-001
+ADV23027,120.00,paid,,2023-11-16,Scratch,,,,old ticket TK-231116-002
+ADV23028,180.00,paid,,2023-11-16,Lego EV3 Robotics,,,,old ticket TK-231116-003
+ADV23028,120.00,paid,,2023-11-16,Scratch,,,,old ticket TK-231116-004
+ADV23013,180.00,paid,,2023-11-18,Lego EV3 Robotics,,,,old ticket TK-231118-001
+ADV23023,180.00,paid,,2023-11-18,Scratch,,,,old ticket TK-231118-002
+ADV23023,120.00,paid,,2023-11-18,Scratch,,,,old ticket TK-231118-003
+ADV0055,120.00,paid,cash,2023-11-25,Scratch,,,,old ticket TK-231125-001 | Cash
+ADV0045,150.00,paid,,2023-11-29,Lego EV3 Robotics,,,,old ticket TK-231129-001
+ADV0056,1200.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-001 | Nov-Adjustment
+ADV23007,1280.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-003 | Nov-Adjustment
+ADV23008,180.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-004 | Nov-Adjustment
+ADV23011,180.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-005 | Nov-Adjustment
+ADV23012,513.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-006 | Nov-Adjustment
+ADV23016,45.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-007 | Nov-Adjustment
+ADV23017,45.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-008 | Nov-Adjustment
+ADV23018,360.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-009 | Nov-Adjustment
+ADV23019,360.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-010 | Nov-Adjustment
+ADV23020,360.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-011 | Nov-Adjustment
+ADV23021,720.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-012 | Nov-Adjustment
+ADV23023,120.00,paid,,2023-11-30,Lego EV3 Robotics,,,,old ticket TK-231130-013 | Nov-Adjustment
+ADV23042,540.00,paid,,2023-12-01,Lego EV3 Robotics,,,,old ticket TK-231201-001
+ADV23050,180.00,paid,,2023-12-01,Lego EV3 Robotics,,,,old ticket TK-231201-002
+ADV23050,150.00,paid,,2023-12-01,Scratch,,,,old ticket TK-231201-003
+ADV23022,120.00,paid,,2023-12-03,Scratch,,,,old ticket TK-231203-001
+ADV23001,180.00,paid,,2023-12-04,Lego EV3 Robotics,,,,old ticket TK-231204-002
+ADV23035,120.00,paid,,2023-12-04,Scratch,,,,old ticket TK-231204-003
+ADV23013,180.00,paid,,2023-12-06,Lego EV3 Robotics,,,,old ticket TK-231206-004
+ADV23048,256.50,paid,,2023-12-07,Lego EV3 Robotics,,,,old ticket TK-231207-003
+ADV23049,256.50,paid,,2023-12-07,Lego EV3 Robotics,,,,old ticket TK-231207-004
+ADV0057,90.00,paid,,2023-12-08,Scratch,,,,old ticket TK-231208-003
+ADV23075,180.00,paid,,2023-12-08,Lego EV3 Robotics,,,,old ticket TK-231208-004
+ADV23040,90.00,paid,,2023-12-10,Scratch,,,,old ticket TK-231210-001
+ADV23024,120.00,paid,,2023-12-11,Scratch,,,,old ticket TK-231211-001
+ADV23024,180.00,paid,,2023-12-11,Lego EV3 Robotics,,,,old ticket TK-231211-002
+ADV23007,160.00,paid,,2023-12-16,Lego EV3 Robotics,,,,old ticket TK-231216-001
+ADV23041,180.00,paid,,2023-12-17,Lego EV3 Robotics,,,,old ticket TK-231217-001
+ADV23018,180.00,paid,,2023-12-17,Lego EV3 Robotics,,,,old ticket TK-231217-002
+ADV23018,180.00,paid,,2023-12-18,,,,,old ticket TK-231218-001
+ADV23083,180.00,paid,,2023-12-18,,,,,old ticket TK-231218-002
+ADV23051,178.20,paid,bank_transfer,2023-12-18,Lego EV3 Robotics,,,,old ticket TK-231218-003 | Boost Payment
+ADV23037,229.40,paid,,2023-12-21,Scratch,,,,old ticket TK-231221-001 | Stripe Payment
+ADV23023,120.00,paid,,2023-12-22,Scratch,,,,old ticket TK-231222-001
+ADV23023,180.00,paid,,2023-12-22,Lego EV3 Robotics,,,,old ticket TK-231222-002
+ADV23023,180.00,paid,,2023-12-22,,,,,old ticket TK-231222-003
+ADV23024,180.00,paid,,2023-12-26,,,,,old ticket TK-231226-001
+ADV23080,324.00,paid,,2023-12-26,Scratch,,,,old ticket TK-231226-002
+ADV23080,486.00,paid,,2023-12-26,Lego EV3 Robotics,,,,old ticket TK-231226-003
+ADV23081,324.00,paid,,2023-12-26,Scratch,,,,old ticket TK-231226-004
+ADV23081,486.00,paid,,2023-12-26,Lego EV3 Robotics,,,,old ticket TK-231226-005
+ADV23043,232.80,paid,,2023-12-26,Scratch,,,,old ticket TK-231226-006
+ADV23084,180.00,paid,,2023-12-28,,,,,old ticket TK-231228-001
+ADV0045,150.00,paid,,2023-12-28,Lego EV3 Robotics,,,,old ticket TK-231228-002
+ADV23045,150.00,paid,,2023-12-29,Scratch,,,,old ticket TK-231229-001
+ADV23034,120.00,paid,,2024-01-01,Scratch,,,,old ticket TK-240101-001
+ADV23050,150.00,paid,,2024-01-02,Scratch,,,,old ticket TK-240102-001
+ADV23050,180.00,paid,,2024-01-02,Lego EV3 Robotics,,,,old ticket TK-240102-002
+ADV23006,324.00,paid,,2024-01-02,Lego EV3 Robotics,,,,old ticket TK-240102-003
+ADV23004,324.00,paid,,2024-01-02,Lego EV3 Robotics,,,,old ticket TK-240102-004
+ADV23005,324.00,paid,,2024-01-02,Lego EV3 Robotics,,,,old ticket TK-240102-005
+ADV0055,150.00,paid,cash,2024-01-02,Scratch,,,,old ticket TK-240102-006 | Cash
+ADV23035,120.00,paid,,2024-01-03,Scratch,,,,old ticket TK-240103-001
+ADV23001,180.00,paid,,2024-01-03,Lego EV3 Robotics,,,,old ticket TK-240103-002
+ADV23030,67.50,paid,,2024-01-03,Scratch,,,,old ticket TK-240103-003
+ADV23022,120.00,paid,,2024-01-04,Scratch,,,,old ticket TK-240104-001
+ADV23011,180.00,paid,,2024-01-05,Lego EV3 Robotics,,,,old ticket TK-240105-001
+ADV23008,180.00,paid,,2024-01-06,Lego EV3 Robotics,,,,old ticket TK-240106-001
+ADV23013,360.00,paid,,2024-01-06,Lego EV3 Robotics,,,,old ticket TK-240106-002
+ADV23030,67.50,paid,,2024-01-07,Scratch,,,,old ticket TK-240107-001
+ADV24001,120.00,paid,,2024-01-08,Scratch,,,,old ticket TK-240108-001
+ADV24001,180.00,paid,,2024-01-08,Lego EV3 Robotics,,,,old ticket TK-240108-002
+ADV23026,120.00,paid,,2024-01-09,Scratch,,,,old ticket TK-240109-001
+ADV23009,513.00,paid,,2024-01-15,Lego EV3 Robotics,,,,old ticket TK-240115-001
+ADV0056,240.00,paid,cash,2024-01-15,Lego EV3 Robotics,,,,old ticket TK-240115-002 | Cash
+ADV0014,180.00,paid,cash,2024-01-15,Lego EV3 Robotics,,,,old ticket TK-240115-003 | Cash
+ADV24003,180.00,paid,cash,2024-01-15,Lego EV3 Robotics,,,,old ticket TK-240115-004 | Cash
+ADV23043,120.00,paid,,2024-01-17,Scratch,,,,old ticket TK-240117-002 | Stripe Payment
+ADV23085,90.00,paid,,2024-01-17,Scratch,,,,old ticket TK-240117-003 | Stripe Payment
+ADV23023,180.00,paid,,2024-01-17,Lego EV3 Robotics,,,,old ticket TK-240117-004
+ADV23023,120.00,paid,,2024-01-17,Scratch,,,,old ticket TK-240117-005
+ADV23051,178.20,paid,bank_transfer,2024-01-18,Lego EV3 Robotics,,,,old ticket TK-240118-001 | Boost Payment
+ADV23075,180.00,paid,,2024-01-20,Lego EV3 Robotics,,,,old ticket TK-240120-001
+ADV24004,180.00,paid,,2024-01-20,Scratch,,,,old ticket TK-240120-002
+ADV24005,180.00,paid,,2024-01-20,Lego EV3 Robotics,,,,old ticket TK-240120-003
+ADV23037,120.00,paid,,2024-01-20,Scratch,,,,old ticket TK-240120-004
+ADV23040,90.00,paid,,2024-01-21,Scratch,,,,old ticket TK-240121-002
+ADV23007,160.00,paid,,2024-01-24,Lego EV3 Robotics,,,,old ticket TK-240124-001
+ADV23045,150.00,paid,,2024-01-28,Scratch,,,,old ticket TK-240128-001
+ADV23018,180.00,paid,,2024-01-28,Lego EV3 Robotics,,,,old ticket TK-240128-002
+ADV0045,150.00,paid,,2024-01-28,Lego EV3 Robotics,,,,old ticket TK-240128-003
+ADV23024,180.00,paid,,2024-01-29,Lego EV3 Robotics,,,,old ticket TK-240129-002
+ADV23024,120.00,paid,,2024-01-29,Scratch,,,,old ticket TK-240129-003
+ADV23024,135.00,paid,,2024-01-29,Lego EV3 Robotics,,,,old ticket TK-240129-004
+ADV23024,90.00,paid,,2024-01-29,Scratch,,,,old ticket TK-240129-005
+ADV24001,45.00,paid,,2024-01-29,Lego EV3 Robotics,,,,old ticket TK-240129-006
+ADV24001,30.00,paid,,2024-01-29,Scratch,,,,old ticket TK-240129-007
+ADV23041,180.00,paid,,2024-01-30,Lego EV3 Robotics,,,,old ticket TK-240130-001
+ADV0055,150.00,paid,,2024-01-31,Scratch,,,,old ticket TK-240131-001
+ADV23012,513.00,paid,,2024-01-31,Lego EV3 Robotics,,,,old ticket TK-240131-002
+ADV23048,256.50,paid,,2024-01-31,Lego EV3 Robotics,,,,old ticket TK-240131-005
+ADV23049,256.50,paid,,2024-01-31,Lego EV3 Robotics,,,,old ticket TK-240131-006
+ADV23029,360.00,paid,,2024-02-03,Scratch,,,,old ticket TK-240203-001
+ADV23035,120.00,paid,,2024-02-03,Scratch,,,,old ticket TK-240203-002
+ADV23077,120.00,paid,,2024-02-03,Scratch,,,,old ticket TK-240203-003
+ADV0057,90.00,paid,,2024-02-03,Scratch,,,,old ticket TK-240203-004
+ADV23011,180.00,paid,,2024-02-03,Lego EV3 Robotics,,,,old ticket TK-240203-005
+ADV23027,120.00,paid,,2024-02-03,Scratch,,,,old ticket TK-240203-006
+ADV23028,120.00,paid,,2024-02-03,Scratch,,,,old ticket TK-240203-007
+ADV23034,120.00,paid,,2024-02-03,Scratch,,,,old ticket TK-240203-008
+ADV23050,180.00,paid,,2024-02-05,Scratch,,,,old ticket TK-240205-001
+ADV23050,150.00,paid,,2024-02-05,Lego EV3 Robotics,,,,old ticket TK-240205-002
+ADV23022,60.00,paid,,2024-02-05,Scratch,,,,old ticket TK-240205-003
+ADV23051,180.00,paid,bank_transfer,2024-02-05,Lego EV3 Robotics,,,,old ticket TK-240205-004 | TNG
+ADV24008,180.00,paid,bank_transfer,2024-02-05,Lego EV3 Robotics,,,,old ticket TK-240205-005 | TNG
+ADV23030,112.50,paid,,2024-02-05,Scratch,,,,old ticket TK-240205-006
+ADV23013,180.00,paid,,2024-02-07,Lego EV3 Robotics,,,,old ticket TK-240207-007
+ADV23040,120.00,paid,,2024-02-08,Scratch,,,,old ticket TK-240208-001
+ADV23007,160.00,paid,,2024-02-09,Lego EV3 Robotics,,,,old ticket TK-240209-001
+ADV24011,180.00,paid,,2024-02-16,,,,,old ticket TK-240216-001 | Minecraft
+ADV24012,180.00,paid,,2024-02-16,,,,,old ticket TK-240216-002 | Minecraft
+ADV24014,180.00,paid,,2024-02-16,,,,,old ticket TK-240216-003 | Minecraft
+ADV23008,180.00,paid,,2024-02-17,Lego EV3 Robotics,,,,old ticket TK-240217-001
+ADV23008,150.00,paid,,2024-02-17,,,,,old ticket TK-240217-002
+ADV23021,180.00,paid,,2024-02-17,Lego EV3 Robotics,,,,old ticket TK-240217-003
+ADV23019,180.00,paid,,2024-02-18,Scratch,,,,old ticket TK-240218-001
+ADV23020,180.00,paid,,2024-02-18,Scratch,,,,old ticket TK-240218-002
+ADV24010,180.00,paid,,2024-02-18,Lego EV3 Robotics,,,,old ticket TK-240218-003
+ADV23043,150.00,paid,,2024-02-19,Scratch,,,,old ticket TK-240219-001 | Stripe Payment
+ADV23085,150.00,paid,,2024-02-19,Scratch,,,,old ticket TK-240219-002 | Stripe Payment
+ADV23007,750.00,paid,,2024-02-20,,,,,old ticket TK-240220-001
+ADV23050,750.00,paid,,2024-02-21,,,,,old ticket TK-240221-001
+ADV0045,150.00,paid,,2024-02-22,,,,,old ticket TK-240222-001 | Minecraft
+ADV0056,360.00,paid,cash,2024-02-23,,,,,old ticket TK-240223-001 | Cash
+ADV23006,750.00,paid,,2024-02-23,,,,,old ticket TK-240223-002
+ADV23005,150.00,paid,,2024-02-23,,,,,old ticket TK-240223-003 | Minecraft
+ADV23005,150.00,paid,,2024-02-23,,,,,old ticket TK-240223-004 | Robotics
+ADV23004,150.00,paid,,2024-02-23,,,,,old ticket TK-240223-005 | Minecraft
+ADV23004,150.00,paid,,2024-02-23,,,,,old ticket TK-240223-006 | Robotics
+ADV23045,150.00,paid,,2024-02-24,Scratch,,,,old ticket TK-240224-001
+ADV23023,180.00,paid,,2024-02-24,Lego EV3 Robotics,,,,old ticket TK-240224-002
+ADV23023,120.00,paid,,2024-02-24,Scratch,,,,old ticket TK-240224-003
+ADV0045,150.00,paid,,2024-02-28,,,,,old ticket TK-240228-001 | Scratch
+ADV23050,150.00,paid,,2024-03-01,Scratch,,,,old ticket TK-240301-001
+ADV23050,180.00,paid,,2024-03-01,Lego EV3 Robotics,,,,old ticket TK-240301-002
+ADV23050,120.00,paid,,2024-03-01,Scratch,,,,old ticket TK-240301-003 | Computer Science
+ADV23013,180.00,paid,,2024-03-01,Lego EV3 Robotics,,,,old ticket TK-240301-004
+ADV0055,150.00,paid,,2024-03-01,Scratch,,,,old ticket TK-240301-005
+ADV23037,114.20,paid,,2024-03-01,Scratch,,,,old ticket TK-240301-006 | Stripe Payment
+ADV23035,120.00,paid,,2024-03-02,Scratch,,,,old ticket TK-240302-001
+ADV23018,180.00,paid,,2024-03-02,Lego EV3 Robotics,,,,old ticket TK-240302-002
+ADV23027,120.00,paid,,2024-03-04,Scratch,,,,old ticket TK-240304-001
+ADV23028,120.00,paid,,2024-03-04,Scratch,,,,old ticket TK-240304-002
+ADV23034,120.00,paid,,2024-03-04,Scratch,,,,old ticket TK-240304-003
+ADV23076,120.00,paid,,2024-03-04,Scratch,,,,old ticket TK-240304-004
+ADV24009,180.00,paid,cash,2024-03-05,Scratch,,,,old ticket TK-240305-001 | Cash
+ADV23022,90.00,paid,,2024-03-05,Scratch,,,,old ticket TK-240305-002
+ADV23018,180.00,paid,,2024-03-05,Scratch,,,,old ticket TK-240305-003
+ADV23083,180.00,paid,,2024-03-05,Scratch,,,,old ticket TK-240305-004
+ADV23011,180.00,paid,,2024-03-05,Lego EV3 Robotics,,,,old ticket TK-240305-005
+ADV24013,180.00,paid,,2024-03-05,,,,,old ticket TK-240305-006 | Robotics
+ADV23013,150.00,paid,,2024-03-07,,,,,old ticket TK-240307-001 | Robotics
+ADV23007,160.00,paid,,2024-03-07,Lego EV3 Robotics,,,,old ticket TK-240307-002
+ADV24011,180.00,paid,,2024-03-08,Scratch,,,,old ticket TK-240308-001
+ADV24012,180.00,paid,,2024-03-08,Scratch,,,,old ticket TK-240308-002
+ADV23008,180.00,paid,,2024-03-09,Lego EV3 Robotics,,,,old ticket TK-240309-001
+ADV23041,360.00,paid,cash,2024-03-10,Lego EV3 Robotics,,,,old ticket TK-240310-001 | Cash
+ADV23024,180.00,paid,,2024-03-11,Lego EV3 Robotics,,,,old ticket TK-240311-001
+ADV23024,120.00,paid,,2024-03-11,Scratch,,,,old ticket TK-240311-002
+ADV23077,120.00,paid,,2024-03-12,Scratch,,,,old ticket TK-240312-001
+ADV23026,240.00,paid,,2024-03-12,Scratch,,,,old ticket TK-240312-002
+ADV23023,180.00,paid,,2024-03-19,Lego EV3 Robotics,,,,old ticket TK-240319-001
+ADV23023,120.00,paid,,2024-03-19,Scratch,,,,old ticket TK-240319-002
+ADV23021,540.00,paid,,2024-03-20,Lego EV3 Robotics,,,,old ticket TK-240320-001
+ADV23075,180.00,paid,,2024-03-20,Lego EV3 Robotics,,,,old ticket TK-240320-002
+ADV23049,256.00,paid,,2024-03-20,Lego EV3 Robotics,,,,old ticket TK-240320-003
+ADV23048,256.00,paid,,2024-03-20,Lego EV3 Robotics,,,,old ticket TK-240320-004
+ADV23006,324.00,paid,,2024-03-23,Lego EV3 Robotics,,,,old ticket TK-240323-001
+ADV23004,324.00,paid,,2024-03-23,Lego EV3 Robotics,,,,old ticket TK-240323-002
+ADV23005,324.00,paid,,2024-03-23,Lego EV3 Robotics,,,,old ticket TK-240323-003
+ADV0055,150.00,paid,,2024-03-27,Scratch,,,,old ticket TK-240327-001
+ADV23045,150.00,paid,,2024-03-28,Scratch,,,,old ticket TK-240328-001
+ADV24013,180.00,paid,,2024-03-29,Lego EV3 Robotics,,,,old ticket TK-240329-001
+ADV24015,486.00,paid,,2024-03-30,Scratch,,,,old ticket TK-240330-001
+ADV24016,486.00,paid,,2024-03-30,Scratch,,,,old ticket TK-240330-002
+ADV23018,180.00,paid,,2024-03-30,Lego EV3 Robotics,,,,old ticket TK-240330-003
+ADV23018,180.00,paid,,2024-03-30,Scratch,,,,old ticket TK-240330-004
+ADV23083,180.00,paid,,2024-03-30,Scratch,,,,old ticket TK-240330-005
+ADV24017,180.00,paid,,2024-03-30,Scratch,,,,old ticket TK-240330-006
+ADV23040,60.00,paid,,2024-03-31,Scratch,,,,old ticket TK-240331-001
+ADV24002,90.00,paid,,2024-03-31,Lego EV3 Robotics,,,,old ticket TK-240331-002
+ADV0014,160.00,paid,,2024-03-31,Lego EV3 Robotics,,,,old ticket TK-240331-003 | Extra RM25
+ADV23050,150.00,paid,,2024-04-01,Lego EV3 Robotics,,,,old ticket TK-240401-001
+ADV23050,150.00,paid,,2024-04-01,Scratch,,,,old ticket TK-240401-002
+ADV23050,150.00,paid,,2024-04-01,Scratch,,,,old ticket TK-240401-003
+ADV0045,150.00,paid,,2024-04-01,Lego EV3 Robotics,,,,old ticket TK-240401-004
+ADV23013,180.00,paid,,2024-04-01,Lego EV3 Robotics,,,,old ticket TK-240401-005
+ADV23011,180.00,paid,,2024-04-01,Lego EV3 Robotics,,,,old ticket TK-240401-006
+ADV23012,513.00,paid,,2024-04-02,Lego EV3 Robotics,,,,old ticket TK-240402-001
+ADV23043,90.00,paid,,2024-04-02,Scratch,,,,old ticket TK-240402-002
+ADV23085,90.00,paid,,2024-04-02,Scratch,,,,old ticket TK-240402-003
+ADV24018,180.00,paid,,2024-04-02,Lego EV3 Robotics,,,,old ticket TK-240402-004
+ADV24019,180.00,paid,,2024-04-02,Lego EV3 Robotics,,,,old ticket TK-240402-005
+ADV23035,120.00,paid,,2024-04-03,Scratch,,,,old ticket TK-240403-001
+ADV23034,120.00,paid,,2024-04-03,Scratch,,,,old ticket TK-240403-002
+ADV23030,45.00,paid,,2024-04-03,Scratch,,,,old ticket TK-240403-003
+ADV23028,120.00,paid,,2024-04-03,Scratch,,,,old ticket TK-240403-004
+ADV23027,120.00,paid,,2024-04-03,Scratch,,,,old ticket TK-240403-005
+ADV23022,60.00,paid,,2024-04-05,Scratch,,,,old ticket TK-240405-001
+ADV23076,120.00,paid,,2024-04-06,Scratch,,,,old ticket TK-240406-001
+ADV23008,180.00,paid,,2024-04-08,Lego EV3 Robotics,,,,old ticket TK-240408-001
+ADV24011,180.00,paid,,2024-04-08,Scratch,,,,old ticket TK-240408-002
+ADV24012,180.00,paid,,2024-04-08,Scratch,,,,old ticket TK-240408-003
+ADV23007,160.00,paid,,2024-04-09,Lego EV3 Robotics,,,,old ticket TK-240409-001
+ADV0057,90.00,paid,,2024-04-13,Scratch,,,,old ticket TK-240413-001
+ADV24021,180.00,paid,,2024-04-13,Lego EV3 Robotics,,,,old ticket TK-240413-002
+ADV23040,120.00,paid,,2024-04-14,Scratch,,,,old ticket TK-240414-001
+ADV24008,180.00,paid,,2024-04-15,Lego EV3 Robotics,,,,old ticket TK-240415-001
+ADV23037,60.00,paid,,2024-04-17,Scratch,,,,old ticket TK-240417-001
+ADV23023,180.00,paid,,2024-04-18,Lego EV3 Robotics,,,,old ticket TK-240418-001
+ADV23023,120.00,paid,,2024-04-18,Scratch,,,,old ticket TK-240418-002
+ADV23019,180.00,paid,,2024-04-21,Scratch,,,,old ticket TK-240421-001
+ADV23020,180.00,paid,,2024-04-21,Scratch,,,,old ticket TK-240421-002
+ADV23026,120.00,paid,,2024-04-22,Scratch,,,,old ticket TK-240422-001
+ADV23026,120.00,paid,,2024-04-22,Scratch,,,,old ticket TK-240422-002
+ADV23041,180.00,paid,,2024-04-26,Lego EV3 Robotics,,,,old ticket TK-240426-001
+ADV23045,75.00,paid,,2024-04-26,Scratch,,,,old ticket TK-240426-002
+ADV24023,513.00,paid,,2024-04-27,Lego EV3 Robotics,,,,old ticket TK-240427-001
+ADV0056,240.00,paid,cash,2024-04-27,Lego EV3 Robotics,,,,old ticket TK-240427-002 | Cash
+ADV23018,180.00,paid,,2024-04-28,Lego EV3 Robotics,,,,old ticket TK-240428-001
+ADV0014,180.00,paid,cash,2024-04-28,Lego EV3 Robotics,,,,old ticket TK-240428-002 | Cash
+ADV24024,972.00,paid,,2024-04-29,Lego EV3 Robotics,,,,old ticket TK-240429-001
+ADV24030,180.00,paid,,2024-04-29,Lego EV3 Robotics,,,,old ticket TK-240429-002
+ADV24018,180.00,paid,,2024-04-30,Lego EV3 Robotics,,,,old ticket TK-240430-001
+ADV0045,150.00,paid,,2024-04-30,Lego EV3 Robotics,,,,old ticket TK-240430-002
+ADV23018,180.00,paid,,2024-05-01,Scratch,,,,old ticket TK-240501-001
+ADV23083,180.00,paid,,2024-05-01,Scratch,,,,old ticket TK-240501-002
+ADV24025,180.00,paid,,2024-05-01,Lego EV3 Robotics,,,,old ticket TK-240501-003
+ADV23029,360.00,paid,,2024-05-01,Scratch,,,,old ticket TK-240501-004
+ADV24022,180.00,paid,,2024-05-02,Lego EV3 Robotics,,,,old ticket TK-240502-001
+ADV23050,150.00,paid,,2024-05-02,Lego EV3 Robotics,,,,old ticket TK-240502-002
+ADV23050,450.00,paid,,2024-05-02,Scratch,,,,old ticket TK-240502-003
+ADV0055,150.00,paid,,2024-05-02,Scratch,,,,old ticket TK-240502-004
+ADV23035,120.00,paid,,2024-05-03,Scratch,,,,old ticket TK-240503-001
+ADV23034,120.00,paid,,2024-05-03,Scratch,,,,old ticket TK-240503-002
+ADV24009,180.00,paid,,2024-05-03,Scratch,,,,old ticket TK-240503-003
+ADV24026,513.00,paid,,2024-05-03,Lego EV3 Robotics,,,,old ticket TK-240503-004
+ADV23013,180.00,paid,,2024-05-03,Lego EV3 Robotics,,,,old ticket TK-240503-005
+ADV24031,180.00,paid,,2024-05-03,Lego EV3 Robotics,,,,old ticket TK-240503-006
+ADV24017,180.00,paid,,2024-05-04,Scratch,,,,old ticket TK-240504-001
+ADV23011,180.00,paid,,2024-05-04,Lego EV3 Robotics,,,,old ticket TK-240504-002
+ADV24032,150.00,paid,,2024-05-06,Scratch,,,,old ticket TK-240506-001
+ADV23024,180.00,paid,,2024-05-06,Lego EV3 Robotics,,,,old ticket TK-240506-002
+ADV23024,120.00,paid,,2024-05-06,Scratch,,,,old ticket TK-240506-003
+ADV23008,180.00,paid,,2024-05-06,Lego EV3 Robotics,,,,old ticket TK-240506-004
+ADV24019,180.00,paid,,2024-05-07,Lego EV3 Robotics,,,,old ticket TK-240507-001
+ADV23037,120.00,paid,,2024-05-07,Scratch,,,,old ticket TK-240507-002
+ADV23027,120.00,paid,,2024-05-08,Scratch,,,,old ticket TK-240508-001
+ADV23028,120.00,paid,,2024-05-08,Scratch,,,,old ticket TK-240508-002
+ADV23022,120.00,paid,,2024-05-08,Scratch,,,,old ticket TK-240508-003
+ADV23042,180.00,paid,,2024-05-12,Lego EV3 Robotics,,,,old ticket TK-240512-001
+ADV24011,180.00,paid,,2024-05-12,Scratch,,,,old ticket TK-240512-002
+ADV24012,180.00,paid,,2024-05-12,Scratch,,,,old ticket TK-240512-003
+ADV23007,160.00,paid,,2024-05-13,Lego EV3 Robotics,,,,old ticket TK-240513-001
+ADV24005,180.00,paid,,2024-05-13,Scratch,,,,old ticket TK-240513-002
+ADV24029,513.00,paid,,2024-05-15,Scratch,,,,old ticket TK-240515-001
+ADV23006,324.00,paid,,2024-05-17,Lego EV3 Robotics,,,,old ticket TK-240517-001
+ADV23004,324.00,paid,,2024-05-17,Lego EV3 Robotics,,,,old ticket TK-240517-002
+ADV23005,324.00,paid,,2024-05-17,Lego EV3 Robotics,,,,old ticket TK-240517-003
+ADV24035,256.50,paid,,2024-05-19,Lego EV3 Robotics,,,,old ticket TK-240519-001
+ADV24036,256.50,paid,,2024-05-19,Lego EV3 Robotics,,,,old ticket TK-240519-002
+ADV23049,256.00,paid,,2024-05-20,Lego EV3 Robotics,,,,old ticket TK-240520-001
+ADV23048,256.00,paid,,2024-05-20,Lego EV3 Robotics,,,,old ticket TK-240520-002
+ADV23023,180.00,paid,,2024-05-21,Lego EV3 Robotics,,,,old ticket TK-240521-001
+ADV23023,120.00,paid,,2024-05-21,Scratch,,,,old ticket TK-240521-002
+ADV24013,180.00,paid,,2024-05-21,Lego EV3 Robotics,,,,old ticket TK-240521-003
+ADV23045,150.00,paid,,2024-05-22,Scratch,,,,old ticket TK-240522-001
+ADV23018,180.00,paid,,2024-05-25,Lego EV3 Robotics,,,,old ticket TK-240525-001
+ADV24021,180.00,paid,,2024-05-25,Lego EV3 Robotics,,,,old ticket TK-240525-002
+ADV24037,180.00,paid,,2024-05-26,Lego EV3 Robotics,,,,old ticket TK-240526-001
+ADV23042,180.00,paid,,2024-05-26,Lego EV3 Robotics,,,,old ticket TK-240526-002
+ADV23041,360.00,paid,,2024-05-26,Lego EV3 Robotics,,,,old ticket TK-240526-003
+ADV23050,150.00,paid,,2024-05-29,Scratch,,,,old ticket TK-240529-001
+ADV23050,150.00,paid,,2024-05-29,Scratch,,,,old ticket TK-240529-002
+ADV23050,150.00,paid,,2024-05-29,Scratch,,,,old ticket TK-240529-003
+ADV23050,150.00,paid,,2024-05-29,Lego EV3 Robotics,,,,old ticket TK-240529-004
+ADV24033,50.00,paid,,2024-05-30,,,,,old ticket TK-240530-001
+ADV24022,180.00,paid,,2024-05-30,Lego EV3 Robotics,,,,old ticket TK-240530-002
+ADV23022,50.00,paid,,2024-05-30,,,,,old ticket TK-240530-003
+ADV23040,50.00,paid,,2024-05-30,,,,,old ticket TK-240530-004
+ADV24018,180.00,paid,,2024-05-30,Lego EV3 Robotics,,,,old ticket TK-240530-005
+ADV23007,50.00,paid,,2024-05-31,,,,,old ticket TK-240531-001
+ADV23018,180.00,paid,,2024-05-31,Scratch,,,,old ticket TK-240531-002
+ADV23018,180.00,paid,,2024-05-31,Lego EV3 Robotics,,,,old ticket TK-240531-003
+ADV0045,150.00,paid,,2024-05-31,Lego EV3 Robotics,,,,old ticket TK-240531-004
+ADV23013,50.00,paid,,2024-06-01,,,,,old ticket TK-240601-001
+ADV23013,180.00,paid,,2024-06-01,Lego EV3 Robotics,,,,old ticket TK-240601-002
+ADV24040,180.00,paid,,2024-06-01,Lego EV3 Robotics,,,,old ticket TK-240601-003
+ADV23011,180.00,paid,,2024-06-01,Lego EV3 Robotics,,,,old ticket TK-240601-004
+ADV23024,180.00,paid,,2024-06-02,Lego EV3 Robotics,,,,old ticket TK-240602-001
+ADV23024,120.00,paid,,2024-06-02,Scratch,,,,old ticket TK-240602-002
+ADV24019,180.00,paid,,2024-06-03,Lego EV3 Robotics,,,,old ticket TK-240603-001
+ADV23034,120.00,paid,,2024-06-04,Scratch,,,,old ticket TK-240604-001
+ADV23035,120.00,paid,,2024-06-04,Scratch,,,,old ticket TK-240604-002
+ADV24009,50.00,paid,,2024-06-04,,,,,old ticket TK-240604-003
+ADV23027,120.00,paid,,2024-06-04,Scratch,,,,old ticket TK-240604-004
+ADV23028,120.00,paid,,2024-06-04,Scratch,,,,old ticket TK-240604-005
+ADV0055,150.00,paid,,2024-06-04,Scratch,,,,old ticket TK-240604-006
+ADV24025,513.00,paid,,2024-06-05,Lego EV3 Robotics,,,,old ticket TK-240605-001
+ADV24033,180.00,paid,,2024-06-06,Lego EV3 Robotics,,,,old ticket TK-240606-001
+ADV23022,120.00,paid,,2024-06-07,Scratch,,,,old ticket TK-240607-001
+ADV23021,540.00,paid,,2024-06-07,Lego EV3 Robotics,,,,old ticket TK-240607-002
+ADV24011,50.00,paid,,2024-06-07,,,,,old ticket TK-240607-003
+ADV24012,50.00,paid,,2024-06-07,,,,,old ticket TK-240607-004
+ADV24011,180.00,paid,,2024-06-07,Scratch,,,,old ticket TK-240607-005
+ADV24012,180.00,paid,,2024-06-07,Scratch,,,,old ticket TK-240607-006
+ADV24032,150.00,paid,,2024-06-07,Scratch,,,,old ticket TK-240607-007
+ADV24017,180.00,paid,,2024-06-08,Scratch,,,,old ticket TK-240608-001
+ADV24031,180.00,paid,,2024-06-09,Lego EV3 Robotics,,,,old ticket TK-240609-001
+ADV23008,180.00,paid,,2024-06-09,Lego EV3 Robotics,,,,old ticket TK-240609-002
+ADV23007,160.00,paid,,2024-06-12,Lego EV3 Robotics,,,,old ticket TK-240612-001
+ADV24008,180.00,paid,,2024-06-18,Lego EV3 Robotics,,,,old ticket TK-240618-001
+ADV23045,150.00,paid,,2024-06-18,Scratch,,,,old ticket TK-240618-002
+ADV24020,972.00,paid,,2024-06-20,Scratch,,,,old ticket TK-240620-001
+ADV23075,360.00,paid,,2024-06-20,Lego EV3 Robotics,,,,old ticket TK-240620-002
+ADV0056,360.00,paid,cash,2024-06-23,Lego EV3 Robotics,,,,old ticket TK-240623-001 | Cash
+ADV23040,180.00,paid,,2024-06-23,Scratch,,,,old ticket TK-240623-002
+ADV23023,120.00,paid,,2024-06-23,Scratch,,,,old ticket TK-240623-003
+ADV23085,90.00,paid,,2024-06-26,Scratch,,,,old ticket TK-240626-001
+ADV23043,120.00,paid,,2024-06-26,Scratch,,,,old ticket TK-240626-002
+ADV23085,90.00,paid,,2024-06-26,Scratch,,,,old ticket TK-240626-003
+ADV23043,120.00,paid,,2024-06-26,Scratch,,,,old ticket TK-240626-004
+ADV23085,180.00,paid,,2024-06-27,Scratch,,,,old ticket TK-240627-001
+ADV24013,70.00,paid,,2024-06-27,,,,,old ticket TK-240627-002
+ADV24013,55.00,paid,,2024-06-27,,,,,old ticket TK-240627-003
+ADV23050,150.00,paid,,2024-06-28,Scratch,,,,old ticket TK-240628-001
+ADV23050,150.00,paid,,2024-06-28,Scratch,,,,old ticket TK-240628-002
+ADV23050,150.00,paid,,2024-06-28,Scratch,,,,old ticket TK-240628-003
+ADV23050,150.00,paid,,2024-06-28,Lego EV3 Robotics,,,,old ticket TK-240628-004
+ADV23018,180.00,paid,,2024-06-29,Lego EV3 Robotics,,,,old ticket TK-240629-001
+ADV0045,150.00,paid,,2024-06-30,Lego EV3 Robotics,,,,old ticket TK-240630-001
+ADV24018,180.00,paid,,2024-07-01,Lego EV3 Robotics,,,,old ticket TK-240701-001
+ADV23013,180.00,paid,,2024-07-01,Lego EV3 Robotics,,,,old ticket TK-240701-002
+ADV24030,513.00,paid,,2024-07-01,Lego EV3 Robotics,,,,old ticket TK-240701-003
+ADV24037,180.00,paid,,2024-07-01,Lego EV3 Robotics,,,,old ticket TK-240701-004
+ADV23042,180.00,paid,,2024-07-01,Lego EV3 Robotics,,,,old ticket TK-240701-005
+ADV23011,180.00,paid,,2024-07-01,Lego EV3 Robotics,,,,old ticket TK-240701-006
+ADV24040,180.00,paid,,2024-07-02,Lego EV3 Robotics,,,,old ticket TK-240702-001
+ADV24040,125.00,paid,,2024-07-02,,,,,old ticket TK-240702-002
+ADV0055,150.00,paid,,2024-07-02,Scratch,,,,old ticket TK-240702-003
+ADV24033,180.00,paid,,2024-07-02,Lego EV3 Robotics,,,,old ticket TK-240702-004
+ADV24009,180.00,paid,,2024-07-03,Scratch,,,,old ticket TK-240703-001
+ADV23035,120.00,paid,,2024-07-03,Scratch,,,,old ticket TK-240703-002
+ADV23021,180.00,paid,,2024-07-03,Lego EV3 Robotics,,,,old ticket TK-240703-003
+ADV23034,120.00,paid,,2024-07-04,Scratch,,,,old ticket TK-240704-001
+ADV23037,240.00,paid,,2024-07-05,Scratch,,,,old ticket TK-240705-001
+ADV24022,180.00,paid,,2024-07-05,Lego EV3 Robotics,,,,old ticket TK-240705-002
+ADV23022,60.00,paid,,2024-07-06,Scratch,,,,old ticket TK-240706-001
+ADV24021,180.00,paid,,2024-07-06,Lego EV3 Robotics,,,,old ticket TK-240706-002
+ADV24017,180.00,paid,,2024-07-06,Scratch,,,,old ticket TK-240706-003
+ADV23008,180.00,paid,,2024-07-06,Lego EV3 Robotics,,,,old ticket TK-240706-004
+ADV24005,180.00,paid,,2024-07-07,Scratch,,,,old ticket TK-240707-001
+ADV24032,112.50,paid,,2024-07-07,Scratch,,,,old ticket TK-240707-002
+ADV24060,75.00,paid,,2024-07-07,Scratch,,,,old ticket TK-240707-003
+ADV24031,180.00,paid,,2024-07-08,Lego EV3 Robotics,,,,old ticket TK-240708-001
+ADV23028,120.00,paid,,2024-07-10,Scratch,,,,old ticket TK-240710-001
+ADV23027,120.00,paid,,2024-07-10,Scratch,,,,old ticket TK-240710-002
+ADV24028,45.00,paid,cash,2024-07-13,Lego EV3 Robotics,,,,old ticket TK-240713-001 | Cash
+ADV24011,180.00,paid,,2024-07-15,Scratch,,,,old ticket TK-240715-001
+ADV24012,180.00,paid,,2024-07-15,Scratch,,,,old ticket TK-240715-002
+ADV24043,513.00,paid,,2024-07-15,Lego EV3 Robotics,,,,old ticket TK-240715-003
+ADV24057,90.00,paid,,2024-07-15,Scratch,,,,old ticket TK-240715-004
+ADV24041,180.00,paid,,2024-07-15,Lego EV3 Robotics,,,,old ticket TK-240715-005
+ADV24042,180.00,paid,,2024-07-15,Lego EV3 Robotics,,,,old ticket TK-240715-006
+ADV23007,160.00,paid,,2024-07-20,Lego EV3 Robotics,,,,old ticket TK-240720-001
+ADV24008,180.00,paid,,2024-07-22,Lego EV3 Robotics,,,,old ticket TK-240722-001
+ADV24055,180.00,paid,,2024-07-22,Lego EV3 Robotics,,,,old ticket TK-240722-002
+ADV24056,180.00,paid,,2024-07-22,Lego EV3 Robotics,,,,old ticket TK-240722-003
+ADV24046,486.00,paid,,2024-07-23,Lego EV3 Robotics,,,,old ticket TK-240723-001
+ADV24047,486.00,paid,,2024-07-23,Lego EV3 Robotics,,,,old ticket TK-240723-002
+ADV0012,150.00,paid,,2024-07-26,Scratch,,,,old ticket TK-240726-001
+ADV0011,150.00,paid,,2024-07-26,Lego EV3 Robotics,,,,old ticket TK-240726-002
+ADV23018,180.00,paid,,2024-07-27,Lego EV3 Robotics,,,,old ticket TK-240727-001
+ADV23045,300.00,paid,,2024-07-28,Scratch,,,,old ticket TK-240728-001
+ADV0045,150.00,paid,,2024-07-30,Lego EV3 Robotics,,,,old ticket TK-240730-001
+ADV24018,180.00,paid,,2024-07-30,Lego EV3 Robotics,,,,old ticket TK-240730-002
+ADV23042,180.00,paid,,2024-07-31,Lego EV3 Robotics,,,,old ticket TK-240731-001
+ADV24033,180.00,paid,,2024-08-01,Lego EV3 Robotics,,,,old ticket TK-240801-001
+ADV23013,180.00,paid,,2024-08-01,Lego EV3 Robotics,,,,old ticket TK-240801-002
+ADV0055,150.00,paid,,2024-08-02,Scratch,,,,old ticket TK-240802-001
+ADV23006,324.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-002
+ADV23005,324.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-003
+ADV23004,324.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-004
+ADV23006,83.00,paid,,2024-08-02,,,,,old ticket TK-240802-005
+ADV23005,324.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-006
+ADV23004,324.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-007
+ADV23006,324.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-008 | Refunded RM750 competition
+ADV24040,180.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-009
+ADV24022,180.00,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-010
+ADV23049,256.50,paid,,2024-08-02,Lego EV3 Robotics,,,,old ticket TK-240802-011
+ADV23048,256.50,paid,,2024-08-03,Lego EV3 Robotics,,,,old ticket TK-240803-001
+ADV24017,180.00,paid,,2024-08-03,Scratch,,,,old ticket TK-240803-002
+ADV23011,180.00,paid,,2024-08-03,Lego EV3 Robotics,,,,old ticket TK-240803-003
+ADV23035,120.00,paid,,2024-08-03,Scratch,,,,old ticket TK-240803-004
+ADV24021,180.00,paid,,2024-08-04,Lego EV3 Robotics,,,,old ticket TK-240804-001
+ADV23019,180.00,paid,,2024-08-04,Scratch,,,,old ticket TK-240804-002
+ADV23020,180.00,paid,,2024-08-04,Scratch,,,,old ticket TK-240804-003
+ADV24054,180.00,paid,,2024-08-04,Lego EV3 Robotics,,,,old ticket TK-240804-004
+ADV24057,180.00,paid,,2024-08-04,Scratch,,,,old ticket TK-240804-005 | Touch and Go
+ADV23008,180.00,paid,,2024-08-04,Lego EV3 Robotics,,,,old ticket TK-240804-006 | Touch and Go
+ADV23034,120.00,paid,,2024-08-06,Scratch,,,,old ticket TK-240806-001
+ADV23022,60.00,paid,,2024-08-06,Scratch,,,,old ticket TK-240806-002
+ADV24061,180.00,paid,,2024-08-08,Lego EV3 Robotics,,,,old ticket TK-240808-001
+ADV24031,180.00,paid,,2024-08-10,Lego EV3 Robotics,,,,old ticket TK-240810-001
+ADV0056,240.00,paid,cash,2024-08-10,Lego EV3 Robotics,,,,old ticket TK-240810-002 | Cash
+ADV24023,513.00,paid,,2024-08-11,Lego EV3 Robotics,,,,old ticket TK-240811-001
+ADV24011,180.00,paid,,2024-08-11,Scratch,,,,old ticket TK-240811-002
+ADV24012,180.00,paid,,2024-08-11,Scratch,,,,old ticket TK-240811-003
+ADV24062,180.00,paid,,2024-08-12,Lego EV3 Robotics,,,,old ticket TK-240812-001
+ADV23024,120.00,paid,,2024-08-13,Scratch,,,,old ticket TK-240813-001
+ADV24013,180.00,paid,,2024-08-15,Lego EV3 Robotics,,,,old ticket TK-240815-001
+ADV24059,180.00,paid,,2024-08-19,Lego EV3 Robotics,,,,old ticket TK-240819-001
+ADV24042,180.00,paid,,2024-08-19,Lego EV3 Robotics,,,,old ticket TK-240819-002
+ADV23041,180.00,paid,,2024-08-20,Lego EV3 Robotics,,,,old ticket TK-240820-001
+ADV23024,480.00,paid,,2024-08-22,Scratch,,,,old ticket TK-240822-002
+ADV23024,720.00,paid,,2024-08-22,Lego EV3 Robotics,,,,old ticket TK-240822-003
+ADV24013,180.00,paid,,2024-08-22,Lego EV3 Robotics,,,,old ticket TK-240822-004
+ADV24026,972.00,paid,,2024-08-22,Lego EV3 Robotics,,,,old ticket TK-240822-005
+ADV23075,360.00,paid,,2024-08-23,Lego EV3 Robotics,,,,old ticket TK-240823-001
+ADV23029,480.00,paid,,2024-08-23,Scratch,,,,old ticket TK-240823-002
+ADV24056,256.50,paid,,2024-08-24,Lego EV3 Robotics,,,,old ticket TK-240824-001 | Touch and Go
+ADV24055,256.50,paid,,2024-08-24,Lego EV3 Robotics,,,,old ticket TK-240824-002 | Touch and Go
+ADV24008,180.00,paid,,2024-08-24,Lego EV3 Robotics,,,,old ticket TK-240824-003 | Grab
+ADV23007,160.00,paid,,2024-08-24,Lego EV3 Robotics,,,,old ticket TK-240824-004
+ADV24063,513.00,paid,,2024-08-25,Lego EV3 Robotics,,,,old ticket TK-240825-001 | Touch and Go
+ADV24005,180.00,paid,,2024-08-25,Scratch,,,,old ticket TK-240825-002 | Touch and Go
+ADV24036,256.50,paid,,2024-08-25,Lego EV3 Robotics,,,,old ticket TK-240825-003
+ADV24035,256.50,paid,,2024-08-25,Lego EV3 Robotics,,,,old ticket TK-240825-004
+ADV23042,180.00,paid,,2024-08-26,Lego EV3 Robotics,,,,old ticket TK-240826-001
+ADV23045,225.00,paid,,2024-08-28,Scratch,,,,old ticket TK-240828-001
+ADV24033,180.00,paid,,2024-08-29,Lego EV3 Robotics,,,,old ticket TK-240829-001
+ADV24064,180.00,paid,cash,2024-08-29,Lego EV3 Robotics,,,,old ticket TK-240829-002 | Cash
+ADV24018,180.00,paid,,2024-08-30,Lego EV3 Robotics,,,,old ticket TK-240830-001
+ADV24032,150.00,paid,,2024-09-01,Scratch,,,,old ticket TK-240901-001
+ADV24060,150.00,paid,,2024-09-01,Scratch,,,,old ticket TK-240901-002
+ADV0055,150.00,paid,,2024-09-02,Scratch,,,,old ticket TK-240902-001
+ADV0045,150.00,paid,,2024-09-02,Lego EV3 Robotics,,,,old ticket TK-240902-002
+ADV24068,180.00,paid,,2024-09-02,Lego EV3 Robotics,,,,old ticket TK-240902-003 | Touch and Go
+ADV24057,180.00,paid,,2024-09-02,Scratch,,,,old ticket TK-240902-004 | Touch and Go
+ADV23034,120.00,paid,,2024-09-03,Scratch,,,,old ticket TK-240903-001
+ADV23040,210.00,paid,,2024-09-03,Scratch,,,,old ticket TK-240903-002
+ADV23035,120.00,paid,,2024-09-04,Scratch,,,,old ticket TK-240904-001
+ADV23022,60.00,paid,,2024-09-04,Scratch,,,,old ticket TK-240904-002
+ADV23027,120.00,paid,,2024-09-04,Scratch,,,,old ticket TK-240904-003
+ADV23028,120.00,paid,,2024-09-04,Scratch,,,,old ticket TK-240904-004
+ADV24066,180.00,paid,,2024-09-06,Lego EV3 Robotics,,,,old ticket TK-240906-001
+ADV24067,180.00,paid,,2024-09-06,Lego EV3 Robotics,,,,old ticket TK-240906-002
+ADV24061,180.00,paid,,2024-09-06,Lego EV3 Robotics,,,,old ticket TK-240906-003
+ADV24054,180.00,paid,,2024-09-06,Lego EV3 Robotics,,,,old ticket TK-240906-004 | Touch and Go
+ADV24009,360.00,paid,,2024-09-06,Scratch,,,,old ticket TK-240906-005
+ADV24025,513.00,paid,,2024-09-06,Lego EV3 Robotics,,,,old ticket TK-240906-006
+ADV24022,180.00,paid,,2024-09-06,Lego EV3 Robotics,,,,old ticket TK-240906-007
+ADV23011,180.00,paid,,2024-09-07,Lego EV3 Robotics,,,,old ticket TK-240907-001
+ADV23018,180.00,paid,,2024-09-08,Lego EV3 Robotics,,,,old ticket TK-240908-001
+ADV23008,180.00,paid,,2024-09-09,Lego EV3 Robotics,,,,old ticket TK-240909-001 | Touch and Go
+ADV24065,180.00,paid,,2024-09-09,Lego EV3 Robotics,,,,old ticket TK-240909-002 | Touch and Go
+ADV24005,20.00,paid,,2024-09-09,Scratch,,,,old ticket TK-240909-003 | Touch and Go
+ADV24031,180.00,paid,,2024-09-09,Lego EV3 Robotics,,,,old ticket TK-240909-004
+ADV23037,171.80,paid,,2024-09-13,Scratch,,,,old ticket TK-240913-001 | Stripe Payment
+ADV24021,180.00,paid,,2024-09-14,Lego EV3 Robotics,,,,old ticket TK-240914-001
+ADV24005,158.40,paid,bank_transfer,2024-09-18,Scratch,,,,old ticket TK-240918-001 | Boost Payment
+ADV24066,80.00,paid,,2024-09-19,,,,,old ticket TK-240919-001 | Roblox Bootcamp
+ADV24022,80.00,paid,,2024-09-19,,,,,old ticket TK-240919-002 | Roblox Bootcamp
+ADV24068,80.00,paid,,2024-09-19,,,,,old ticket TK-240919-003 | Roblox Bootcamp
+ADV0022,120.00,paid,,2024-09-19,,,,,old ticket TK-240919-004 | Roblox Bootcamp
+ADV24037,160.00,paid,,2024-09-19,,,,,old ticket TK-240919-005 | Roblox Bootcamp
+ADV23063,80.00,paid,,2024-09-19,,,,,old ticket TK-240919-006 | Touch and Go
+ADV24064,180.00,paid,,2024-09-27,Lego EV3 Robotics,,,,old ticket TK-240927-001
+ADV23007,160.00,paid,,2024-09-28,Lego EV3 Robotics,,,,old ticket TK-240928-001
+ADV24059,180.00,paid,,2024-09-28,Lego EV3 Robotics,,,,old ticket TK-240928-002
+ADV24018,180.00,paid,,2024-09-30,Lego EV3 Robotics,,,,old ticket TK-240930-001
+ADV23042,180.00,paid,,2024-09-30,Lego EV3 Robotics,,,,old ticket TK-240930-002
+ADV23045,300.00,paid,,2024-09-30,Scratch,,,,old ticket TK-240930-003
+ADV23043,120.00,paid,,2024-09-30,Scratch,,,,old ticket TK-240930-004
+ADV23085,210.00,paid,,2024-09-30,Scratch,,,,old ticket TK-240930-005
+ADV23023,180.00,paid,bank_transfer,2024-09-30,Lego EV3 Robotics,,,,old ticket TK-240930-006 | Grab - TNG
+ADV0055,150.00,paid,,2024-10-01,Scratch,,,,old ticket TK-241001-001
+ADV23034,120.00,paid,,2024-10-02,Scratch,,,,old ticket TK-241002-002
+ADV24066,180.00,paid,,2024-10-02,Lego EV3 Robotics,,,,old ticket TK-241002-003
+ADV24067,180.00,paid,,2024-10-02,Lego EV3 Robotics,,,,old ticket TK-241002-004
+ADV0045,150.00,paid,,2024-10-02,Lego EV3 Robotics,,,,old ticket TK-241002-005
+ADV23035,120.00,paid,,2024-10-04,Scratch,,,,old ticket TK-241004-001
+ADV24031,180.00,paid,,2024-10-04,Lego EV3 Robotics,,,,old ticket TK-241004-002
+ADV24022,180.00,paid,,2024-10-04,Lego EV3 Robotics,,,,old ticket TK-241004-003
+ADV23038,513.00,paid,,2024-10-04,Lego EV3 Robotics,,,,old ticket TK-241004-004
+ADV24008,180.00,paid,,2024-10-05,Lego EV3 Robotics,,,,old ticket TK-241005-001
+ADV23011,180.00,paid,,2024-10-05,Lego EV3 Robotics,,,,old ticket TK-241005-002
+ADV24035,256.50,paid,,2024-10-05,Lego EV3 Robotics,,,,old ticket TK-241005-003
+ADV24036,256.50,paid,,2024-10-05,Lego EV3 Robotics,,,,old ticket TK-241005-004
+ADV0027,180.00,paid,,2024-10-05,Scratch,,,,old ticket TK-241005-005 | Touch and Go
+ADV24080,180.00,paid,,2024-10-05,Lego EV3 Robotics,,,,old ticket TK-241005-006 | Touch and Go
+ADV24042,180.00,paid,,2024-10-05,Lego EV3 Robotics,,,,old ticket TK-241005-007 | Touch and Go
+ADV24057,180.00,paid,,2024-10-06,Scratch,,,,old ticket TK-241006-001 | Touch and Go
+ADV23008,180.00,paid,,2024-10-06,Lego EV3 Robotics,,,,old ticket TK-241006-002 | Touch and Go
+ADV23018,180.00,paid,,2024-10-06,Lego EV3 Robotics,,,,old ticket TK-241006-003
+ADV24032,150.00,paid,,2024-10-06,Scratch,,,,old ticket TK-241006-004
+ADV24060,150.00,paid,,2024-10-06,Scratch,,,,old ticket TK-241006-005
+ADV24011,180.00,paid,,2024-10-07,Scratch,,,,old ticket TK-241007-001
+ADV24012,180.00,paid,,2024-10-07,Scratch,,,,old ticket TK-241007-002
+ADV23022,90.00,paid,,2024-10-08,Scratch,,,,old ticket TK-241008-001
+ADV24040,180.00,paid,,2024-10-08,Lego EV3 Robotics,,,,old ticket TK-241008-002
+ADV23019,180.00,paid,,2024-10-11,Scratch,,,,old ticket TK-241011-001
+ADV23020,180.00,paid,,2024-10-11,Scratch,,,,old ticket TK-241011-002
+ADV0012,150.00,paid,,2024-10-11,Scratch,,,,old ticket TK-241011-003
+ADV0011,150.00,paid,,2024-10-11,Lego EV3 Robotics,,,,old ticket TK-241011-004
+ADV24033,180.00,paid,,2024-10-11,Lego EV3 Robotics,,,,old ticket TK-241011-005
+ADV23049,256.50,paid,,2024-10-12,Lego EV3 Robotics,,,,old ticket TK-241012-001
+ADV23048,256.50,paid,,2024-10-12,Lego EV3 Robotics,,,,old ticket TK-241012-002
+ADV23041,360.00,paid,,2024-10-13,Lego EV3 Robotics,,,,old ticket TK-241013-001
+ADV23041,180.00,paid,,2024-10-13,Lego EV3 Robotics,,,,old ticket TK-241013-002
+ADV24068,180.00,paid,,2024-10-13,Lego EV3 Robotics,,,,old ticket TK-241013-003
+ADV24013,180.00,paid,,2024-10-17,Lego EV3 Robotics,,,,old ticket TK-241017-001
+ADV24061,180.00,paid,,2024-10-18,Lego EV3 Robotics,,,,old ticket TK-241018-001 | Touch and Go
+ADV23007,160.00,paid,,2024-10-19,Lego EV3 Robotics,,,,old ticket TK-241019-001
+ADV24054,180.00,paid,promptpay,2024-10-19,Lego EV3 Robotics,,,,old ticket TK-241019-002 | Maybank QR
+ADV24056,180.00,paid,,2024-10-19,Lego EV3 Robotics,,,,old ticket TK-241019-003 | Touch and Go
+ADV24055,180.00,paid,,2024-10-19,Lego EV3 Robotics,,,,old ticket TK-241019-004 | Touch and Go
+ADV23040,150.00,paid,,2024-10-20,Scratch,,,,old ticket TK-241020-001 | Touch and Go
+ADV23084,180.00,paid,,2024-10-20,Lego EV3 Robotics,,,,old ticket TK-241020-002 | Touch and Go
+ADV23084,120.00,paid,,2024-10-20,Scratch,,,,old ticket TK-241020-003 | Touch and Go
+ADV23084,120.00,paid,,2024-10-20,Scratch,,,,old ticket TK-241020-004 | Touch and Go
+ADV24013,180.00,paid,,2024-10-23,Lego EV3 Robotics,,,,old ticket TK-241023-001
+ADV24046,486.00,paid,,2024-10-25,Lego EV3 Robotics,,,,old ticket TK-241025-001
+ADV24047,486.00,paid,,2024-10-25,Lego EV3 Robotics,,,,old ticket TK-241025-002
+ADV23021,360.00,paid,,2024-10-27,Lego EV3 Robotics,,,,old ticket TK-241027-001
+ADV0047,180.00,paid,,2024-10-29,Lego EV3 Robotics,,,,old ticket TK-241029-002
+ADV24009,180.00,paid,,2024-10-30,Scratch,,,,old ticket TK-241030-001
+ADV23042,180.00,paid,,2024-10-31,Lego EV3 Robotics,,,,old ticket TK-241031-001
+ADV24018,180.00,paid,,2024-11-01,Lego EV3 Robotics,,,,old ticket TK-241101-001
+ADV23037,229.40,paid,,2024-11-01,Scratch,,,,old ticket TK-241101-002 | Stripe Payment
+ADV24042,180.00,paid,,2024-11-01,Lego EV3 Robotics,,,,old ticket TK-241101-003
+ADV23011,180.00,paid,,2024-11-01,Lego EV3 Robotics,,,,old ticket TK-241101-004
+ADV24022,180.00,paid,,2024-11-02,Lego EV3 Robotics,,,,old ticket TK-241102-001
+ADV0055,150.00,paid,,2024-11-02,Scratch,,,,old ticket TK-241102-002
+ADV24021,360.00,paid,,2024-11-02,Lego EV3 Robotics,,,,old ticket TK-241102-003
+ADV23034,120.00,paid,,2024-11-02,Scratch,,,,old ticket TK-241102-004
+ADV24068,180.00,paid,,2024-11-03,Lego EV3 Robotics,,,,old ticket TK-241103-001 | Touch and Go
+ADV0056,240.00,paid,cash,2024-11-03,Lego EV3 Robotics,,,,old ticket TK-241103-002 | Cash
+ADV23035,120.00,paid,,2024-11-04,Scratch,,,,old ticket TK-241104-001
+ADV24040,180.00,paid,,2024-11-05,Lego EV3 Robotics,,,,old ticket TK-241105-001
+ADV23022,90.00,paid,,2024-11-05,Scratch,,,,old ticket TK-241105-002
+ADV24031,180.00,paid,,2024-11-05,Lego EV3 Robotics,,,,old ticket TK-241105-003
+ADV0045,150.00,paid,,2024-11-06,Lego EV3 Robotics,,,,old ticket TK-241106-001
+ADV24065,180.00,paid,,2024-11-07,Lego EV3 Robotics,,,,old ticket TK-241107-001
+ADV24011,225.00,paid,,2024-11-07,Scratch,,,,old ticket TK-241107-002
+ADV24012,180.00,paid,,2024-11-07,Scratch,,,,old ticket TK-241107-003
+ADV23007,160.00,paid,,2024-11-08,Lego EV3 Robotics,,,,old ticket TK-241108-001
+ADV24033,180.00,paid,,2024-11-08,Lego EV3 Robotics,,,,old ticket TK-241108-002
+ADV23008,180.00,paid,,2024-11-10,Lego EV3 Robotics,,,,old ticket TK-241110-001
+ADV24032,150.00,paid,,2024-11-10,Scratch,,,,old ticket TK-241110-002
+ADV24060,150.00,paid,,2024-11-10,Scratch,,,,old ticket TK-241110-003
+ADV24064,180.00,paid,,2024-11-15,Lego EV3 Robotics,,,,old ticket TK-241115-001 | Touch and Go
+ADV0012,150.00,paid,,2024-11-15,Scratch,,,,old ticket TK-241115-002
+ADV0011,150.00,paid,,2024-11-15,Lego EV3 Robotics,,,,old ticket TK-241115-003
+ADV23020,180.00,paid,,2024-11-15,Scratch,,,,old ticket TK-241115-004
+ADV23019,180.00,paid,,2024-11-15,Scratch,,,,old ticket TK-241115-005
+ADV23075,180.00,paid,,2024-11-15,Lego EV3 Robotics,,,,old ticket TK-241115-006
+ADV23018,180.00,paid,,2024-11-16,Lego EV3 Robotics,,,,old ticket TK-241116-001
+ADV24013,180.00,paid,,2024-11-17,Lego EV3 Robotics,,,,old ticket TK-241117-001
+ADV24059,180.00,paid,,2024-11-18,Lego EV3 Robotics,,,,old ticket TK-241118-001 | Touch and Go
+ADV24038,180.00,paid,,2024-11-18,Lego EV3 Robotics,,,,old ticket TK-241118-002
+ADV23041,360.00,paid,,2024-11-19,Lego EV3 Robotics,,,,old ticket TK-241119-001
+ADV24081,180.00,paid,,2024-11-22,Lego EV3 Robotics,,,,old ticket TK-241122-001
+ADV24082,513.00,paid,,2024-11-24,Lego EV3 Robotics,,,,old ticket TK-241124-001
+ADV0027,256.50,paid,,2024-11-24,Scratch,,,,old ticket TK-241124-002
+ADV24080,256.50,paid,,2024-11-24,Lego EV3 Robotics,,,,old ticket TK-241124-003
+ADV23045,150.00,paid,,2024-11-28,Scratch,,,,old ticket TK-241128-001
+ADV0045,150.00,paid,,2024-11-29,Lego EV3 Robotics,,,,old ticket TK-241129-001
+ADV24066,180.00,paid,,2024-11-29,Lego EV3 Robotics,,,,old ticket TK-241129-003
+ADV24067,180.00,paid,,2024-11-29,Lego EV3 Robotics,,,,old ticket TK-241129-004
+ADV24061,180.00,paid,bank_transfer,2024-11-29,Lego EV3 Robotics,,,,old ticket TK-241129-005 | Virtual Banking
+ADV24018,180.00,paid,,2024-12-01,Lego EV3 Robotics,,,,old ticket TK-241201-001
+ADV24005,180.00,paid,,2024-12-01,Scratch,,,,old ticket TK-241201-002
+ADV23040,120.00,paid,,2024-12-01,Scratch,,,,old ticket TK-241201-003
+ADV24040,180.00,paid,,2024-12-01,Lego EV3 Robotics,,,,old ticket TK-241201-004
+ADV24059,180.00,paid,,2024-12-02,Lego EV3 Robotics,,,,old ticket TK-241202-001 | Touch and Go
+ADV0055,150.00,paid,,2024-12-02,Scratch,,,,old ticket TK-241202-002
+ADV23034,120.00,paid,,2024-12-02,Scratch,,,,old ticket TK-241202-003
+ADV23029,480.00,paid,,2024-12-02,Scratch,,,,old ticket TK-241202-004
+ADV23042,180.00,paid,,2024-12-02,Lego EV3 Robotics,,,,old ticket TK-241202-005
+ADV23019,180.00,paid,,2024-12-03,Scratch,,,,old ticket TK-241203-001
+ADV23020,180.00,paid,,2024-12-03,Scratch,,,,old ticket TK-241203-002
+ADV23035,120.00,paid,,2024-12-04,Scratch,,,,old ticket TK-241204-001
+ADV0047,513.00,paid,,2024-12-05,Lego EV3 Robotics,,,,old ticket TK-241205-001
+ADV24009,180.00,paid,,2024-12-06,Scratch,,,,old ticket TK-241206-001
+ADV24056,256.50,paid,,2024-12-07,Lego EV3 Robotics,,,,old ticket TK-241207-001
+ADV24055,256.50,paid,,2024-12-07,Lego EV3 Robotics,,,,old ticket TK-241207-002
+ADV24022,180.00,paid,,2024-12-07,Lego EV3 Robotics,,,,old ticket TK-241207-003
+ADV23048,256.50,paid,,2024-12-07,Lego EV3 Robotics,,,,old ticket TK-241207-004
+ADV23049,256.50,paid,,2024-12-07,Lego EV3 Robotics,,,,old ticket TK-241207-005
+ADV24042,180.00,paid,,2024-12-07,Lego EV3 Robotics,,,,old ticket TK-241207-006
+ADV23011,180.00,paid,,2024-12-07,Lego EV3 Robotics,,,,old ticket TK-241207-007
+ADV24087,180.00,paid,,2024-12-07,Scratch,,,,old ticket TK-241207-008
+ADV24031,180.00,paid,,2024-12-08,Lego EV3 Robotics,,,,old ticket TK-241208-001
+ADV24083,180.00,paid,,2024-12-08,Lego EV3 Robotics,,,,old ticket TK-241208-002
+ADV24057,180.00,paid,,2024-12-08,Scratch,,,,old ticket TK-241208-003
+ADV23084,180.00,paid,,2024-12-08,Lego EV3 Robotics,,,,old ticket TK-241208-004
+ADV23084,120.00,paid,,2024-12-08,Scratch,,,,old ticket TK-241208-005
+ADV23008,180.00,paid,,2024-12-08,Lego EV3 Robotics,,,,old ticket TK-241208-006
+ADV23085,390.00,paid,,2024-12-09,Scratch,,,,old ticket TK-241209-001
+ADV23043,240.00,paid,,2024-12-09,Scratch,,,,old ticket TK-241209-002
+ADV24054,180.00,paid,,2024-12-12,Lego EV3 Robotics,,,,old ticket TK-241212-001
+ADV24033,180.00,paid,,2024-12-13,Lego EV3 Robotics,,,,old ticket TK-241213-001
+ADV24013,180.00,paid,,2024-12-13,Lego EV3 Robotics,,,,old ticket TK-241213-002
+ADV23021,360.00,paid,,2024-12-13,Lego EV3 Robotics,,,,old ticket TK-241213-003
+ADV24081,180.00,paid,,2024-12-13,Lego EV3 Robotics,,,,old ticket TK-241213-004
+ADV23022,60.00,paid,,2024-12-14,Scratch,,,,old ticket TK-241214-001
+ADV24091,180.00,paid,,2024-12-15,Lego EV3 Robotics,,,,old ticket TK-241215-001
+ADV24092,180.00,paid,,2024-12-15,Lego EV3 Robotics,,,,old ticket TK-241215-002
+ADV23007,160.00,paid,,2024-12-17,Lego EV3 Robotics,,,,old ticket TK-241217-001
+ADV24097,200.00,paid,,2024-12-18,,,,,old ticket TK-241218-001
+ADV24008,180.00,paid,,2024-12-18,Lego EV3 Robotics,,,,old ticket TK-241218-002
+ADV24064,180.00,paid,,2024-12-20,,,,,old ticket TK-241220-001
+ADV24095,200.00,paid,,2024-12-20,,,,,old ticket TK-241220-002
+ADV24096,200.00,paid,,2024-12-20,,,,,old ticket TK-241220-003
+ADV24088,180.00,paid,,2024-12-22,Lego EV3 Robotics,,,,old ticket TK-241222-001
+ADV0014,900.00,paid,,2024-12-22,Scratch,,,,old ticket TK-241222-002
+ADV23018,90.00,paid,,2024-12-22,,,,,old ticket TK-241222-003
+ADV24038,180.00,paid,,2024-12-22,Lego EV3 Robotics,,,,old ticket TK-241222-004
+ADV24038,180.00,paid,,2024-12-22,,,,,old ticket TK-241222-005
+ADV24030,180.00,paid,,2024-12-22,Lego EV3 Robotics,,,,old ticket TK-241222-006
+ADV23084,180.00,paid,,2024-12-23,,,,,old ticket TK-241223-001
+ADV24005,180.00,paid,,2024-12-23,,,,,old ticket TK-241223-002
+ADV24089,180.00,paid,,2024-12-23,Lego EV3 Robotics,,,,old ticket TK-241223-003
+ADV0047,180.00,paid,,2024-12-24,,,,,old ticket TK-241224-001
+ADV24066,180.00,paid,,2024-12-26,,,,,old ticket TK-241226-001
+ADV23013,180.00,paid,,2024-12-26,,,,,old ticket TK-241226-002
+ADV24081,180.00,paid,,2024-12-27,,,,,old ticket TK-241227-001
+ADV24090,180.00,paid,,2024-12-27,Lego EV3 Robotics,,,,old ticket TK-241227-002
+ADV24061,180.00,paid,,2024-12-27,Lego EV3 Robotics,,,,old ticket TK-241227-003
+ADV23006,324.00,paid,,2024-12-28,Lego EV3 Robotics,,,,old ticket TK-241228-001
+ADV23004,324.00,paid,,2024-12-28,Lego EV3 Robotics,,,,old ticket TK-241228-002
+ADV23005,324.00,paid,,2024-12-28,Lego EV3 Robotics,,,,old ticket TK-241228-003
+ADV23045,300.00,paid,,2024-12-28,Scratch,,,,old ticket TK-241228-004
+ADV23018,180.00,paid,,2024-12-29,Lego EV3 Robotics,,,,old ticket TK-241229-001
+ADV0055,150.00,paid,,2024-12-30,Scratch,,,,old ticket TK-241230-001
+ADV24018,180.00,paid,,2024-12-30,Lego EV3 Robotics,,,,old ticket TK-241230-002
+ADV0045,150.00,paid,,2024-12-31,Lego EV3 Robotics,,,,old ticket TK-241231-001
+ADV24040,180.00,paid,,2025-01-02,Lego EV3 Robotics,,,,old ticket TK-250102-001
+ADV23034,120.00,paid,,2025-01-03,Scratch,,,,old ticket TK-250103-001
+ADV23035,120.00,paid,,2025-01-03,Scratch,,,,old ticket TK-250103-002
+ADV24064,180.00,paid,,2025-01-03,Lego EV3 Robotics,,,,old ticket TK-250103-003
+ADV24022,180.00,paid,,2025-01-04,Lego EV3 Robotics,,,,old ticket TK-250104-001
+ADV23011,180.00,paid,,2025-01-04,Lego EV3 Robotics,,,,old ticket TK-250104-002
+ADV24066,180.00,paid,,2025-01-04,Lego EV3 Robotics,,,,old ticket TK-250104-003
+ADV24087,180.00,paid,,2025-01-06,Scratch,,,,old ticket TK-250106-001
+ADV24085,180.00,paid,,2025-01-06,Scratch,,,,old ticket TK-250106-002
+ADV23075,360.00,paid,,2025-01-06,Lego EV3 Robotics,,,,old ticket TK-250106-003
+ADV24093,45.00,paid,,2025-01-06,Lego EV3 Robotics,,,,old ticket TK-250106-004
+ADV23013,180.00,paid,,2025-01-06,Lego EV3 Robotics,,,,old ticket TK-250106-005
+ADV23040,150.00,paid,,2025-01-07,Scratch,,,,old ticket TK-250107-001
+ADV23019,180.00,paid,,2025-01-07,Scratch,,,,old ticket TK-250107-002
+ADV23020,180.00,paid,,2025-01-07,Scratch,,,,old ticket TK-250107-003
+ADV23042,180.00,paid,,2025-01-07,Lego EV3 Robotics,,,,old ticket TK-250107-004
+ADV23022,90.00,paid,,2025-01-09,Scratch,,,,old ticket TK-250109-001
+ADV23012,513.00,paid,,2025-01-10,Lego EV3 Robotics,,,,old ticket TK-250110-001
+ADV24032,486.00,paid,,2025-01-11,Scratch,,,,old ticket TK-250111-001
+ADV24060,486.00,paid,,2025-01-11,Lego EV3 Robotics,,,,old ticket TK-250111-002
+ADV25001,513.00,paid,,2025-01-11,Lego EV3 Robotics,,,,old ticket TK-250111-003
+ADV23084,180.00,paid,,2025-01-12,Lego EV3 Robotics,,,,old ticket TK-250112-001
+ADV23084,120.00,paid,,2025-01-12,Scratch,,,,old ticket TK-250112-002
+ADV25002,243.00,paid,,2025-01-12,Lego EV3 Robotics,,,,old ticket TK-250112-003
+ADV25002,243.00,paid,,2025-01-12,Scratch,,,,old ticket TK-250112-004
+ADV25003,243.00,paid,,2025-01-12,Lego EV3 Robotics,,,,old ticket TK-250112-005
+ADV25003,243.00,paid,,2025-01-12,Scratch,,,,old ticket TK-250112-006
+ADV24092,135.00,paid,,2025-01-12,Lego EV3 Robotics,,,,old ticket TK-250112-007
+ADV24059,180.00,paid,,2025-01-13,Lego EV3 Robotics,,,,old ticket TK-250113-001
+ADV23007,160.00,paid,,2025-01-14,Lego EV3 Robotics,,,,old ticket TK-250114-001
+ADV24024,972.00,paid,,2025-01-14,Lego EV3 Robotics,,,,old ticket TK-250114-002
+ADV23041,180.00,paid,,2025-01-14,Lego EV3 Robotics,,,,old ticket TK-250114-003
+ADV0012,150.00,paid,,2025-01-17,Scratch,,,,old ticket TK-250117-001
+ADV0011,150.00,paid,,2025-01-17,Lego EV3 Robotics,,,,old ticket TK-250117-002
+ADV23038,972.00,paid,,2025-01-17,Lego EV3 Robotics,,,,old ticket TK-250117-003
+ADV24009,180.00,paid,,2025-01-17,Scratch,,,,old ticket TK-250117-004
+ADV24026,972.00,paid,,2025-01-18,Lego EV3 Robotics,,,,old ticket TK-250118-001
+ADV25006,972.00,paid,,2025-01-18,Lego EV3 Robotics,,,,old ticket TK-250118-002
+ADV25007,180.00,paid,,2025-01-18,Lego EV3 Robotics,,,,old ticket TK-250118-003
+ADV24091,180.00,paid,,2025-01-19,Lego EV3 Robotics,,,,old ticket TK-250119-001
+ADV23008,180.00,paid,,2025-01-19,Lego EV3 Robotics,,,,old ticket TK-250119-002 | Touch and Go
+ADV24090,180.00,paid,,2025-01-20,Lego EV3 Robotics,,,,old ticket TK-250120-001
+ADV25008,180.00,paid,,2025-01-22,Lego EV3 Robotics,,,,old ticket TK-250122-001
+ADV24038,180.00,paid,,2025-01-22,Lego EV3 Robotics,,,,old ticket TK-250122-002
+ADV24021,360.00,paid,,2025-01-25,Lego EV3 Robotics,,,,old ticket TK-250125-001
+ADV24089,180.00,paid,,2025-01-27,Lego EV3 Robotics,,,,old ticket TK-250127-001 | Touch and Go
+ADV24081,180.00,paid,,2025-01-27,Lego EV3 Robotics,,,,old ticket TK-250127-002
+ADV0045,150.00,paid,,2025-01-28,Lego EV3 Robotics,,,,old ticket TK-250128-001
+ADV23085,180.00,paid,,2025-01-28,Scratch,,,,old ticket TK-250128-002
+ADV23043,210.00,paid,,2025-01-28,Scratch,,,,old ticket TK-250128-003
+ADV23045,150.00,paid,,2025-01-28,Scratch,,,,old ticket TK-250128-004
+ADV24018,180.00,paid,,2025-01-31,Lego EV3 Robotics,,,,old ticket TK-250131-001
+ADV0055,150.00,paid,,2025-02-02,Scratch,,,,old ticket TK-250202-001
+ADV24033,180.00,paid,,2025-02-02,Lego EV3 Robotics,,,,old ticket TK-250202-002
+ADV23035,120.00,paid,,2025-02-03,Scratch,,,,old ticket TK-250203-001
+ADV23034,120.00,paid,,2025-02-03,Scratch,,,,old ticket TK-250203-002
+ADV24066,180.00,paid,,2025-02-03,Lego EV3 Robotics,,,,old ticket TK-250203-003
+ADV24042,180.00,paid,,2025-02-05,Lego EV3 Robotics,,,,old ticket TK-250205-001
+ADV23022,30.00,paid,,2025-02-06,Scratch,,,,old ticket TK-250206-001
+ADV25009,180.00,paid,,2025-02-07,Scratch,,,,old ticket TK-250207-001
+ADV24061,360.00,paid,,2025-02-07,Lego EV3 Robotics,,,,old ticket TK-250207-002
+ADV24022,180.00,paid,,2025-02-08,Lego EV3 Robotics,,,,old ticket TK-250208-001
+ADV24057,180.00,paid,,2025-02-08,Scratch,,,,old ticket TK-250208-002
+ADV24008,180.00,paid,,2025-02-08,Lego EV3 Robotics,,,,old ticket TK-250208-003 | Touch and Go
+ADV25005,256.50,paid,cash,2025-02-09,Lego EV3 Robotics,,,,old ticket TK-250209-001 | Cash
+ADV25004,256.50,paid,cash,2025-02-09,Lego EV3 Robotics,,,,old ticket TK-250209-002 | Cash
+ADV0056,360.00,paid,,2025-02-09,Lego EV3 Robotics,,,,old ticket TK-250209-003
+ADV24005,180.00,paid,,2025-02-09,Scratch,,,,old ticket TK-250209-004
+ADV23007,160.00,paid,,2025-02-12,Lego EV3 Robotics,,,,old ticket TK-250212-001
+ADV24009,180.00,paid,,2025-02-17,Scratch,,,,old ticket TK-250217-001
+ADV24031,180.00,paid,,2025-02-19,Lego EV3 Robotics,,,,old ticket TK-250219-001
+ADV24064,180.00,paid,,2025-02-20,Lego EV3 Robotics,,,,old ticket TK-250220-001
+ADV24064,600.00,paid,,2025-02-20,,,,,old ticket TK-250220-002
+ADV24056,256.50,paid,,2025-02-22,Lego EV3 Robotics,,,,old ticket TK-250222-001 | Touch and Go
+ADV24055,256.50,paid,,2025-02-22,Lego EV3 Robotics,,,,old ticket TK-250222-002 | Touch and Go
+ADV25010,513.00,paid,cash,2025-02-23,Lego EV3 Robotics,,,,old ticket TK-250223-001 | Cash
+ADV23008,180.00,paid,,2025-02-23,Lego EV3 Robotics,,,,old ticket TK-250223-002
+ADV23041,180.00,paid,,2025-02-24,Lego EV3 Robotics,,,,old ticket TK-250224-001
+ADV25008,180.00,paid,,2025-02-25,Lego EV3 Robotics,,,,old ticket TK-250225-001
+ADV25011,180.00,paid,,2025-02-27,Lego EV3 Robotics,,,,old ticket TK-250227-001
+ADV23045,150.00,paid,,2025-02-28,Scratch,,,,old ticket TK-250228-001
+ADV24090,180.00,paid,,2025-02-28,Lego EV3 Robotics,,,,old ticket TK-250228-002
+ADV24018,180.00,paid,,2025-03-01,Lego EV3 Robotics,,,,old ticket TK-250301-001
+ADV24022,180.00,paid,,2025-03-01,Lego EV3 Robotics,,,,old ticket TK-250301-002
+ADV23008,180.00,paid,,2025-03-01,Lego EV3 Robotics,,,,old ticket TK-250301-003
+ADV0045,150.00,paid,,2025-03-02,Lego EV3 Robotics,,,,old ticket TK-250302-001
+ADV25012,513.00,paid,,2025-03-02,Lego EV3 Robotics,,,,old ticket TK-250302-002
+ADV0055,150.00,paid,,2025-03-03,Scratch,,,,old ticket TK-250303-001
+ADV25016,180.00,paid,,2025-03-03,Lego EV3 Robotics,,,,old ticket TK-250303-002
+ADV23022,120.00,paid,,2025-03-03,Scratch,,,,old ticket TK-250303-003
+ADV24040,180.00,paid,,2025-03-03,Lego EV3 Robotics,,,,old ticket TK-250303-004
+ADV23034,120.00,paid,,2025-03-04,Scratch,,,,old ticket TK-250304-001
+ADV23035,120.00,paid,,2025-03-04,Scratch,,,,old ticket TK-250304-002
+ADV23042,180.00,paid,,2025-03-04,Lego EV3 Robotics,,,,old ticket TK-250304-003
+ADV24011,225.00,paid,,2025-03-04,Scratch,,,,old ticket TK-250304-004
+ADV25009,180.00,paid,,2025-03-05,Scratch,,,,old ticket TK-250305-001
+ADV24066,180.00,paid,,2025-03-05,Lego EV3 Robotics,,,,old ticket TK-250305-002
+ADV24042,180.00,paid,,2025-03-06,Lego EV3 Robotics,,,,old ticket TK-250306-001
+ADV24031,180.00,paid,,2025-03-06,Lego EV3 Robotics,,,,old ticket TK-250306-002
+ADV24081,180.00,paid,,2025-03-06,Lego EV3 Robotics,,,,old ticket TK-250306-003
+ADV24057,180.00,paid,,2025-03-08,Scratch,,,,old ticket TK-250308-001
+ADV25014,180.00,paid,,2025-03-08,Lego EV3 Robotics,,,,old ticket TK-250308-002
+ADV25013,180.00,paid,,2025-03-08,Lego EV3 Robotics,,,,old ticket TK-250308-003 | Touch and Go
+ADV24064,180.00,paid,,2025-03-09,Lego EV3 Robotics,,,,old ticket TK-250309-001
+ADV23084,180.00,paid,,2025-03-09,Lego EV3 Robotics,,,,old ticket TK-250309-002
+ADV23084,120.00,paid,,2025-03-09,Scratch,,,,old ticket TK-250309-003
+ADV24088,513.00,paid,,2025-03-09,Lego EV3 Robotics,,,,old ticket TK-250309-004 | Touch and Go
+ADV25017,513.00,paid,,2025-03-09,Lego EV3 Robotics,,,,old ticket TK-250309-005 | Touch and Go
+ADV24030,180.00,paid,,2025-03-09,Lego EV3 Robotics,,,,old ticket TK-250309-006 | Touch and Go
+ADV24059,180.00,paid,,2025-03-10,Lego EV3 Robotics,,,,old ticket TK-250310-001 | Touch and Go
+ADV24046,180.00,paid,,2025-03-11,Lego EV3 Robotics,,,,old ticket TK-250311-001
+ADV24047,180.00,paid,,2025-03-11,Lego EV3 Robotics,,,,old ticket TK-250311-002
+ADV24033,180.00,paid,,2025-03-12,Lego EV3 Robotics,,,,old ticket TK-250312-001
+ADV24038,180.00,paid,,2025-03-13,Lego EV3 Robotics,,,,old ticket TK-250313-001
+ADV0047,513.00,paid,,2025-03-14,Lego EV3 Robotics,,,,old ticket TK-250314-001
+ADV25015,180.00,paid,,2025-03-15,Lego EV3 Robotics,,,,old ticket TK-250315-001
+ADV0027,256.50,paid,,2025-03-16,Scratch,,,,old ticket TK-250316-001 | Touch and Go
+ADV24080,256.50,paid,,2025-03-16,Lego EV3 Robotics,,,,old ticket TK-250316-002 | Touch and Go
+ADV23084,180.00,paid,,2025-03-17,Lego EV3 Robotics,,,,old ticket TK-250317-001
+ADV23084,120.00,paid,,2025-03-17,Scratch,,,,old ticket TK-250317-002
+ADV24090,180.00,paid,,2025-03-22,Lego EV3 Robotics,,,,old ticket TK-250322-001
+ADV0056,240.00,paid,cash,2025-03-23,Lego EV3 Robotics,,,,old ticket TK-250323-001 | Cash
+ADV24087,180.00,paid,,2025-03-24,Scratch,,,,old ticket TK-250324-001 | Touch and Go
+ADV25011,180.00,paid,cash,2025-03-27,Lego EV3 Robotics,,,,old ticket TK-250327-001 | Cash
+ADV23045,150.00,paid,,2025-03-28,Scratch,,,,old ticket TK-250328-001
+ADV24061,180.00,paid,bank_transfer,2025-03-28,Lego EV3 Robotics,,,,old ticket TK-250328-002 | Virtual Banking
+ADV23041,180.00,paid,,2025-03-29,Lego EV3 Robotics,,,,old ticket TK-250329-001
+ADV0055,150.00,paid,,2025-03-31,Scratch,,,,old ticket TK-250331-001
+ADV24018,180.00,paid,,2025-04-01,Lego EV3 Robotics,,,,old ticket TK-250401-001
+ADV23042,180.00,paid,,2025-04-03,Lego EV3 Robotics,,,,old ticket TK-250403-001
+ADV24066,180.00,paid,,2025-04-04,Lego EV3 Robotics,,,,old ticket TK-250404-001
+ADV23035,120.00,paid,,2025-04-04,Scratch,,,,old ticket TK-250404-002
+ADV24042,180.00,paid,,2025-04-04,Lego EV3 Robotics,,,,old ticket TK-250404-003
+ADV24022,180.00,paid,,2025-04-04,Lego EV3 Robotics,,,,old ticket TK-250404-004
+ADV23034,120.00,paid,,2025-04-05,Scratch,,,,old ticket TK-250405-001
+ADV23022,90.00,paid,,2025-04-06,Scratch,,,,old ticket TK-250406-001
+ADV25018,270.00,paid,,2025-04-06,Scratch,,,,old ticket TK-250406-002
+ADV24031,180.00,paid,,2025-04-07,Lego EV3 Robotics,,,,old ticket TK-250407-001
+ADV24011,180.00,paid,,2025-04-07,Scratch,,,,old ticket TK-250407-002
+ADV25019,972.00,paid,,2025-04-08,Lego EV3 Robotics,,,,old ticket TK-250408-001
+ADV24033,180.00,paid,,2025-04-10,Lego EV3 Robotics,,,,old ticket TK-250410-001
+ADV23007,320.00,paid,,2025-04-10,Lego EV3 Robotics,,,,old ticket TK-250410-002
+ADV25009,180.00,paid,,2025-04-10,Scratch,,,,old ticket TK-250410-003
+ADV24057,180.00,paid,,2025-04-12,Scratch,,,,old ticket TK-250412-001
+ADV25020,180.00,paid,,2025-04-12,Lego EV3 Robotics,,,,old ticket TK-250412-002
+ADV25013,180.00,paid,,2025-04-12,Lego EV3 Robotics,,,,old ticket TK-250412-003 | Touch and Go
+ADV23008,180.00,paid,,2025-04-13,Lego EV3 Robotics,,,,old ticket TK-250413-001
+ADV25016,180.00,paid,,2025-04-13,Lego EV3 Robotics,,,,old ticket TK-250413-002
+ADV24085,90.00,paid,,2025-04-18,Scratch,,,,old ticket TK-250418-001
+ADV24021,360.00,paid,,2025-04-18,Lego EV3 Robotics,,,,old ticket TK-250418-002
+ADV24063,972.00,paid,,2025-04-18,Lego EV3 Robotics,,,,old ticket TK-250418-003
+ADV24064,180.00,paid,,2025-04-18,Lego EV3 Robotics,,,,old ticket TK-250418-004
+ADV0011,300.00,paid,,2025-04-18,Lego EV3 Robotics,,,,old ticket TK-250418-005
+ADV0012,300.00,paid,,2025-04-18,Scratch,,,,old ticket TK-250418-006
+ADV25021,171.00,paid,,2025-04-19,Lego EV3 Robotics,,,,old ticket TK-250419-001
+ADV25022,171.00,paid,,2025-04-19,Lego EV3 Robotics,,,,old ticket TK-250419-002
+ADV25023,171.00,paid,,2025-04-19,Lego EV3 Robotics,,,,old ticket TK-250419-003
+ADV23075,540.00,paid,,2025-04-19,Lego EV3 Robotics,,,,old ticket TK-250419-004
+ADV25002,243.00,paid,,2025-04-19,Lego EV3 Robotics,,,,old ticket TK-250419-005
+ADV25002,243.00,paid,,2025-04-19,Scratch,,,,old ticket TK-250419-006
+ADV25003,243.00,paid,,2025-04-19,Lego EV3 Robotics,,,,old ticket TK-250419-007
+ADV25003,243.00,paid,,2025-04-19,Scratch,,,,old ticket TK-250419-008
+ADV25024,90.00,paid,,2025-04-20,Lego EV3 Robotics,,,,old ticket TK-250420-001
+ADV25025,180.00,paid,,2025-04-22,Scratch,,,,old ticket TK-250422-001
+ADV23040,120.00,paid,,2025-04-23,Scratch,,,,old ticket TK-250423-001
+ADV25008,180.00,paid,,2025-04-24,Lego EV3 Robotics,,,,old ticket TK-250424-001
+ADV24061,180.00,paid,bank_transfer,2025-04-25,Lego EV3 Robotics,,,,old ticket TK-250425-001 | Virtual Banking
+ADV23006,324.00,paid,,2025-04-25,Lego EV3 Robotics,,,,old ticket TK-250425-002
+ADV23005,324.00,paid,,2025-04-25,Lego EV3 Robotics,,,,old ticket TK-250425-003
+ADV23004,324.00,paid,,2025-04-25,Lego EV3 Robotics,,,,old ticket TK-250425-004
+ADV23045,150.00,paid,,2025-04-28,Scratch,,,,old ticket TK-250428-001
+ADV24013,180.00,paid,,2025-04-30,Lego EV3 Robotics,,,,old ticket TK-250430-001
+ADV0045,150.00,paid,,2025-05-01,Lego EV3 Robotics,,,,old ticket TK-250501-001
+ADV24033,180.00,paid,,2025-05-01,Lego EV3 Robotics,,,,old ticket TK-250501-003
+ADV24090,180.00,paid,,2025-05-01,Lego EV3 Robotics,,,,old ticket TK-250501-004
+ADV24018,180.00,paid,,2025-05-02,Lego EV3 Robotics,,,,old ticket TK-250502-001
+ADV24081,180.00,paid,,2025-05-02,Lego EV3 Robotics,,,,old ticket TK-250502-002
+ADV25027,180.00,paid,cash,2025-05-02,Lego EV3 Robotics,,,,old ticket TK-250502-003 | Cash
+ADV24031,180.00,paid,,2025-05-03,Lego EV3 Robotics,,,,old ticket TK-250503-001
+ADV25020,180.00,paid,,2025-05-03,Lego EV3 Robotics,,,,old ticket TK-250503-002
+ADV25015,180.00,paid,,2025-05-03,Lego EV3 Robotics,,,,old ticket TK-250503-003
+ADV23048,256.50,paid,,2025-05-03,Lego EV3 Robotics,,,,old ticket TK-250503-004
+ADV23049,256.50,paid,,2025-05-03,Lego EV3 Robotics,,,,old ticket TK-250503-005
+ADV23035,120.00,paid,,2025-05-03,Scratch,,,,old ticket TK-250503-006
+ADV23034,120.00,paid,,2025-05-03,Scratch,,,,old ticket TK-250503-007
+ADV24005,180.00,paid,,2025-05-04,Scratch,,,,old ticket TK-250504-001
+ADV23008,180.00,paid,,2025-05-04,Lego EV3 Robotics,,,,old ticket TK-250504-002
+ADV25018,315.00,paid,,2025-05-04,Scratch,,,,old ticket TK-250504-003
+ADV0055,150.00,paid,,2025-05-05,Scratch,,,,old ticket TK-250505-001
+ADV24066,180.00,paid,,2025-05-05,Lego EV3 Robotics,,,,old ticket TK-250505-002
+ADV25009,180.00,paid,,2025-05-06,Scratch,,,,old ticket TK-250506-001
+ADV23041,180.00,paid,,2025-05-06,Lego EV3 Robotics,,,,old ticket TK-250506-002
+ADV23022,90.00,paid,,2025-05-06,Scratch,,,,old ticket TK-250506-003
+ADV24011,180.00,paid,,2025-05-08,Scratch,,,,old ticket TK-250508-001
+ADV24046,180.00,paid,,2025-05-08,Lego EV3 Robotics,,,,old ticket TK-250508-002
+ADV24047,180.00,paid,,2025-05-08,Lego EV3 Robotics,,,,old ticket TK-250508-003
+ADV25011,45.00,paid,,2025-05-08,Lego EV3 Robotics,,,,old ticket TK-250508-004
+ADV24022,180.00,paid,,2025-05-09,Lego EV3 Robotics,,,,old ticket TK-250509-001
+ADV25028,513.00,paid,,2025-05-10,Lego EV3 Robotics,,,,old ticket TK-250510-001
+ADV25013,180.00,paid,,2025-05-10,Lego EV3 Robotics,,,,old ticket TK-250510-002
+ADV23042,180.00,paid,,2025-05-10,Lego EV3 Robotics,,,,old ticket TK-250510-003
+ADV25029,180.00,paid,,2025-05-11,Lego EV3 Robotics,,,,old ticket TK-250511-001
+ADV25008,180.00,paid,,2025-05-16,Lego EV3 Robotics,,,,old ticket TK-250516-001
+ADV24030,180.00,paid,,2025-05-18,Lego EV3 Robotics,,,,old ticket TK-250518-001
+ADV25016,180.00,paid,,2025-05-19,Lego EV3 Robotics,,,,old ticket TK-250519-001
+ADV25030,180.00,paid,cash,2025-05-24,Lego EV3 Robotics,,,,old ticket TK-250524-001 | Cash
+ADV23029,600.00,paid,,2025-05-25,Scratch,,,,old ticket TK-250525-001
+ADV0056,360.00,paid,cash,2025-05-25,Lego EV3 Robotics,,,,old ticket TK-250525-002 | Cash
+ADV24087,180.00,paid,,2025-05-26,Scratch,,,,old ticket TK-250526-001
+ADV24038,180.00,paid,,2025-05-27,Lego EV3 Robotics,,,,old ticket TK-250527-001
+ADV24090,180.00,paid,,2025-05-27,Lego EV3 Robotics,,,,old ticket TK-250527-002
+ADV0045,150.00,paid,,2025-05-28,Lego EV3 Robotics,,,,old ticket TK-250528-001
+ADV23019,180.00,paid,,2025-05-28,Scratch,,,,old ticket TK-250528-002
+ADV23020,180.00,paid,,2025-05-28,Scratch,,,,old ticket TK-250528-003
+ADV23013,540.00,paid,,2025-05-28,Lego EV3 Robotics,,,,old ticket TK-250528-004
+ADV23045,150.00,paid,,2025-05-29,Scratch,,,,old ticket TK-250529-001
+ADV24061,180.00,paid,,2025-05-30,Lego EV3 Robotics,,,,old ticket TK-250530-001
+ADV24018,180.00,paid,,2025-05-30,Lego EV3 Robotics,,,,old ticket TK-250530-002
+ADV24057,180.00,paid,,2025-05-31,Scratch,,,,old ticket TK-250531-001
+ADV23007,160.00,paid,,2025-05-31,Lego EV3 Robotics,,,,old ticket TK-250531-002
+ADV24082,180.00,paid,,2025-05-31,,,,,old ticket TK-250531-003
+ADV25010,180.00,paid,,2025-05-31,Lego EV3 Robotics,,,,old ticket TK-250531-004 | Touch and Go
+ADV0055,150.00,paid,,2025-06-01,Scratch,,,,old ticket TK-250601-001
+ADV25032,180.00,paid,,2025-06-01,Lego EV3 Robotics,,,,old ticket TK-250601-002
+ADV25031,180.00,paid,,2025-06-01,Lego EV3 Robotics,,,,old ticket TK-250601-003
+ADV24033,180.00,paid,,2025-06-02,Lego EV3 Robotics,,,,old ticket TK-250602-001
+ADV23041,180.00,paid,,2025-06-03,Lego EV3 Robotics,,,,old ticket TK-250603-001
+ADV23043,240.00,paid,,2025-06-03,Scratch,,,,old ticket TK-250603-002
+ADV23085,240.00,paid,,2025-06-03,Scratch,,,,old ticket TK-250603-003
+ADV24011,180.00,paid,,2025-06-03,Scratch,,,,old ticket TK-250603-004
+ADV24011,160.00,paid,,2025-06-03,,,,,old ticket TK-250603-005
+ADV24012,160.00,paid,,2025-06-03,,,,,old ticket TK-250603-006
+ADV24066,180.00,paid,,2025-06-03,Lego EV3 Robotics,,,,old ticket TK-250603-007
+ADV24066,180.00,paid,,2025-06-03,,,,,old ticket TK-250603-008
+ADV25019,90.00,paid,,2025-06-04,,,,,old ticket TK-250604-001
+ADV23034,120.00,paid,,2025-06-04,Scratch,,,,old ticket TK-250604-002
+ADV23035,120.00,paid,,2025-06-04,Scratch,,,,old ticket TK-250604-003
+ADV25028,180.00,paid,,2025-06-04,,,,,old ticket TK-250604-004
+ADV23063,180.00,paid,,2025-06-04,,,,,old ticket TK-250604-005
+ADV23022,90.00,paid,,2025-06-04,Scratch,,,,old ticket TK-250604-006
+ADV23013,180.00,paid,,2025-06-04,,,,,old ticket TK-250604-007
+ADV24024,180.00,paid,,2025-06-05,,,,,old ticket TK-250605-001
+ADV25037,200.00,paid,,2025-06-05,,,,,old ticket TK-250605-002
+ADV24021,360.00,paid,,2025-06-06,Lego EV3 Robotics,,,,old ticket TK-250606-001
+ADV24008,180.00,paid,,2025-06-06,,,,,old ticket TK-250606-002
+ADV25033,180.00,paid,promptpay,2025-06-07,Lego EV3 Robotics,,,,old ticket TK-250607-001 | QR Pay
+ADV25034,180.00,paid,promptpay,2025-06-07,Lego EV3 Robotics,,,,old ticket TK-250607-002 | QR Pay
+ADV25035,180.00,paid,promptpay,2025-06-07,Lego EV3 Robotics,,,,old ticket TK-250607-003 | QR Pay
+ADV23008,180.00,paid,,2025-06-07,Lego EV3 Robotics,,,,old ticket TK-250607-004
+ADV25005,256.50,paid,cash,2025-06-07,Lego EV3 Robotics,,,,old ticket TK-250607-005 | Cash
+ADV25004,256.50,paid,cash,2025-06-07,Lego EV3 Robotics,,,,old ticket TK-250607-006 | Cash
+ADV25036,180.00,paid,,2025-06-08,Lego EV3 Robotics,,,,old ticket TK-250608-001
+ADV23084,240.00,paid,,2025-06-08,Scratch,,,,old ticket TK-250608-002
+ADV25029,180.00,paid,,2025-06-09,Lego EV3 Robotics,,,,old ticket TK-250609-001
+ADV24081,180.00,paid,,2025-06-09,Lego EV3 Robotics,,,,old ticket TK-250609-002
+ADV24031,180.00,paid,,2025-06-10,Lego EV3 Robotics,,,,old ticket TK-250610-001
+ADV23007,160.00,paid,,2025-06-10,Lego EV3 Robotics,,,,old ticket TK-250610-002
+ADV23007,180.00,paid,,2025-06-10,,,,,old ticket TK-250610-003
+ADV24013,180.00,paid,,2025-06-10,Lego EV3 Robotics,,,,old ticket TK-250610-004
+ADV24022,180.00,paid,,2025-06-14,Lego EV3 Robotics,,,,old ticket TK-250614-001
+ADV25009,180.00,paid,,2025-06-14,Scratch,,,,old ticket TK-250614-002
+ADV25013,180.00,paid,,2025-06-14,Lego EV3 Robotics,,,,old ticket TK-250614-003 | Touch and Go
+ADV25027,180.00,paid,cash,2025-06-14,Lego EV3 Robotics,,,,old ticket TK-250614-004 | Cash
+ADV25038,180.00,paid,cash,2025-06-15,Scratch,,,,old ticket TK-250615-001 | Cash
+ADV24059,180.00,paid,,2025-06-16,Lego EV3 Robotics,,,,old ticket TK-250616-001 | Touch and Go
+ADV25016,180.00,paid,,2025-06-17,Lego EV3 Robotics,,,,old ticket TK-250617-001
+ADV25025,225.00,paid,,2025-06-17,Scratch,,,,old ticket TK-250617-002
+ADV23075,180.00,paid,,2025-06-19,Lego EV3 Robotics,,,,old ticket TK-250619-002
+ADV24082,513.00,paid,,2025-06-20,Lego EV3 Robotics,,,,old ticket TK-250620-001
+ADV23006,324.00,paid,,2025-06-21,Lego EV3 Robotics,,,,old ticket TK-250621-001
+ADV23004,324.00,paid,,2025-06-21,Lego EV3 Robotics,,,,old ticket TK-250621-002
+ADV23005,324.00,paid,,2025-06-21,Lego EV3 Robotics,,,,old ticket TK-250621-003
+ADV23004,160.00,paid,,2025-06-21,,,,,old ticket TK-250621-004
+ADV23005,160.00,paid,,2025-06-21,,,,,old ticket TK-250621-005
+ADV23006,80.00,paid,,2025-06-21,,,,,old ticket TK-250621-006
+ADV23006,25.00,paid,,2025-06-21,,,,,old ticket TK-250621-007 | APU Smorphi Challenge
+ADV25001,972.00,paid,,2025-06-21,Lego EV3 Robotics,,,,old ticket TK-250621-008
+ADV25008,360.00,paid,,2025-06-25,Lego EV3 Robotics,,,,old ticket TK-250625-001
+ADV25031,180.00,paid,,2025-06-25,Lego EV3 Robotics,,,,old ticket TK-250625-002
+ADV23042,360.00,paid,,2025-06-26,Lego EV3 Robotics,,,,old ticket TK-250626-001
+ADV23019,180.00,paid,,2025-06-26,Scratch,,,,old ticket TK-250626-002
+ADV23020,180.00,paid,,2025-06-26,Scratch,,,,old ticket TK-250626-003
+ADV25039,180.00,paid,cash,2025-06-27,Lego EV3 Robotics,,,,old ticket TK-250627-001 | Cash
+ADV23045,150.00,paid,,2025-06-28,Scratch,,,,old ticket TK-250628-001
+ADV25020,45.00,paid,,2025-06-28,Lego EV3 Robotics,,,,old ticket TK-250628-002
+ADV25015,135.00,paid,,2025-06-28,Lego EV3 Robotics,,,,old ticket TK-250628-003
+ADV0045,150.00,paid,,2025-06-28,Lego EV3 Robotics,,,,old ticket TK-250628-004
+ADV24018,180.00,paid,,2025-06-30,Lego EV3 Robotics,,,,old ticket TK-250630-001
+ADV0055,150.00,paid,,2025-06-30,Scratch,,,,old ticket TK-250630-002
+ADV23034,120.00,paid,,2025-07-01,Scratch,,,,old ticket TK-250701-001
+ADV24033,180.00,paid,,2025-07-01,Lego EV3 Robotics,,,,old ticket TK-250701-002
+ADV0012,450.00,paid,,2025-07-01,Scratch,,,,old ticket TK-250701-003
+ADV0011,450.00,paid,,2025-07-01,Lego EV3 Robotics,,,,old ticket TK-250701-004
+ADV25018,135.00,paid,,2025-07-02,Scratch,,,,old ticket TK-250702-001
+ADV24009,540.00,paid,,2025-07-03,Scratch,,,,old ticket TK-250703-001
+ADV24034,540.00,paid,,2025-07-03,Scratch,,,,old ticket TK-250703-002
+ADV0014,360.00,paid,,2025-07-03,Scratch,,,,old ticket TK-250703-003
+ADV0014,180.00,paid,,2025-07-03,,,,,old ticket TK-250703-004
+ADV23045,150.00,paid,,2025-07-03,Scratch,,,,old ticket TK-250703-005
+ADV24066,180.00,paid,,2025-07-03,Lego EV3 Robotics,,,,old ticket TK-250703-006
+ADV24066,133.00,paid,,2025-07-03,,,,,old ticket TK-250703-007
+ADV23035,120.00,paid,,2025-07-04,Scratch,,,,old ticket TK-250704-001
+ADV24046,160.00,paid,,2025-07-04,Lego EV3 Robotics,,,,old ticket TK-250704-002 | Partial Payment
+ADV24047,160.00,paid,,2025-07-04,Lego EV3 Robotics,,,,old ticket TK-250704-003 | Partial Payment
+ADV25029,180.00,paid,,2025-07-05,Lego EV3 Robotics,,,,old ticket TK-250705-001
+ADV23084,180.00,paid,,2025-07-05,Lego EV3 Robotics,,,,old ticket TK-250705-002
+ADV23084,120.00,paid,,2025-07-05,Scratch,,,,old ticket TK-250705-003
+ADV25020,180.00,paid,,2025-07-05,Lego EV3 Robotics,,,,old ticket TK-250705-004
+ADV25015,180.00,paid,,2025-07-05,Lego EV3 Robotics,,,,old ticket TK-250705-005
+ADV24090,180.00,paid,,2025-07-05,Lego EV3 Robotics,,,,old ticket TK-250705-006
+ADV0027,342.00,paid,,2025-07-05,Scratch,,,,old ticket TK-250705-007 | Touch and Go
+ADV24080,171.00,paid,,2025-07-05,Lego EV3 Robotics,,,,old ticket TK-250705-008 | Touch and Go
+ADV24005,360.00,paid,,2025-07-06,Scratch,,,,old ticket TK-250706-001
+ADV24011,180.00,paid,,2025-07-07,Scratch,,,,old ticket TK-250707-001
+ADV23022,120.00,paid,,2025-07-07,Scratch,,,,old ticket TK-250707-002
+ADV23049,256.50,paid,,2025-07-08,Lego EV3 Robotics,,,,old ticket TK-250708-001
+ADV23048,256.50,paid,,2025-07-08,Lego EV3 Robotics,,,,old ticket TK-250708-002
+ADV24031,180.00,paid,,2025-07-08,Lego EV3 Robotics,,,,old ticket TK-250708-003
+ADV25009,180.00,paid,,2025-07-08,Scratch,,,,old ticket TK-250708-004
+ADV24038,180.00,paid,,2025-07-09,Lego EV3 Robotics,,,,old ticket TK-250709-001
+ADV23041,180.00,paid,,2025-07-10,Lego EV3 Robotics,,,,old ticket TK-250710-001
+ADV24064,180.00,paid,,2025-07-11,Lego EV3 Robotics,,,,old ticket TK-250711-001
+ADV23007,160.00,paid,,2025-07-12,Lego EV3 Robotics,,,,old ticket TK-250712-001
+ADV23007,83.00,paid,,2025-07-12,,,,,old ticket TK-250712-002
+ADV24057,180.00,paid,,2025-07-12,Scratch,,,,old ticket TK-250712-003
+ADV24061,360.00,paid,,2025-07-12,Lego EV3 Robotics,,,,old ticket TK-250712-004
+ADV25013,180.00,paid,,2025-07-12,Lego EV3 Robotics,,,,old ticket TK-250712-005
+ADV25036,180.00,paid,,2025-07-13,Lego EV3 Robotics,,,,old ticket TK-250713-001
+ADV23076,120.00,paid,,2025-07-13,Scratch,,,,old ticket TK-250713-002
+ADV25026,513.00,paid,,2025-07-13,Lego EV3 Robotics,,,,old ticket TK-250713-003
+ADV25025,180.00,paid,,2025-07-15,Scratch,,,,old ticket TK-250715-001
+ADV25039,180.00,paid,cash,2025-07-19,Lego EV3 Robotics,,,,old ticket TK-250719-001 | Cash
+ADV23008,180.00,paid,,2025-07-19,Lego EV3 Robotics,,,,old ticket TK-250719-002
+ADV25031,180.00,paid,,2025-07-26,Lego EV3 Robotics,,,,old ticket TK-250726-001
+ADV25040,513.00,paid,,2025-07-26,Lego EV3 Robotics,,,,old ticket TK-250726-002
+ADV25041,180.00,paid,cash,2025-07-27,Lego EV3 Robotics,,,,old ticket TK-250727-001 | Cash
+ADV25042,180.00,paid,cash,2025-07-27,Lego EV3 Robotics,,,,old ticket TK-250727-002 | Cash
+ADV23045,300.00,paid,,2025-07-28,Scratch,,,,old ticket TK-250728-001
+ADV0045,150.00,paid,,2025-07-29,Lego EV3 Robotics,,,,old ticket TK-250729-001
+ADV25016,180.00,paid,,2025-07-30,Lego EV3 Robotics,,,,old ticket TK-250730-001
+ADV24033,180.00,paid,,2025-07-30,Lego EV3 Robotics,,,,old ticket TK-250730-002
+ADV24081,180.00,paid,,2025-07-30,Lego EV3 Robotics,,,,old ticket TK-250730-003
+ADV24018,180.00,paid,,2025-07-31,Lego EV3 Robotics,,,,old ticket TK-250731-001
+ADV0055,150.00,paid,,2025-07-31,Scratch,,,,old ticket TK-250731-002
+ADV25027,180.00,paid,,2025-07-31,Lego EV3 Robotics,,,,old ticket TK-250731-003
+ADV23042,180.00,paid,,2025-07-31,Lego EV3 Robotics,,,,old ticket TK-250731-004
+ADV23041,180.00,paid,,2025-08-01,Lego EV3 Robotics,,,,old ticket TK-250801-001
+ADV24038,180.00,paid,,2025-08-01,Lego EV3 Robotics,,,,old ticket TK-250801-002
+ADV24022,180.00,paid,,2025-08-02,Lego EV3 Robotics,,,,old ticket TK-250802-001
+ADV25029,180.00,paid,,2025-08-02,Lego EV3 Robotics,,,,old ticket TK-250802-002
+ADV25043,180.00,paid,,2025-08-02,Lego EV3 Robotics,,,,old ticket TK-250802-003
+ADV25044,180.00,paid,,2025-08-02,Lego EV3 Robotics,,,,old ticket TK-250802-004 | Touch and Go
+ADV25045,180.00,paid,,2025-08-02,Lego EV3 Robotics,,,,old ticket TK-250802-005 | Touch and Go
+ADV23034,120.00,paid,,2025-08-03,Scratch,,,,old ticket TK-250803-001
+ADV24031,180.00,paid,,2025-08-03,Lego EV3 Robotics,,,,old ticket TK-250803-002
+ADV23035,120.00,paid,,2025-08-04,Scratch,,,,old ticket TK-250804-001
+ADV23022,120.00,paid,,2025-08-04,Scratch,,,,old ticket TK-250804-002
+ADV24066,180.00,paid,,2025-08-04,Lego EV3 Robotics,,,,old ticket TK-250804-003
+ADV24021,360.00,paid,,2025-08-05,Lego EV3 Robotics,,,,old ticket TK-250805-001
+ADV23013,540.00,paid,,2025-08-05,Lego EV3 Robotics,,,,old ticket TK-250805-002
+ADV25009,180.00,paid,,2025-08-06,Scratch,,,,old ticket TK-250806-001
+ADV24013,180.00,paid,,2025-08-07,Lego EV3 Robotics,,,,old ticket TK-250807-001
+ADV24090,180.00,paid,,2025-08-08,Lego EV3 Robotics,,,,old ticket TK-250808-001
+ADV24011,180.00,paid,,2025-08-08,Scratch,,,,old ticket TK-250808-002
+ADV23008,180.00,paid,,2025-08-09,Lego EV3 Robotics,,,,old ticket TK-250809-001
+ADV24042,180.00,paid,,2025-08-09,Lego EV3 Robotics,,,,old ticket TK-250809-002
+ADV25013,180.00,paid,,2025-08-09,Lego EV3 Robotics,,,,old ticket TK-250809-003
+ADV25046,180.00,paid,,2025-08-10,Lego EV3 Robotics,,,,old ticket TK-250810-001
+ADV25038,180.00,paid,cash,2025-08-10,Scratch,,,,old ticket TK-250810-002 | Cash
+ADV25047,180.00,paid,,2025-08-11,Lego EV3 Robotics,,,,old ticket TK-250811-001
+ADV25025,180.00,paid,,2025-08-12,Scratch,,,,old ticket TK-250812-001
+ADV25015,180.00,paid,,2025-08-13,Lego EV3 Robotics,,,,old ticket TK-250813-001
+ADV25020,180.00,paid,,2025-08-13,Lego EV3 Robotics,,,,old ticket TK-250813-002
+ADV24030,180.00,paid,,2025-08-15,Lego EV3 Robotics,,,,old ticket TK-250815-001
+ADV24087,180.00,paid,,2025-08-17,Scratch,,,,old ticket TK-250817-001 | Touch and Go
+ADV25039,513.00,paid,cash,2025-08-17,Lego EV3 Robotics,,,,old ticket TK-250817-002 | Cash
+ADV23084,180.00,paid,,2025-08-19,Lego EV3 Robotics,,,,old ticket TK-250819-001
+ADV23084,120.00,paid,,2025-08-19,Scratch,,,,old ticket TK-250819-002
+ADV24026,972.00,paid,,2025-08-20,Lego EV3 Robotics,,,,old ticket TK-250820-001
+ADV0012,150.00,paid,,2025-08-21,Scratch,,,,old ticket TK-250821-001
+ADV0011,150.00,paid,,2025-08-21,Lego EV3 Robotics,,,,old ticket TK-250821-002
+ADV25018,180.00,paid,,2025-08-21,Scratch,,,,old ticket TK-250821-003 | Touch and Go
+ADV25050,180.00,paid,,2025-08-23,Lego EV3 Robotics,,,,old ticket TK-250823-001
+ADV25031,180.00,paid,,2025-08-23,Lego EV3 Robotics,,,,old ticket TK-250823-002
+ADV25041,180.00,paid,cash,2025-08-24,Scratch,,,,old ticket TK-250824-001 | Cash
+ADV25042,180.00,paid,cash,2025-08-24,Lego EV3 Robotics,,,,old ticket TK-250824-002 | Cash
+ADV25048,324.00,paid,,2025-08-25,Scratch,,,,old ticket TK-250825-001 | Touch and Go
+ADV25049,324.00,paid,,2025-08-25,Scratch,,,,old ticket TK-250825-002 | Touch and Go
+ADV25048,324.00,paid,,2025-08-25,Lego EV3 Robotics,,,,old ticket TK-250825-003 | Touch and Go
+ADV24046,100.00,paid,,2025-08-27,Lego EV3 Robotics,,,,old ticket TK-250827-001 | Partial Payment
+ADV24047,100.00,paid,,2025-08-27,Lego EV3 Robotics,,,,old ticket TK-250827-002
+ADV23045,150.00,paid,,2025-08-28,Scratch,,,,old ticket TK-250828-001
+ADV25008,180.00,paid,,2025-08-28,Lego EV3 Robotics,,,,old ticket TK-250828-002
+ADV25051,972.00,paid,,2025-08-30,Lego EV3 Robotics,,,,old ticket TK-250830-001
+ADV24057,180.00,paid,,2025-08-30,Scratch,,,,old ticket TK-250830-002
+ADV25052,180.00,paid,,2025-08-30,Lego EV3 Robotics,,,,old ticket TK-250830-003
+ADV25005,486.00,paid,,2025-08-30,Lego EV3 Robotics,,,,old ticket TK-250830-004
+ADV25004,486.00,paid,,2025-08-30,Lego EV3 Robotics,,,,old ticket TK-250830-005
+ADV24018,180.00,paid,,2025-09-01,Lego EV3 Robotics,,,,old ticket TK-250901-001
+ADV0055,150.00,paid,,2025-09-01,Scratch,,,,old ticket TK-250901-002
+ADV0045,150.00,paid,,2025-09-01,Lego EV3 Robotics,,,,old ticket TK-250901-003
+ADV23034,120.00,paid,,2025-09-02,Scratch,,,,old ticket TK-250902-001
+ADV23042,180.00,paid,,2025-09-02,Lego EV3 Robotics,,,,old ticket TK-250902-002
+ADV24033,180.00,paid,,2025-09-02,Lego EV3 Robotics,,,,old ticket TK-250902-003
+ADV24066,180.00,paid,,2025-09-03,Lego EV3 Robotics,,,,old ticket TK-250903-001
+ADV24090,180.00,paid,,2025-09-03,Lego EV3 Robotics,,,,old ticket TK-250903-002
+ADV23022,30.00,paid,,2025-09-03,Scratch,,,,old ticket TK-250903-003
+ADV24081,180.00,paid,,2025-09-04,Lego EV3 Robotics,,,,old ticket TK-250904-001
+ADV24031,180.00,paid,,2025-09-05,Lego EV3 Robotics,,,,old ticket TK-250905-001
+ADV25029,180.00,paid,,2025-09-05,Lego EV3 Robotics,,,,old ticket TK-250905-002 | Farah Sakinah
+ADV25009,180.00,paid,,2025-09-05,Scratch,,,,old ticket TK-250905-003
+ADV24061,360.00,paid,,2025-09-05,Lego EV3 Robotics,,,,old ticket TK-250905-004
+ADV25033,180.00,paid,cash,2025-09-05,Lego EV3 Robotics,,,,old ticket TK-250905-005 | Cash
+ADV24022,180.00,paid,,2025-09-06,Lego EV3 Robotics,,,,old ticket TK-250906-001
+ADV23035,120.00,paid,,2025-09-06,Scratch,,,,old ticket TK-250906-002
+ADV25053,180.00,paid,,2025-09-06,Lego EV3 Robotics,,,,old ticket TK-250906-003
+ADV23007,160.00,paid,cash,2025-09-06,Lego EV3 Robotics,,,,old ticket TK-250906-004 | Cash
+ADV25044,180.00,paid,cash,2025-09-06,Lego EV3 Robotics,,,,old ticket TK-250906-005 | Cash
+ADV25036,180.00,paid,,2025-09-07,Lego EV3 Robotics,,,,old ticket TK-250907-001
+ADV25046,180.00,paid,,2025-09-07,Lego EV3 Robotics,,,,old ticket TK-250907-002
+ADV25043,513.00,paid,,2025-09-07,Lego EV3 Robotics,,,,old ticket TK-250907-003
+ADV25045,180.00,paid,,2025-09-07,Lego EV3 Robotics,,,,old ticket TK-250907-004 | Touch and Go
+ADV24036,180.00,paid,,2025-09-08,Lego EV3 Robotics,,,,old ticket TK-250908-001
+ADV24088,513.00,paid,,2025-09-08,Lego EV3 Robotics,,,,old ticket TK-250908-002 | Touch and Go
+ADV24038,180.00,paid,,2025-09-09,Lego EV3 Robotics,,,,old ticket TK-250909-001
+ADV25018,180.00,paid,,2025-09-09,Scratch,,,,old ticket TK-250909-002 | Touch and Go
+ADV25016,180.00,paid,,2025-09-10,Lego EV3 Robotics,,,,old ticket TK-250910-001
+ADV0014,180.00,paid,,2025-09-10,Scratch,,,,old ticket TK-250910-002
+ADV0014,83.00,paid,,2025-09-10,,,,,old ticket TK-250910-003
+ADV23075,315.00,paid,,2025-09-10,Lego EV3 Robotics,,,,old ticket TK-250910-004
+ADV24093,45.00,paid,,2025-09-10,Lego EV3 Robotics,,,,old ticket TK-250910-005
+ADV25020,180.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-001
+ADV25015,180.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-002
+ADV23048,360.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-003
+ADV23004,324.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-004
+ADV23004,83.00,paid,,2025-09-11,,,,,old ticket TK-250911-005
+ADV23006,324.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-006
+ADV23006,83.00,paid,,2025-09-11,,,,,old ticket TK-250911-007
+ADV23005,324.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-008
+ADV23005,83.00,paid,,2025-09-11,,,,,old ticket TK-250911-009
+ADV25055,180.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-010
+ADV25054,180.00,paid,,2025-09-11,Lego EV3 Robotics,,,,old ticket TK-250911-011
+ADV24011,180.00,paid,,2025-09-12,Scratch,,,,old ticket TK-250912-001 | Mirai Resources
+ADV23029,480.00,paid,,2025-09-12,Scratch,,,,old ticket TK-250912-002
+ADV23013,360.00,paid,,2025-09-13,Lego EV3 Robotics,,,,old ticket TK-250913-001
+ADV23008,180.00,paid,,2025-09-13,Lego EV3 Robotics,,,,old ticket TK-250913-002
+ADV25027,180.00,paid,cash,2025-09-14,Lego EV3 Robotics,,,,old ticket TK-250914-001 | Cash
+ADV0011,150.00,paid,,2025-09-17,Lego EV3 Robotics,,,,old ticket TK-250917-001
+ADV0012,150.00,paid,,2025-09-17,Scratch,,,,old ticket TK-250917-002
+ADV23041,180.00,paid,,2025-09-18,Lego EV3 Robotics,,,,old ticket TK-250918-001
+ADV25013,180.00,paid,,2025-09-19,Lego EV3 Robotics,,,,old ticket TK-250919-001 | Touch and Go
+ADV25038,180.00,paid,cash,2025-09-21,Scratch,,,,old ticket TK-250921-001 | Cash
+ADV25041,180.00,paid,,2025-09-21,Scratch,,,,old ticket TK-250921-002
+ADV25042,180.00,paid,,2025-09-21,Lego EV3 Robotics,,,,old ticket TK-250921-003
+ADV25047,972.00,paid,,2025-09-23,Lego EV3 Robotics,,,,old ticket TK-250923-001
+ADV24081,180.00,paid,,2025-09-24,Lego EV3 Robotics,,,,old ticket TK-250924-001
+ADV25031,180.00,paid,,2025-09-25,Lego EV3 Robotics,,,,old ticket TK-250925-001
+ADV25008,180.00,paid,,2025-09-25,Lego EV3 Robotics,,,,old ticket TK-250925-002
+ADV23007,160.00,paid,,2025-09-27,Lego EV3 Robotics,,,,old ticket TK-250927-001
+ADV25050,180.00,paid,,2025-09-27,Lego EV3 Robotics,,,,old ticket TK-250927-002 | Touch and Go
+ADV23045,150.00,paid,,2025-09-28,Scratch,,,,old ticket TK-250928-001
+ADV24090,180.00,paid,,2025-09-29,Lego EV3 Robotics,,,,old ticket TK-250929-001
+ADV23041,180.00,paid,,2025-09-29,Lego EV3 Robotics,,,,old ticket TK-250929-002
+ADV24059,180.00,paid,,2025-09-29,Lego EV3 Robotics,,,,old ticket TK-250929-003 | Touch and Go
+ADV23084,180.00,paid,,2025-10-01,Lego EV3 Robotics,,,,old ticket TK-251001-001
+ADV23084,120.00,paid,,2025-10-01,Scratch,,,,old ticket TK-251001-002
+ADV0045,150.00,paid,,2025-10-01,Lego EV3 Robotics,,,,old ticket TK-251001-003
+ADV24033,180.00,paid,,2025-10-01,Lego EV3 Robotics,,,,old ticket TK-251001-004
+ADV25029,180.00,paid,,2025-10-02,Lego EV3 Robotics,,,,old ticket TK-251002-001
+ADV23034,120.00,paid,,2025-10-02,Scratch,,,,old ticket TK-251002-002
+ADV24031,180.00,paid,,2025-10-03,Lego EV3 Robotics,,,,old ticket TK-251003-001
+ADV23003,180.00,paid,,2025-10-03,Scratch,,,,old ticket TK-251003-002
+ADV0055,150.00,paid,,2025-10-04,Scratch,,,,old ticket TK-251004-001
+ADV24022,180.00,paid,,2025-10-04,Lego EV3 Robotics,,,,old ticket TK-251004-002
+ADV25033,180.00,paid,promptpay,2025-10-04,Lego EV3 Robotics,,,,old ticket TK-251004-003 | QR Crossborder
+ADV23035,120.00,paid,,2025-10-04,Scratch,,,,old ticket TK-251004-004
+ADV23042,180.00,paid,,2025-10-04,Lego EV3 Robotics,,,,old ticket TK-251004-005
+ADV24005,180.00,paid,,2025-10-05,Scratch,,,,old ticket TK-251005-001
+ADV23022,90.00,paid,,2025-10-05,Scratch,,,,old ticket TK-251005-002
+ADV25056,180.00,paid,promptpay,2025-10-05,Lego EV3 Robotics,,,,old ticket TK-251005-003 | QR Crossborder
+ADV23008,180.00,paid,,2025-10-05,Lego EV3 Robotics,,,,old ticket TK-251005-004
+ADV24066,180.00,paid,,2025-10-06,Lego EV3 Robotics,,,,old ticket TK-251006-001
+ADV25009,180.00,paid,,2025-10-07,Scratch,,,,old ticket TK-251007-001
+ADV25052,180.00,paid,,2025-10-07,Lego EV3 Robotics,,,,old ticket TK-251007-002
+ADV24011,180.00,paid,,2025-10-08,Scratch,,,,old ticket TK-251008-001
+ADV25044,180.00,paid,promptpay,2025-10-11,Lego EV3 Robotics,,,,old ticket TK-251011-001 | DUITNOW QR
+ADV25057,180.00,paid,,2025-10-11,Lego EV3 Robotics,,,,old ticket TK-251011-002
+ADV0027,360.00,paid,,2025-10-11,Scratch,,,,old ticket TK-251011-003 | Touch and Go
+ADV24087,180.00,paid,,2025-10-12,Scratch,,,,old ticket TK-251012-001 | Touch and Go
+ADV25004,486.00,paid,promptpay,2025-10-12,Lego EV3 Robotics,,,,old ticket TK-251012-002 | QR Crossborder
+ADV25005,486.00,paid,,2025-10-12,Lego EV3 Robotics,,,,old ticket TK-251012-003
+ADV25058,180.00,paid,cash,2025-10-12,Lego EV3 Robotics,,,,old ticket TK-251012-004 | Cash
+ADV23084,180.00,paid,,2025-10-14,Lego EV3 Robotics,,,,old ticket TK-251014-001
+ADV23084,120.00,paid,,2025-10-14,Scratch,,,,old ticket TK-251014-002
+ADV25016,180.00,paid,,2025-10-16,Lego EV3 Robotics,,,,old ticket TK-251016-001
+ADV25008,180.00,paid,,2025-10-16,Lego EV3 Robotics,,,,old ticket TK-251016-002
+ADV24036,180.00,paid,,2025-10-17,Lego EV3 Robotics,,,,old ticket TK-251017-001
+ADV24038,180.00,paid,,2025-10-18,Lego EV3 Robotics,,,,old ticket TK-251018-001
+ADV25018,180.00,paid,,2025-10-19,Scratch,,,,old ticket TK-251019-001 | Touch and Go
+ADV25061,180.00,paid,,2025-10-23,Lego EV3 Robotics,,,,old ticket TK-251023-001
+ADV23007,160.00,paid,,2025-10-23,Lego EV3 Robotics,,,,old ticket TK-251023-002
+ADV25059,180.00,paid,promptpay,2025-10-25,Lego EV3 Robotics,,,,old ticket TK-251025-001 | DUITNOW QR
+ADV25060,180.00,paid,,2025-10-25,Lego EV3 Robotics,,,,old ticket TK-251025-002
+ADV23007,200.00,paid,,2025-10-25,Lego EV3 Robotics,,,,old ticket TK-251025-003
+ADV25031,180.00,paid,,2025-10-25,Lego EV3 Robotics,,,,old ticket TK-251025-004
+ADV25026,513.00,paid,,2025-10-27,Lego EV3 Robotics,,,,old ticket TK-251027-001
+ADV23045,150.00,paid,,2025-10-28,Scratch,,,,old ticket TK-251028-002
+ADV24013,180.00,paid,,2025-10-29,Lego EV3 Robotics,,,,old ticket TK-251029-001 | Siang Malam
+ADV25055,270.00,paid,,2025-10-30,Lego EV3 Robotics,,,,old ticket TK-251030-001
+ADV24024,972.00,paid,,2025-10-31,Lego EV3 Robotics,,,,old ticket TK-251031-001
+ADV0045,150.00,paid,,2025-10-31,Lego EV3 Robotics,,,,old ticket TK-251031-002
+ADV25039,513.00,paid,cash,2025-10-31,Lego EV3 Robotics,,,,old ticket TK-251031-003 | Cash
+ADV24057,180.00,paid,,2025-11-01,Scratch,,,,old ticket TK-251101-001
+ADV24022,180.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-002
+ADV23042,180.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-003
+ADV23008,180.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-004
+ADV24042,180.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-005
+ADV25040,512.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-006
+ADV24009,180.00,paid,,2025-11-01,Scratch,,,,old ticket TK-251101-007
+ADV24033,180.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-008
+ADV24021,360.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-009
+ADV0056,360.00,paid,,2025-11-01,Lego EV3 Robotics,,,,old ticket TK-251101-010
+ADV25027,180.00,paid,cash,2025-11-02,Lego EV3 Robotics,,,,old ticket TK-251102-001 | Cash
+ADV25038,513.00,paid,cash,2025-11-02,Scratch,,,,old ticket TK-251102-002 | Cash
+ADV23034,120.00,paid,,2025-11-02,Scratch,,,,old ticket TK-251102-003
+ADV0055,150.00,paid,,2025-11-03,Scratch,,,,old ticket TK-251103-001
+ADV24031,180.00,paid,,2025-11-03,Lego EV3 Robotics,,,,old ticket TK-251103-002
+ADV24066,180.00,paid,,2025-11-03,Lego EV3 Robotics,,,,old ticket TK-251103-003
+ADV23035,120.00,paid,,2025-11-04,Scratch,,,,old ticket TK-251104-001
+ADV24090,180.00,paid,,2025-11-04,Lego EV3 Robotics,,,,old ticket TK-251104-002
+ADV25029,180.00,paid,,2025-11-07,Lego EV3 Robotics,,,,old ticket TK-251107-001
+ADV25013,180.00,paid,,2025-11-07,Lego EV3 Robotics,,,,old ticket TK-251107-002
+ADV23022,90.00,paid,,2025-11-07,Scratch,,,,old ticket TK-251107-003
+ADV25009,180.00,paid,,2025-11-07,Scratch,,,,old ticket TK-251107-004
+ADV23006,324.00,paid,,2025-11-08,Lego EV3 Robotics,,,,old ticket TK-251108-001
+ADV23004,324.00,paid,,2025-11-08,Lego EV3 Robotics,,,,old ticket TK-251108-002
+ADV23005,324.00,paid,,2025-11-08,Lego EV3 Robotics,,,,old ticket TK-251108-003
+ADV25044,180.00,paid,,2025-11-08,Lego EV3 Robotics,,,,old ticket TK-251108-004
+ADV25004,486.00,paid,,2025-11-08,Lego EV3 Robotics,,,,old ticket TK-251108-005
+ADV25005,486.00,paid,,2025-11-08,Lego EV3 Robotics,,,,old ticket TK-251108-006
+ADV24003,180.00,paid,cash,2025-11-08,Lego EV3 Robotics,,,,old ticket TK-251108-007 | Cash
+ADV25052,180.00,paid,,2025-11-10,Lego EV3 Robotics,,,,old ticket TK-251110-001
+ADV23038,50.00,paid,,2025-11-11,,,,,old ticket TK-251111-001
+ADV25016,180.00,paid,,2025-11-12,Lego EV3 Robotics,,,,old ticket TK-251112-001
+ADV23007,160.00,paid,,2025-11-14,Lego EV3 Robotics,,,,old ticket TK-251114-001
+ADV25033,180.00,paid,cash,2025-11-14,Lego EV3 Robotics,,,,old ticket TK-251114-002 | Cash
+ADV25057,180.00,paid,,2025-11-15,Lego EV3 Robotics,,,,old ticket TK-251115-001 | Touch and Go
+ADV25046,180.00,paid,,2025-11-16,Lego EV3 Robotics,,,,old ticket TK-251116-001
+ADV25063,180.00,paid,,2025-11-16,Lego EV3 Robotics,,,,old ticket TK-251116-002 | Touch and Go
+ADV25018,90.00,paid,,2025-11-16,Scratch,,,,old ticket TK-251116-003 | Touch and Go
+ADV25061,180.00,paid,,2025-11-17,Lego EV3 Robotics,,,,old ticket TK-251117-001
+ADV25064,972.00,paid,,2025-11-19,Lego EV3 Robotics,,,,old ticket TK-251119-001
+ADV24082,513.00,paid,,2025-11-21,Lego EV3 Robotics,,,,old ticket TK-251121-001
+ADV24036,180.00,paid,,2025-11-22,Lego EV3 Robotics,,,,old ticket TK-251122-001
+ADV25059,180.00,paid,,2025-11-22,Lego EV3 Robotics,,,,old ticket TK-251122-002
+ADV25060,180.00,paid,,2025-11-22,Lego EV3 Robotics,,,,old ticket TK-251122-003
+ADV25036,180.00,paid,,2025-11-22,Lego EV3 Robotics,,,,old ticket TK-251122-004
+ADV24038,180.00,paid,,2025-11-22,Lego EV3 Robotics,,,,old ticket TK-251122-005
+ADV25065,180.00,paid,,2025-11-22,Lego EV3 Robotics,,,,old ticket TK-251122-006
+ADV25031,180.00,paid,,2025-11-26,Lego EV3 Robotics,,,,old ticket TK-251126-001
+ADV25055,513.00,paid,,2025-11-27,Lego EV3 Robotics,,,,old ticket TK-251127-001
+ADV25053,180.00,paid,,2025-11-27,Lego EV3 Robotics,,,,old ticket TK-251127-002
+ADV23034,120.00,paid,,2025-11-30,Scratch,,,,old ticket TK-251130-001
+ADV0045,180.00,paid,,2025-12-01,Lego EV3 Robotics,,,,old ticket TK-251201-001
+ADV24090,180.00,paid,,2025-12-01,Lego EV3 Robotics,,,,old ticket TK-251201-002
+ADV24033,180.00,paid,,2025-12-01,Lego EV3 Robotics,,,,old ticket TK-251201-003
+ADV0055,150.00,paid,,2025-12-02,Scratch,,,,old ticket TK-251202-001
+ADV25029,180.00,paid,,2025-12-03,Lego EV3 Robotics,,,,old ticket TK-251203-001
+ADV24031,180.00,paid,,2025-12-03,Lego EV3 Robotics,,,,old ticket TK-251203-002
+ADV24066,180.00,paid,,2025-12-03,Lego EV3 Robotics,,,,old ticket TK-251203-003
+ADV23013,360.00,paid,,2025-12-04,Lego EV3 Robotics,,,,old ticket TK-251204-001
+ADV23048,360.00,paid,,2025-12-04,Lego EV3 Robotics,,,,old ticket TK-251204-002
+ADV23013,360.00,paid,,2025-12-04,Lego EV3 Robotics,,,,old ticket TK-251204-003
+ADV0011,300.00,paid,,2025-12-04,Lego EV3 Robotics,,,,old ticket TK-251204-004
+ADV0012,300.00,paid,,2025-12-04,Scratch,,,,old ticket TK-251204-005
+ADV25066,180.00,paid,,2025-12-04,Lego EV3 Robotics,,,,old ticket TK-251204-006 | RHB
+ADV23075,540.00,paid,,2025-12-05,Lego EV3 Robotics,,,,old ticket TK-251205-001
+ADV23035,120.00,paid,,2025-12-05,Scratch,,,,old ticket TK-251205-002
+ADV25006,972.00,paid,,2025-12-05,Lego EV3 Robotics,,,,old ticket TK-251205-003
+ADV25043,513.00,paid,,2025-12-05,Lego EV3 Robotics,,,,old ticket TK-251205-004
+ADV24057,180.00,paid,promptpay,2025-12-06,Scratch,,,,old ticket TK-251206-001 | Duit now
+ADV23022,60.00,paid,,2025-12-06,Scratch,,,,old ticket TK-251206-002
+ADV25001,972.00,paid,,2025-12-06,Lego EV3 Robotics,,,,old ticket TK-251206-003
+ADV25056,225.00,paid,promptpay,2025-12-06,Lego EV3 Robotics,,,,old ticket TK-251206-004 | QR Crossborder
+ADV25052,180.00,paid,cash,2025-12-07,Lego EV3 Robotics,,,,old ticket TK-251207-001 | Cash
+ADV24022,180.00,paid,,2025-12-07,Lego EV3 Robotics,,,,old ticket TK-251207-002
+ADV24088,512.00,paid,,2025-12-07,Lego EV3 Robotics,,,,old ticket TK-251207-003 | Touch and Go
+ADV24087,180.00,paid,,2025-12-07,Scratch,,,,old ticket TK-251207-004 | Touch and Go
+ADV25063,513.00,paid,,2025-12-08,Lego EV3 Robotics,,,,old ticket TK-251208-001 | Touch and Go
+ADV23029,360.00,paid,,2025-12-10,Scratch,,,,old ticket TK-251210-002
+ADV25057,180.00,paid,,2025-12-11,Lego EV3 Robotics,,,,old ticket TK-251211-001 | Touch and Go
+ADV25044,180.00,paid,cash,2025-12-13,Lego EV3 Robotics,,,,old ticket TK-251213-001 | Cash
+ADV25027,180.00,paid,cash,2025-12-14,Lego EV3 Robotics,,,,old ticket TK-251214-001 | Cash
+ADV25061,180.00,paid,,2025-12-15,Lego EV3 Robotics,,,,old ticket TK-251215-001
+ADV25067,180.00,paid,,2025-12-18,Lego EV3 Robotics,,,,old ticket TK-251218-001
+ADV25059,160.00,paid,,2025-12-19,,,,,old ticket TK-251219-001 | Bootcamp
+ADV25060,160.00,paid,,2025-12-19,,,,,old ticket TK-251219-002 | Bootcamp
+ADV24046,100.00,paid,,2025-12-19,Lego EV3 Robotics,,,,old ticket TK-251219-003 | Cleared
+ADV24047,100.00,paid,,2025-12-19,Lego EV3 Robotics,,,,old ticket TK-251219-004 | Cleared
+ADV25026,180.00,paid,,2025-12-21,,,,,old ticket TK-251221-001
+ADV24038,180.00,paid,,2025-12-21,,,,,old ticket TK-251221-002
+ADV24038,180.00,paid,,2025-12-21,Lego EV3 Robotics,,,,old ticket TK-251221-003
+ADV25069,486.00,paid,,2025-12-21,Lego EV3 Robotics,,,,old ticket TK-251221-004 | Touch and Go
+ADV25070,486.00,paid,,2025-12-21,Lego EV3 Robotics,,,,old ticket TK-251221-005 | Touch and Go
+ADV24095,160.00,paid,,2025-12-21,,,,,old ticket TK-251221-006 | Touch and Go
+ADV24096,160.00,paid,,2025-12-21,,,,,old ticket TK-251221-007 | Touch and Go
+ADV25069,160.00,paid,,2025-12-22,,,,,old ticket TK-251222-001
+ADV25070,160.00,paid,,2025-12-22,,,,,old ticket TK-251222-002
+ADV23063,180.00,paid,,2025-12-23,,,,,old ticket TK-251223-001
+ADV25071,200.00,paid,,2025-12-23,,,,,old ticket TK-251223-002
+ADV25068,972.00,paid,,2025-12-23,Scratch,,,,old ticket TK-251223-003
+ADV25027,180.00,paid,,2025-12-23,,,,,old ticket TK-251223-004 | Touch and Go
+ADV25052,180.00,paid,cash,2025-12-23,,,,,old ticket TK-251223-005 | Cash
+ADV0056,160.00,paid,cash,2025-12-23,,,,,old ticket TK-251223-006 | Cash
+ADV0056,120.00,paid,cash,2025-12-23,Lego EV3 Robotics,,,,old ticket TK-251223-007 | Cash
+ADV25031,180.00,paid,,2025-12-26,Lego EV3 Robotics,,,,old ticket TK-251226-001
+ADV25060,180.00,paid,,2025-12-27,Lego EV3 Robotics,,,,old ticket TK-251227-001
+ADV25059,180.00,paid,,2025-12-27,Lego EV3 Robotics,,,,old ticket TK-251227-002
+ADV23045,150.00,paid,,2025-12-28,Scratch,,,,old ticket TK-251228-001
+ADV25058,180.00,paid,,2025-12-28,Lego EV3 Robotics,,,,old ticket TK-251228-002
+ADV25062,180.00,paid,,2025-12-28,Scratch,,,,old ticket TK-251228-003
+ADV24005,180.00,paid,,2025-12-28,Scratch,,,,old ticket TK-251228-004
+ADV23008,180.00,paid,,2025-12-28,Lego EV3 Robotics,,,,old ticket TK-251228-005
+ADV0045,150.00,paid,,2025-12-29,Lego EV3 Robotics,,,,old ticket TK-251229-001
+ADV23038,513.00,paid,,2025-12-31,Lego EV3 Robotics,,,,old ticket TK-251231-001
+ADV24066,180.00,paid,,2026-01-02,Lego EV3 Robotics,,,,old ticket TK-260102-001
+ADV25044,180.00,paid,,2026-01-03,Lego EV3 Robotics,,,,old ticket TK-260103-001
+ADV23035,120.00,paid,,2026-01-03,Scratch,,,,old ticket TK-260103-002
+ADV0055,150.00,paid,,2026-01-03,Scratch,,,,old ticket TK-260103-003
+ADV24031,180.00,paid,,2026-01-04,Lego EV3 Robotics,,,,old ticket TK-260104-001
+ADV25038,256.50,paid,cash,2026-01-04,Lego EV3 Robotics,,,,old ticket TK-260104-002 | Cash
+ADV25038,256.50,paid,cash,2026-01-04,Scratch,,,,old ticket TK-260104-003 | Cash
+ADV25052,180.00,paid,,2026-01-06,Lego EV3 Robotics,,,,old ticket TK-260106-001 | Rich Mummy Bakery
+ADV23042,180.00,paid,,2026-01-06,Lego EV3 Robotics,,,,old ticket TK-260106-002
+ADV23034,120.00,paid,,2026-01-07,Scratch,,,,old ticket TK-260107-001
+ADV23022,120.00,paid,,2026-01-07,Scratch,,,,old ticket TK-260107-002
+ADV24064,180.00,paid,,2026-01-08,Lego EV3 Robotics,,,,old ticket TK-260108-001
+ADV24064,180.00,paid,,2026-01-08,Lego EV3 Robotics,,,,old ticket TK-260108-002
+ADV25048,121.50,paid,,2026-01-10,Scratch,,,,old ticket TK-260110-001
+ADV25048,121.50,paid,,2026-01-10,Lego EV3 Robotics,,,,old ticket TK-260110-002
+ADV25049,729.00,paid,,2026-01-10,Scratch,,,,old ticket TK-260110-003
+ADV24042,180.00,paid,,2026-01-10,Lego EV3 Robotics,,,,old ticket TK-260110-004
+ADV24022,180.00,paid,,2026-01-11,Lego EV3 Robotics,,,,old ticket TK-260111-001
+ADV25046,180.00,paid,,2026-01-11,Lego EV3 Robotics,,,,old ticket TK-260111-002
+ADV23008,180.00,paid,,2026-01-11,Lego EV3 Robotics,,,,old ticket TK-260111-003
+ADV25069,486.00,paid,,2026-01-11,Lego EV3 Robotics,,,,old ticket TK-260111-004
+ADV25070,486.00,paid,,2026-01-11,Lego EV3 Robotics,,,,old ticket TK-260111-005
+ADV25065,180.00,paid,,2026-01-12,Lego EV3 Robotics,,,,old ticket TK-260112-001
+ADV25009,180.00,paid,,2026-01-12,Scratch,,,,old ticket TK-260112-002
+ADV25061,180.00,paid,,2026-01-14,Lego EV3 Robotics,,,,old ticket TK-260114-001
+ADV25057,180.00,paid,,2026-01-15,Lego EV3 Robotics,,,,old ticket TK-260115-001
+ADV25067,180.00,paid,,2026-01-16,Lego EV3 Robotics,,,,old ticket TK-260116-001
+ADV25013,180.00,paid,,2026-01-17,Lego EV3 Robotics,,,,old ticket TK-260117-001
+ADV25056,180.00,paid,,2026-01-18,Lego EV3 Robotics,,,,old ticket TK-260118-001
+ADV26002,513.00,paid,,2026-01-23,Lego EV3 Robotics,,,,old ticket TK-260123-001
+ADV25039,513.00,paid,cash,2026-01-24,Lego EV3 Robotics,,,,old ticket TK-260124-001 | Cash
+ADV24057,180.00,paid,,2026-01-24,Scratch,,,,old ticket TK-260124-002
+ADV26003,513.00,paid,,2026-01-24,Lego EV3 Robotics,,,,old ticket TK-260124-003 | Touch and Go
+ADV26001,180.00,paid,,2026-01-25,Lego EV3 Robotics,,,,old ticket TK-260125-001
+ADV25005,486.00,paid,,2026-01-25,Lego EV3 Robotics,,,,old ticket TK-260125-002
+ADV25004,486.00,paid,,2026-01-25,Lego EV3 Robotics,,,,old ticket TK-260125-003
+ADV25031,180.00,paid,,2026-01-26,Lego EV3 Robotics,,,,old ticket TK-260126-001
+ADV23045,150.00,paid,,2026-01-28,Scratch,,,,old ticket TK-260128-001
+ADV26004,180.00,paid,,2026-01-29,Lego EV3 Robotics,,,,old ticket TK-260129-001
+ADV0045,150.00,paid,,2026-01-29,Lego EV3 Robotics,,,,old ticket TK-260129-002
+ADV26006,180.00,paid,,2026-01-30,Lego EV3 Robotics,,,,old ticket TK-260130-001
+ADV25027,180.00,paid,,2026-01-30,Lego EV3 Robotics,,,,old ticket TK-260130-002
+ADV26005,972.00,paid,cash,2026-01-31,Lego EV3 Robotics,,,,old ticket TK-260131-001 | Cash
+ADV25044,180.00,paid,,2026-01-31,Lego EV3 Robotics,,,,old ticket TK-260131-002
+ADV23034,120.00,paid,,2026-02-02,Scratch,,,,old ticket TK-260202-001
+ADV24066,180.00,paid,,2026-02-02,Lego EV3 Robotics,,,,old ticket TK-260202-002
+ADV24021,360.00,paid,,2026-02-02,Lego EV3 Robotics,,,,old ticket TK-260202-003
+ADV23042,180.00,paid,,2026-02-05,Lego EV3 Robotics,,,,old ticket TK-260205-001
+ADV0055,150.00,paid,,2026-02-05,Scratch,,,,old ticket TK-260205-002
+ADV23035,120.00,paid,,2026-02-05,Scratch,,,,old ticket TK-260205-003
+ADV25009,180.00,paid,,2026-02-05,Scratch,,,,old ticket TK-260205-004
+ADV23019,180.00,paid,,2026-02-06,Scratch,,,,old ticket TK-260206-004
+ADV23003,180.00,paid,,2026-02-06,Scratch,,,,old ticket TK-260206-005
+ADV23022,210.00,paid,,2026-02-06,Scratch,,,,old ticket TK-260206-006
+ADV23075,180.00,paid,,2026-02-06,Lego EV3 Robotics,,,,old ticket TK-260206-007
+ADV25069,486.00,paid,,2026-02-06,Lego EV3 Robotics,,,,old ticket TK-260206-008
+ADV25070,486.00,paid,,2026-02-06,Lego EV3 Robotics,,,,old ticket TK-260206-009
+ADV0012,300.00,paid,,2026-02-07,Scratch,,,,old ticket TK-260207-001
+ADV0011,300.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-002
+ADV25050,180.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-003
+ADV25059,180.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-004
+ADV25060,180.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-005
+ADV23007,160.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-006
+ADV23048,180.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-007
+ADV23084,180.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-008
+ADV23084,120.00,paid,,2026-02-07,Scratch,,,,old ticket TK-260207-009
+ADV24042,180.00,paid,,2026-02-07,Lego EV3 Robotics,,,,old ticket TK-260207-010
+ADV25056,180.00,paid,,2026-02-08,Lego EV3 Robotics,,,,old ticket TK-260208-001
+ADV24022,180.00,paid,,2026-02-08,Lego EV3 Robotics,,,,old ticket TK-260208-002
+ADV26001,180.00,paid,,2026-02-08,Lego EV3 Robotics,,,,old ticket TK-260208-003
+ADV26007,180.00,paid,,2026-02-08,Lego EV3 Robotics,,,,old ticket TK-260208-004
+ADV25061,180.00,paid,,2026-02-10,Lego EV3 Robotics,,,,old ticket TK-260210-001
+ADV25061,180.00,paid,,2026-02-10,Lego EV3 Robotics,,,,old ticket TK-260210-002
+ADV26012,180.00,paid,,2026-02-12,Lego EV3 Robotics,,,,old ticket TK-260212-001
+ADV26013,180.00,paid,,2026-02-12,Lego EV3 Robotics,,,,old ticket TK-260212-002
+ADV25057,180.00,paid,,2026-02-14,Lego EV3 Robotics,,,,old ticket TK-260214-001
+ADV25008,180.00,paid,,2026-02-15,Lego EV3 Robotics,,,,old ticket TK-260215-001
+ADV24031,180.00,paid,,2026-02-15,Lego EV3 Robotics,,,,old ticket TK-260215-002
+ADV25067,180.00,paid,,2026-02-17,Lego EV3 Robotics,,,,old ticket TK-260217-001
+ADV26009,180.00,paid,,2026-02-25,Scratch,,,,old ticket TK-260225-001
+ADV26010,180.00,paid,,2026-02-25,Scratch,,,,old ticket TK-260225-002
+ADV25031,180.00,paid,,2026-02-26,Lego EV3 Robotics,,,,old ticket TK-260226-001
+ADV25036,180.00,paid,,2026-02-27,Lego EV3 Robotics,,,,old ticket TK-260227-001
+ADV0045,150.00,paid,,2026-02-27,Lego EV3 Robotics,,,,old ticket TK-260227-002
+ADV23045,150.00,paid,,2026-02-28,Scratch,,,,old ticket TK-260228-001
+ADV24026,972.00,paid,,2026-02-28,Lego EV3 Robotics,,,,old ticket TK-260228-002
+ADV25013,513.00,paid,,2026-02-28,Lego EV3 Robotics,,,,old ticket TK-260228-003
+ADV25040,513.00,paid,,2026-02-28,Lego EV3 Robotics,,,,old ticket TK-260228-004
+ADV0055,150.00,paid,,2026-03-01,Scratch,,,,old ticket TK-260301-001
+ADV25052,180.00,paid,,2026-03-01,Lego EV3 Robotics,,,,old ticket TK-260301-002 | Rich Mummy Bakery
+ADV24031,180.00,paid,,2026-03-02,Lego EV3 Robotics,,,,old ticket TK-260302-001
+ADV25065,180.00,paid,,2026-03-03,Lego EV3 Robotics,,,,old ticket TK-260303-001
+ADV23034,120.00,paid,,2026-03-03,Scratch,,,,old ticket TK-260303-002
+ADV24066,180.00,paid,,2026-03-04,Lego EV3 Robotics,,,,old ticket TK-260304-001
+ADV24009,360.00,paid,,2026-03-06,Scratch,,,,old ticket TK-260306-001
+ADV23035,120.00,paid,,2026-03-06,Scratch,,,,old ticket TK-260306-002
+ADV26006,180.00,paid,,2026-03-06,Lego EV3 Robotics,,,,old ticket TK-260306-003
+ADV23022,180.00,paid,,2026-03-06,Scratch,,,,old ticket TK-260306-004
+ADV24022,180.00,paid,,2026-03-08,Lego EV3 Robotics,,,,old ticket TK-260308-001
+ADV25069,486.00,paid,,2026-03-08,Lego EV3 Robotics,,,,old ticket TK-260308-002
+ADV25070,486.00,paid,,2026-03-08,Lego EV3 Robotics,,,,old ticket TK-260308-003
+ADV25057,180.00,paid,,2026-03-12,Lego EV3 Robotics,,,,old ticket TK-260312-001
+ADV25044,486.00,paid,,2026-03-14,Lego EV3 Robotics,,,,old ticket TK-260314-001
+ADV26011,486.00,paid,,2026-03-14,Lego EV3 Robotics,,,,old ticket TK-260314-002
+ADV0056,360.00,paid,,2026-03-01,Lego EV3 Robotics,,,,old ticket TK-260301-003
+ADV26014,180.00,paid,,2026-03-14,Lego EV3 Robotics,,,,old ticket TK-260314-003
+ADV25067,180.00,paid,,2026-03-19,Lego EV3 Robotics,,,,old ticket TK-260319-001
+ADV24057,180.00,paid,,2026-03-19,Scratch,,,,old ticket TK-260319-002
+ADV25052,180.00,paid,,2026-03-26,Lego EV3 Robotics,,,,old ticket TK-260326-001
+ADV25031,180.00,paid,,2026-03-26,Lego EV3 Robotics,,,,old ticket TK-260326-002
+ADV26015,972.00,paid,,2026-03-27,Lego EV3 Robotics,,,,old ticket TK-260327-001
+ADV23045,150.00,paid,,2026-03-28,Scratch,,,,old ticket TK-260328-001
+ADV0045,150.00,paid,,2026-03-29,Lego EV3 Robotics,,,,old ticket TK-260329-001
+ADV25005,486.00,paid,,2026-03-29,Lego EV3 Robotics,,,,old ticket TK-260329-002
+ADV25004,486.00,paid,,2026-03-29,Lego EV3 Robotics,,,,old ticket TK-260329-003
+ADV25036,180.00,paid,,2026-03-29,Lego EV3 Robotics,,,,old ticket TK-260329-004
+ADV26001,180.00,paid,,2026-03-30,Lego EV3 Robotics,,,,old ticket TK-260330-001
+ADV26007,180.00,paid,,2026-03-30,Lego EV3 Robotics,,,,old ticket TK-260330-002
+ADV24018,180.00,paid,,2026-03-31,Lego EV3 Robotics,,,,old ticket TK-260331-001
+ADV23034,120.00,paid,,2026-04-02,Scratch,,,,old ticket TK-260402-001
+ADV25066,180.00,paid,,2026-04-02,Lego EV3 Robotics,,,,old ticket TK-260402-002
+ADV26004,180.00,paid,,2026-04-02,Lego EV3 Robotics,,,,old ticket TK-260402-003
+ADV23035,120.00,paid,,2026-04-03,Scratch,,,,old ticket TK-260403-002
+ADV25009,180.00,paid,,2026-04-03,Scratch,,,,old ticket TK-260403-003
+ADV24066,180.00,paid,,2026-04-03,Lego EV3 Robotics,,,,old ticket TK-260403-004
+ADV24022,180.00,paid,,2026-04-05,Lego EV3 Robotics,,,,old ticket TK-260405-001
+ADV24005,135.00,paid,,2026-04-05,Scratch,,,,old ticket TK-260405-002
+ADV25026,513.00,paid,,2026-04-06,Lego EV3 Robotics,,,,old ticket TK-260406-001
+ADV24031,180.00,paid,,2026-04-06,Lego EV3 Robotics,,,,old ticket TK-260406-002
+ADV23022,180.00,paid,,2026-04-08,Scratch,,,,old ticket TK-260408-001
+ADV23008,180.00,paid,,2026-04-11,Lego EV3 Robotics,,,,old ticket TK-260411-001
+ADV25063,513.00,paid,,2026-04-11,Lego EV3 Robotics,,,,old ticket TK-260411-002
+ADV25059,180.00,paid,,2026-04-12,Lego EV3 Robotics,,,,old ticket TK-260412-001
+ADV25060,180.00,paid,,2026-04-12,Lego EV3 Robotics,,,,old ticket TK-260412-002
+ADV23006,324.00,paid,,2026-04-15,Lego EV3 Robotics,,,,old ticket TK-260415-001
+ADV23004,324.00,paid,,2026-04-15,Lego EV3 Robotics,,,,old ticket TK-260415-002
+ADV23005,324.00,paid,,2026-04-15,Lego EV3 Robotics,,,,old ticket TK-260415-003
+ADV25057,180.00,paid,,2026-04-15,Lego EV3 Robotics,,,,old ticket TK-260415-004
+ADV26009,270.00,paid,,2026-04-16,Scratch,,,,old ticket TK-260416-001
+ADV26010,270.00,paid,,2026-04-16,Scratch,,,,old ticket TK-260416-002
+ADV25008,360.00,paid,,2026-04-16,Lego EV3 Robotics,,,,old ticket TK-260416-003
+ADV25067,180.00,paid,,2026-04-16,Lego EV3 Robotics,,,,old ticket TK-260416-004
+ADV-001-26016,513.00,paid,,2026-04-19,Lego EV3 Robotics,,,,old ticket TK-260419-001
+ADV25069,486.00,paid,,2026-04-22,Lego EV3 Robotics,,,,old ticket TK-260422-001
+ADV25070,486.00,paid,,2026-04-22,Lego EV3 Robotics,,,,old ticket TK-260422-002
+ADV23013,180.00,paid,,2026-04-22,,,,,old ticket TK-260422-005
+ADV23013,360.00,paid,,2026-04-22,Lego EV3 Robotics,,,,old ticket TK-260422-006
+ADV25055,513.00,paid,,2026-04-24,Lego EV3 Robotics,,,,old ticket TK-260424-001
+ADV24011,225.00,paid,,2026-04-25,Scratch,,,,old ticket TK-260425-001
+ADV26012,180.00,paid,,2026-04-25,Lego EV3 Robotics,,,,old ticket TK-260425-002
+ADV26013,180.00,paid,,2026-04-25,Lego EV3 Robotics,,,,old ticket TK-260425-003
+ADV-001-26017,180.00,paid,,2026-04-25,Lego EV3 Robotics,,,,old ticket TK-260425-004
+ADV0045,150.00,paid,,2026-04-27,Lego EV3 Robotics,,,,old ticket TK-260427-001
+ADV25031,180.00,paid,,2026-04-27,Lego EV3 Robotics,,,,old ticket TK-260427-002
+ADV23029,480.00,paid,,2026-04-27,Scratch,,,,old ticket TK-260427-003
+ADV26004,180.00,paid,,2026-04-29,Lego EV3 Robotics,,,,old ticket TK-260429-001
+ADV25061,180.00,paid,,2026-04-30,Lego EV3 Robotics,,,,old ticket TK-260430-001
+ADV24018,180.00,paid,,2026-04-30,Lego EV3 Robotics,,,,old ticket TK-260430-002
+ADV23034,180.00,paid,,2026-05-01,Scratch,,,,old ticket TK-260501-001
+ADV24022,180.00,paid,,2026-05-03,Lego EV3 Robotics,,,,old ticket TK-260503-001
+ADV25004,972.00,paid,,2026-05-03,Lego EV3 Robotics,,,,old ticket TK-260503-002
+ADV25005,486.00,paid,,2026-05-03,Lego EV3 Robotics,,,,old ticket TK-260503-003
+ADV25005,486.00,paid,,2026-05-03,Scratch,,,,old ticket TK-260503-004
+ADV23035,120.00,paid,,2026-05-04,Scratch,,,,old ticket TK-260504-001
+ADV24066,180.00,paid,,2026-05-05,Lego EV3 Robotics,,,,old ticket TK-260505-001
+ADV25027,180.00,paid,,2026-05-05,Lego EV3 Robotics,,,,old ticket TK-260505-002 | Touch and Go
+ADV24021,360.00,paid,,2026-05-06,Lego EV3 Robotics,,,,old ticket TK-260506-001
+ADV0055,150.00,paid,,2026-05-06,Scratch,,,,old ticket TK-260506-002
+ADV25009,180.00,paid,,2026-05-06,Scratch,,,,old ticket TK-260506-003
+ADV23022,240.00,paid,,2026-05-06,Scratch,,,,old ticket TK-260506-004
+ADV24009,180.00,paid,,2026-05-07,Scratch,,,,old ticket TK-260507-001
+ADV24031,180.00,paid,,2026-05-08,Lego EV3 Robotics,,,,old ticket TK-260508-005
+ADV23084,360.00,paid,,2026-05-08,Lego EV3 Robotics,,,,old ticket TK-260508-006
+ADV23084,240.00,paid,,2026-05-08,Scratch,,,,old ticket TK-260508-007
+ADV23075,360.00,paid,,2026-05-08,Lego EV3 Robotics,,,,old ticket TK-260508-008
+ADV25050,180.00,paid,,2026-05-09,Lego EV3 Robotics,,,,old ticket TK-260509-001
+ADV25059,180.00,paid,,2026-05-10,Lego EV3 Robotics,,,,old ticket TK-260510-001
+ADV25060,180.00,paid,,2026-05-10,Lego EV3 Robotics,,,,old ticket TK-260510-002
+ADV25006,972.00,paid,,2026-05-10,Lego EV3 Robotics,,,,old ticket TK-260510-003
+ADV26014,180.00,paid,,2026-05-11,Lego EV3 Robotics,,,,old ticket TK-260511-001
+ADV24057,180.00,paid,,2026-05-11,Scratch,,,,old ticket TK-260511-002
+ADV25057,180.00,paid,,2026-05-14,Lego EV3 Robotics,,,,old ticket TK-260514-001
+ADV26002,513.00,paid,,2026-05-16,Lego EV3 Robotics,,,,old ticket TK-260516-001
+ADV23008,180.00,paid,,2026-05-17,Lego EV3 Robotics,,,,old ticket TK-260517-001
+ADV0056,360.00,paid,cash,2026-05-17,Lego EV3 Robotics,,,,old ticket TK-260517-002 | Cash
+ADV25036,180.00,paid,,2026-05-22,Lego EV3 Robotics,,,,old ticket TK-260522-003
+ADV24038,540.00,paid,,2026-05-22,Lego EV3 Robotics,,,,old ticket TK-260522-004
+ADV26009,337.50,paid,,2026-05-22,Scratch,,,,old ticket TK-260522-005
+ADV26010,337.50,paid,,2026-05-22,Scratch,,,,old ticket TK-260522-006
+ADV25067,180.00,paid,,2026-05-22,Lego EV3 Robotics,,,,old ticket TK-260522-007
+ADV25043,513.00,paid,,2026-05-24,Lego EV3 Robotics,,,,old ticket TK-260524-001
+ADV23012,180.00,paid,,2026-05-24,Lego EV3 Robotics,,,,old ticket TK-260524-002
+ADV25061,180.00,paid,,2026-05-25,Lego EV3 Robotics,,,,old ticket TK-260525-001
