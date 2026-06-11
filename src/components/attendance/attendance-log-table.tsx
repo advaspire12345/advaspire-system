@@ -756,20 +756,20 @@ export function AttendanceLogTable({
                         {getStatusBadge(row.status)}
                       </td>
 
-                      {/* Lesson */}
+                      {/* Lesson — one line per activity stacked. */}
                       <td
                         className="px-4 py-3"
                         style={{ width: columns[9].width }}
                       >
-                        <TruncatedText text={row.lesson} maxLength={15} />
+                        <ActivityLogCell activities={row.activities} field="lesson" maxLength={15} />
                       </td>
 
-                      {/* Mission */}
+                      {/* Mission — one line per activity stacked. */}
                       <td
                         className="px-4 py-3"
                         style={{ width: columns[10].width }}
                       >
-                        <TruncatedText text={row.mission} maxLength={12} />
+                        <ActivityLogCell activities={row.activities} field="mission" maxLength={12} />
                       </td>
 
                       {/* Activity */}
@@ -854,5 +854,38 @@ export function AttendanceLogTable({
         onDelete={handleDelete}
       />
     </>
+  );
+}
+
+/**
+ * Renders the Lesson or Mission column of an attendance-log row. Multiple
+ * activities show stacked — first line default, the rest muted. Inlines its
+ * own truncation since the TruncatedText helper above lives inside a
+ * component closure and isn't reachable from this module-scope helper.
+ */
+function ActivityLogCell({
+  activities,
+  field,
+  maxLength,
+}: {
+  activities: { lesson: string; mission: string }[] | null | undefined;
+  field: "lesson" | "mission";
+  maxLength: number;
+}) {
+  const list = (activities ?? []).filter((a) => a[field]);
+  const truncate = (s: string) => (s.length > maxLength ? s.slice(0, maxLength - 1) + "…" : s);
+  if (list.length === 0) return <span className="text-sm text-muted-foreground">-</span>;
+  return (
+    <div className="leading-tight space-y-0.5">
+      {list.map((a, i) => (
+        <div
+          key={i}
+          className={i === 0 ? "text-sm" : "text-xs text-muted-foreground"}
+          title={a[field]}
+        >
+          {truncate(a[field])}
+        </div>
+      ))}
+    </div>
   );
 }

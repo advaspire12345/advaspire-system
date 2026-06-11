@@ -35,18 +35,53 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, Event[]>();
+    const weekdayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const pushAt = (dateStr: string, ev: Event) => {
+      if (!map.has(dateStr)) map.set(dateStr, []);
+      map.get(dateStr)!.push(ev);
+    };
     for (const ev of visibleEvents) {
-      const start = new Date(ev.date + "T00:00:00");
-      const endStr = ev.end_date && ev.end_date !== ev.date ? ev.end_date : ev.date;
-      const end = new Date(endStr + "T00:00:00");
-      for (const d of getDateRange(start, end)) {
-        const key = format(d, "yyyy-MM-dd");
-        if (!map.has(key)) map.set(key, []);
-        map.get(key)!.push(ev);
+      if (ev.is_recurring) {
+        // Recurring events expand across the visible month range (and a one
+        // month buffer either side to cover the calendar's neighbouring weeks).
+        // For open-ended ones we cap at the buffer too — the visible window is
+        // what matters for the user looking at "this month".
+        const days = ev.recurring_days ?? [];
+        if (days.length === 0) continue;
+        const winStart = new Date(new Date());
+        winStart.setMonth(winStart.getMonth() - 1);
+        const winEnd = new Date(new Date());
+        winEnd.setMonth(winEnd.getMonth() + 2);
+        const lowerBound = ev.is_bounded && ev.recurring_start_date
+          ? new Date(ev.recurring_start_date + "T00:00:00")
+          : winStart;
+        const upperBound = ev.is_bounded && ev.recurring_end_date
+          ? new Date(ev.recurring_end_date + "T00:00:00")
+          : winEnd;
+        const lo = winStart > lowerBound ? winStart : lowerBound;
+        const hi = winEnd < upperBound ? winEnd : upperBound;
+        for (const d of getDateRange(lo, hi)) {
+          if (days.includes(weekdayNames[d.getDay()])) {
+            pushAt(format(d, "yyyy-MM-dd"), ev);
+          }
+        }
+      } else if (ev.occurrences && ev.occurrences.length > 0) {
+        // Specific-dates mode with proper occurrences loaded.
+        for (const o of ev.occurrences) {
+          pushAt(o.date, ev);
+        }
+      } else {
+        // Fallback to the legacy denormalised columns (single date or range).
+        const start = new Date(ev.date + "T00:00:00");
+        const endStr = ev.end_date && ev.end_date !== ev.date ? ev.end_date : ev.date;
+        const end = new Date(endStr + "T00:00:00");
+        for (const d of getDateRange(start, end)) {
+          pushAt(format(d, "yyyy-MM-dd"), ev);
+        }
       }
     }
     return map;
-  }, [visibleEvents]);
+  }, [visibleEvents, new Date()]);
 
   const eventSlots = useMemo(() => {
     const slots = new Map<string, number>();

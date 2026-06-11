@@ -7,6 +7,11 @@ import { cn } from "@/lib/utils";
 export interface SelectOption {
   value: string;
   label: string;
+  /** When true, this row renders as a non-interactive section header.
+   *  Use to group options visually inside a single dropdown without needing
+   *  a separate grouping component. The row is gray, not selectable, not
+   *  hover-highlighted. */
+  disabled?: boolean;
   /** Optional: for richer display with name, ID, and balance */
   meta?: {
     name: string;
@@ -63,11 +68,13 @@ const FloatingSelect = React.forwardRef<HTMLDivElement, FloatingSelectProps>(
 
     // Filter options based on search (skipped when parent does server-side
     // filtering — in that case `options` already reflects the search term).
+    // Section headers (disabled rows) are always shown so the grouping is
+    // visible even mid-search.
     const filteredOptions = React.useMemo(() => {
       if (disableClientFilter) return options;
       if (!searchTerm.trim()) return options;
       return options.filter((opt) =>
-        opt.label.toLowerCase().includes(searchTerm.toLowerCase())
+        opt.disabled || opt.label.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }, [options, searchTerm, disableClientFilter]);
 
@@ -211,7 +218,16 @@ const FloatingSelect = React.forwardRef<HTMLDivElement, FloatingSelectProps>(
             {/* Options List */}
             <div className="max-h-48 overflow-y-auto py-2">
               {filteredOptions.length > 0 ? (
-                filteredOptions.map((option) => (
+                filteredOptions.map((option) =>
+                  option.disabled ? (
+                    // Section-header row — non-interactive, gray styling.
+                    <div
+                      key={option.value}
+                      className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground"
+                    >
+                      {option.label}
+                    </div>
+                  ) : (
                   <div
                     key={option.value}
                     role="option"
@@ -254,7 +270,8 @@ const FloatingSelect = React.forwardRef<HTMLDivElement, FloatingSelectProps>(
                       </span>
                     )}
                   </div>
-                ))
+                  )
+                )
               ) : (
                 <div className="px-4 py-6 text-center text-sm text-gray-500">
                   {searchTerm ? "No matching options" : "No options available"}

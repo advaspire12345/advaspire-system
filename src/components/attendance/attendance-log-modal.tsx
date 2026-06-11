@@ -104,8 +104,7 @@ export function AttendanceLogModal({
   const [adcoin, setAdcoin] = useState<number>(0);
   const [projectPhotos, setProjectPhotos] = useState<string[]>([]);
   const [reason, setReason] = useState("");
-  const [lesson, setLesson] = useState("");
-  const [mission, setMission] = useState("");
+  const [activities, setActivities] = useState<{ lesson: string; mission: string }[]>([]);
 
   // Curriculum state
   const [curriculumLessons, setCurriculumLessons] = useState<CurriculumLesson[]>([]);
@@ -124,8 +123,7 @@ export function AttendanceLogModal({
       setAdcoin(record.adcoin ?? 0);
       setProjectPhotos(record.projectPhotos ?? []);
       setReason(record.notes ?? "");
-      setLesson(record.lesson ?? "");
-      setMission(record.mission ?? "");
+      setActivities(record.activities ?? []);
     }
   }, [open, record]);
 
@@ -160,64 +158,10 @@ export function AttendanceLogModal({
     }
   }, [open, record]);
 
-  // Reset mission when lesson changes (only if user changes it, not on initial load)
-  const [initialLoad, setInitialLoad] = useState(true);
-  useEffect(() => {
-    if (initialLoad) {
-      setInitialLoad(false);
-      return;
-    }
-    setMission("");
-  }, [lesson]);
+  // This modal is read-only (mode is either "delete" or "edit", both treated
+  // as readonly downstream). No lesson/mission picker is rendered — the
+  // activities are displayed as a stacked list below.
 
-  // Reset initialLoad when modal opens
-  useEffect(() => {
-    if (open) {
-      setInitialLoad(true);
-    }
-  }, [open]);
-
-  // Lesson options: curriculum lessons + Competition
-  const lessonOptions = useMemo(() => {
-    const options = curriculumLessons.map((l) => ({
-      value: l.title,
-      label: l.title,
-    }));
-    // Add Competition option at the end
-    options.push({ value: "Competition", label: "Competition" });
-    return options;
-  }, [curriculumLessons]);
-
-  // Mission options: depends on selected lesson
-  const missionOptions = useMemo(() => {
-    if (!lesson) return [];
-
-    // If Competition is selected, show Preparation and Showcase
-    if (lesson === "Competition") {
-      return COMPETITION_MISSIONS;
-    }
-
-    // Find the selected lesson in curriculum
-    const selectedLesson = curriculumLessons.find((l) => l.title === lesson);
-    if (!selectedLesson || !selectedLesson.missions || selectedLesson.missions.length === 0) {
-      // Even if no missions defined, show Build Only option
-      return [{ value: "Build Only", label: "Build Only" }];
-    }
-
-    // Start with "Build Only" option for curriculum lessons
-    const options = [{ value: "Build Only", label: "Build Only" }];
-
-    // Map missions to options - use level as the display text if no other identifier
-    selectedLesson.missions.forEach((m, index) => {
-      const label = m.level !== null ? `Level ${m.level}` : `Mission ${index + 1}`;
-      options.push({
-        value: label,
-        label: label,
-      });
-    });
-
-    return options;
-  }, [lesson, curriculumLessons]);
 
   const handleSubmit = async () => {
     if (!record) return;
@@ -483,62 +427,42 @@ export function AttendanceLogModal({
             ) : (
               /* Activity fields - shown when present/late/excused */
               <>
-                {/* Lesson and Mission */}
-                <div className="grid grid-cols-2 gap-4">
-                  {isReadonly ? (
+                {/* Activities — stacked read-only Lesson + Mission pairs.
+                    History rows are immutable here; the modal just shows what
+                    the teacher recorded. If there are no activities (older
+                    rows pre-migration etc.) show a single "-" placeholder pair. */}
+                {(activities.length > 0 ? activities : [{ lesson: "", mission: "" }]).map((act, idx) => (
+                  <div key={idx} className="grid grid-cols-2 gap-4">
                     <div className="relative">
                       <input
                         type="text"
                         readOnly
-                        value={lesson || "-"}
+                        value={act.lesson || "-"}
                         className={cn(
                           "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
-                          readonlyFieldClass
+                          readonlyFieldClass,
                         )}
                       />
                       <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                        Lesson
+                        Lesson{activities.length > 1 ? ` ${idx + 1}` : ""}
                       </label>
                     </div>
-                  ) : (
-                    <FloatingSelect
-                      id="select-lesson"
-                      label="Lesson"
-                      placeholder={isLoadingCurriculum ? "Loading..." : "Select lesson..."}
-                      value={lesson}
-                      onChange={setLesson}
-                      options={lessonOptions}
-                      searchable
-                    />
-                  )}
-
-                  {isReadonly ? (
                     <div className="relative">
                       <input
                         type="text"
                         readOnly
-                        value={mission || "-"}
+                        value={act.mission || "-"}
                         className={cn(
                           "peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground flex items-center",
-                          readonlyFieldClass
+                          readonlyFieldClass,
                         )}
                       />
                       <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                        Mission
+                        Mission{activities.length > 1 ? ` ${idx + 1}` : ""}
                       </label>
                     </div>
-                  ) : (
-                    <FloatingSelect
-                      id="select-mission"
-                      label="Mission"
-                      placeholder={!lesson ? "Select lesson first..." : "Select mission..."}
-                      value={mission}
-                      onChange={setMission}
-                      options={missionOptions}
-                      searchable
-                    />
-                  )}
-                </div>
+                  </div>
+                ))}
 
                 {/* Activity Completed */}
                 {isReadonly ? (

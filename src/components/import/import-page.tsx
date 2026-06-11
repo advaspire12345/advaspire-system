@@ -192,6 +192,13 @@ const ATTENDANCE_EXAMPLE_ROWS = [[
   "Jane Doe",
   "Lesson 4 - Sensors",
   "Build a line follower",
+  // lesson_2 / mission_2 — used when the student finished a second activity
+  // in the same session. Leave blank for single-activity rows.
+  "",
+  "",
+  // lesson_3 / mission_3 — same idea for a third activity. Blank = none.
+  "",
+  "",
   "Built and tested a line-following robot",
   "10",
   "",
@@ -291,10 +298,13 @@ const SECTIONS: ImportSection[] = [
     id: "attendance",
     title: "Attendance History",
     description:
-      "Import attendance records. Students must exist first (use student_id from the Students import). `time` = actual start time (HH:MM 24-hour). `activity` = what was completed in class (shown as \"Activity Completed\" in the mark-attendance modal). `absence_reason` is only used when status=absent/excused — it surfaces in the attendance log under that absent entry; leave blank for present/late rows. The first row is a sample — delete it OR leave it, the system auto-skips rows whose student_id starts with \"EXAMPLE\".",
+      "Import attendance records. Students must exist first (use student_id from the Students import). `time` = actual start time (HH:MM 24-hour). `activity` = what was completed in class (shown as \"Activity Completed\" in the mark-attendance modal). The three (lesson, mission) pairs let you record up to 3 activities completed in one session — fill only `lesson` + `mission` for the common one-activity case and leave `lesson_2`/`mission_2`/`lesson_3`/`mission_3` blank. If you fill a numbered pair, both halves must be filled together. `absence_reason` is only used when status=absent/excused — it surfaces in the attendance log under that absent entry; leave blank for present/late rows. The first row is a sample — delete it OR leave it, the system auto-skips rows whose student_id starts with \"EXAMPLE\".",
     templateColumns: [
       "student_id", "date", "time", "status", "class_type", "instructor_name",
-      "lesson", "mission", "activity", "adcoin", "absence_reason",
+      "lesson", "mission",
+      "lesson_2", "mission_2",
+      "lesson_3", "mission_3",
+      "activity", "adcoin", "absence_reason",
     ],
     exampleRows: ATTENDANCE_EXAMPLE_ROWS,
   },

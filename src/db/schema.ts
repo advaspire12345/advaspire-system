@@ -298,8 +298,7 @@ export interface Attendance {
   notes: string | null;
   marked_by: string | null;
   adcoin: number;
-  lesson: string | null;
-  mission: string | null;
+  activities: { lesson: string; mission: string }[] | null;
   slot_day: string | null;
   slot_time: string | null;
   created_at: string;
@@ -694,8 +693,7 @@ export interface AttendanceInsert {
   notes?: string | null;
   marked_by?: string | null;
   adcoin?: number;
-  lesson?: string | null;
-  mission?: string | null;
+  activities?: { lesson: string; mission: string }[] | null;
   slot_day?: string | null;
   slot_time?: string | null;
 }
@@ -913,8 +911,7 @@ export interface AttendanceUpdate {
   notes?: string | null;
   marked_by?: string | null;
   adcoin?: number;
-  lesson?: string | null;
-  mission?: string | null;
+  activities?: { lesson: string; mission: string }[] | null;
   slot_day?: string | null;
   slot_time?: string | null;
 }
@@ -2090,11 +2087,29 @@ export interface Event {
   scope: EventScope;
   audience: EventAudience;
 
+  // Denormalised "first occurrence" (or recurring start) so legacy reads
+  // that only know about events.date / start_time / end_time keep working.
+  // The authoritative shape going forward is `occurrences` (specific dates)
+  // or the recurring_* columns (weekly).
   date: string;       // 'YYYY-MM-DD'
   end_date: string | null;
   start_time: string | null; // 'HH:MM:SS'
   end_time: string | null;
   color: string;
+
+  // Recurrence configuration. is_recurring=false → specific dates in
+  // `occurrences`. is_recurring=true → fires every recurring_days[] weekday;
+  // is_bounded=true bounds it to [recurring_start_date, recurring_end_date].
+  is_recurring: boolean;
+  is_bounded: boolean;
+  recurring_days: string[] | null;
+  recurring_start_date: string | null;
+  recurring_end_date: string | null;
+  recurring_start_time: string | null;
+  recurring_end_time: string | null;
+  // Specific-date occurrences (only present when is_recurring=false). Joined
+  // in by event read helpers.
+  occurrences?: EventOccurrence[];
 
   created_by_user_id: string | null;
   created_by_parent_id: string | null;
@@ -2115,6 +2130,16 @@ export interface Event {
   deleted_at: string | null;
 }
 
+export interface EventOccurrence {
+  id: string;
+  event_id: string;
+  date: string;       // 'YYYY-MM-DD'
+  start_time: string | null; // 'HH:MM:SS'
+  end_time: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface EventInsert {
   id?: string;
   title: string;
@@ -2128,6 +2153,15 @@ export interface EventInsert {
   start_time?: string | null;
   end_time?: string | null;
   color?: string;
+
+  // Recurrence — see Event interface for semantics.
+  is_recurring?: boolean;
+  is_bounded?: boolean;
+  recurring_days?: string[] | null;
+  recurring_start_date?: string | null;
+  recurring_end_date?: string | null;
+  recurring_start_time?: string | null;
+  recurring_end_time?: string | null;
 
   created_by_user_id?: string | null;
   created_by_parent_id?: string | null;
@@ -2155,6 +2189,13 @@ export interface EventUpdate {
   start_time?: string | null;
   end_time?: string | null;
   color?: string;
+  is_recurring?: boolean;
+  is_bounded?: boolean;
+  recurring_days?: string[] | null;
+  recurring_start_date?: string | null;
+  recurring_end_date?: string | null;
+  recurring_start_time?: string | null;
+  recurring_end_time?: string | null;
   branch_id?: string | null;
   company_id?: string | null;
   status?: EventStatus;
