@@ -83,41 +83,43 @@ function LoginContent() {
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-      return;
-    }
-
-    // Store remember me preference
-    if (rememberMe) {
-      localStorage.setItem("rememberMe", "true");
-    } else {
-      localStorage.removeItem("rememberMe");
-      // Set session storage flag — on window close, session will be cleared
-      sessionStorage.setItem("sessionOnly", "true");
-    }
-
-    // Check role to decide redirect destination
     try {
-      const res = await fetch("/api/auth/role");
-      const { role } = await res.json();
+      // Login goes through the server route so failed attempts are tracked
+      // and brute-force lockout is enforced server-side.
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
 
-      if (role === "parent") {
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Login failed");
+        setLoading(false);
+        return;
+      }
+
+      // Store remember me preference
+      if (rememberMe) {
+        localStorage.setItem("rememberMe", "true");
+      } else {
+        localStorage.removeItem("rememberMe");
+        // Set session storage flag — on window close, session will be cleared
+        sessionStorage.setItem("sessionOnly", "true");
+      }
+
+      if (data.role === "parent") {
         router.push("/parent");
       } else {
         router.push("/dashboard");
       }
-    } catch {
-      router.push("/dashboard");
-    }
 
-    router.refresh();
+      router.refresh();
+    } catch {
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
+    }
   };
 
   const handleStudentLogin = async (e: React.FormEvent) => {
@@ -154,14 +156,22 @@ function LoginContent() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      // Server route enforces the 2-per-30-minutes send limit.
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail }),
       });
 
-      if (error) {
-        setError(error.message);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
       } else {
-        setSuccessMsg("Password reset link has been sent to your email. Please check your inbox.");
+        setSuccessMsg(
+          data.message ||
+            "Password reset link has been sent to your email. Please check your inbox."
+        );
       }
     } catch {
       setError("Something went wrong. Please try again.");
