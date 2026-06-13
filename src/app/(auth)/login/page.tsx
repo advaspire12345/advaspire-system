@@ -30,6 +30,18 @@ function LoginContent() {
     return false;
   });
 
+  // Show a friendly message when redirected from an expired/invalid reset link
+  useEffect(() => {
+    if (searchParams.get("error") === "invalid_reset_link") {
+      setError(
+        "Your password reset link is invalid or has expired. Please request a new one below."
+      );
+      setShowForgotPassword(true);
+      // Clean the query param so the message doesn't persist on refresh
+      router.replace("/login");
+    }
+  }, [searchParams, router]);
+
   // Auto-logout if "Remember Me" was not checked and browser was reopened
   useEffect(() => {
     const wasRemembered = localStorage.getItem("rememberMe") === "true";
