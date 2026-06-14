@@ -11,6 +11,7 @@ import {
   createStudentAction,
   updateStudentAction,
   deleteStudentAction,
+  deleteEnrollmentAction,
 } from "./actions";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
@@ -146,6 +147,7 @@ export default async function StudentsPage() {
           onAdd={perms?.can_create ? createStudentAction : undefined}
           onEdit={perms?.can_edit ? updateStudentAction : undefined}
           onDelete={perms?.can_delete ? deleteStudentAction : undefined}
+          onDeleteEnrollment={perms?.can_delete ? deleteEnrollmentAction : undefined}
         />
       </div>
     </main>

@@ -327,14 +327,32 @@ export async function createEvent(
     callerRole === "assistant_admin" && input.scope === "branch";
   const status: EventStatus = needsApproval ? "pending" : "published";
 
-  // Resolve mode + validate. Specific-dates needs ≥1 occurrence;
-  // recurring needs ≥1 day-of-week; bounded needs both bounds.
+  // Four valid modes from the (is_recurring, is_bounded) checkbox combo:
+  //   Mode 1 — Specific dates (both off): `occurrences[]` carries the schedule.
+  //   Mode 2 — Recurring open-ended (Recurring on, Multi-day off): every future
+  //            matching weekday from `recurring_days[]`.
+  //   Mode 3 — Recurring bounded (both on): weekday rule + [start_date, end_date].
+  //   Mode 4 — Multi-day only (Recurring off, Multi-day on): consecutive day
+  //            range `recurring_start_date..recurring_end_date` with `recurring_*_time`.
   const isRecurring = input.is_recurring === true;
-  const isBounded = isRecurring && input.is_bounded === true;
+  const isBounded = input.is_bounded === true;
+  const isMultiDayOnly = !isRecurring && isBounded;
+  const isSpecificDates = !isRecurring && !isBounded;
   const occurrences = isRecurring ? [] : (input.occurrences ?? []);
 
-  if (!isRecurring && occurrences.length === 0) {
+  if (isSpecificDates && occurrences.length === 0) {
     return { ok: false, error: "Specific-date events need at least one date." };
+  }
+  if (isMultiDayOnly) {
+    if (!input.recurring_start_date || !input.recurring_end_date) {
+      return { ok: false, error: "Multi-day events need both start and end dates." };
+    }
+    if (input.recurring_start_date > input.recurring_end_date) {
+      return { ok: false, error: "End date must be after start date." };
+    }
+    if (!input.recurring_start_time || !input.recurring_end_time) {
+      return { ok: false, error: "Multi-day events need start and end times." };
+    }
   }
   if (isRecurring) {
     if (!input.recurring_days || input.recurring_days.length === 0) {
@@ -356,16 +374,34 @@ export async function createEvent(
     }
   }
 
-  // Build the denormalised "first occurrence" / "recurring start" values that
-  // legacy reads still rely on.
+  // Build the denormalised "first occurrence" / "range start" values that
+  // legacy reads still rely on. Multi-day-only mode uses recurring_*_date
+  // semantically as start/end of the range — store them in the legacy date /
+  // end_date columns so the calendar grid renders the full span.
   const sortedOccurrences = occurrences
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
   const firstOccurrence = sortedOccurrences[0];
-  const legacyDate = isRecurring ? (input.recurring_start_date ?? new Date().toISOString().slice(0, 10)) : firstOccurrence.date;
-  const legacyStart = isRecurring ? input.recurring_start_time ?? null : firstOccurrence.start_time ?? null;
-  const legacyEnd = isRecurring ? input.recurring_end_time ?? null : firstOccurrence.end_time ?? null;
-  const legacyEndDate = isBounded ? (input.recurring_end_date ?? null) : null;
+  let legacyDate: string;
+  let legacyStart: string | null;
+  let legacyEnd: string | null;
+  let legacyEndDate: string | null = null;
+  if (isSpecificDates) {
+    legacyDate = firstOccurrence.date;
+    legacyStart = firstOccurrence.start_time ?? null;
+    legacyEnd = firstOccurrence.end_time ?? null;
+  } else if (isMultiDayOnly) {
+    legacyDate = input.recurring_start_date!;
+    legacyStart = input.recurring_start_time ?? null;
+    legacyEnd = input.recurring_end_time ?? null;
+    legacyEndDate = input.recurring_end_date!;
+  } else {
+    // Recurring (open or bounded)
+    legacyDate = input.recurring_start_date ?? new Date().toISOString().slice(0, 10);
+    legacyStart = input.recurring_start_time ?? null;
+    legacyEnd = input.recurring_end_time ?? null;
+    legacyEndDate = isBounded ? (input.recurring_end_date ?? null) : null;
+  }
 
   const row: EventInsert = {
     title: input.title.trim(),
@@ -385,11 +421,17 @@ export async function createEvent(
     status,
     is_recurring: isRecurring,
     is_bounded: isBounded,
+    // recurring_days only meaningful for recurring modes (2 & 3).
     recurring_days: isRecurring ? (input.recurring_days ?? null) : null,
+    // recurring_start_date / end_date populated for any bounded mode (3 & 4).
     recurring_start_date: isBounded ? input.recurring_start_date ?? null : null,
     recurring_end_date: isBounded ? input.recurring_end_date ?? null : null,
-    recurring_start_time: isRecurring ? input.recurring_start_time ?? null : null,
-    recurring_end_time: isRecurring ? input.recurring_end_time ?? null : null,
+    // recurring_start_time / end_time populated for any mode that has them:
+    // recurring (2 & 3) AND multi-day-only (4).
+    recurring_start_time:
+      isRecurring || isMultiDayOnly ? input.recurring_start_time ?? null : null,
+    recurring_end_time:
+      isRecurring || isMultiDayOnly ? input.recurring_end_time ?? null : null,
   };
 
   if (caller.kind === "staff") row.created_by_user_id = caller.userId;
@@ -488,11 +530,24 @@ export async function updateEvent(
 
   if (scheduleProvided) {
     const isRecurring = input.is_recurring === true;
-    const isBounded = isRecurring && input.is_bounded === true;
+    const isBounded = input.is_bounded === true;
+    const isMultiDayOnly = !isRecurring && isBounded;
+    const isSpecificDates = !isRecurring && !isBounded;
     const occurrences = isRecurring ? [] : (input.occurrences ?? []);
 
-    if (!isRecurring && occurrences.length === 0) {
+    if (isSpecificDates && occurrences.length === 0) {
       return { ok: false, error: "Specific-date events need at least one date." };
+    }
+    if (isMultiDayOnly) {
+      if (!input.recurring_start_date || !input.recurring_end_date) {
+        return { ok: false, error: "Multi-day events need both start and end dates." };
+      }
+      if (input.recurring_start_date > input.recurring_end_date) {
+        return { ok: false, error: "End date must be after start date." };
+      }
+      if (!input.recurring_start_time || !input.recurring_end_time) {
+        return { ok: false, error: "Multi-day events need start and end times." };
+      }
     }
     if (isRecurring) {
       if (!input.recurring_days || input.recurring_days.length === 0) {
@@ -522,18 +577,32 @@ export async function updateEvent(
     update.recurring_days = isRecurring ? (input.recurring_days ?? null) : null;
     update.recurring_start_date = isBounded ? input.recurring_start_date ?? null : null;
     update.recurring_end_date = isBounded ? input.recurring_end_date ?? null : null;
-    update.recurring_start_time = isRecurring ? input.recurring_start_time ?? null : null;
-    update.recurring_end_time = isRecurring ? input.recurring_end_time ?? null : null;
+    update.recurring_start_time =
+      isRecurring || isMultiDayOnly ? input.recurring_start_time ?? null : null;
+    update.recurring_end_time =
+      isRecurring || isMultiDayOnly ? input.recurring_end_time ?? null : null;
 
-    update.date = isRecurring ? (input.recurring_start_date ?? new Date().toISOString().slice(0, 10)) : firstOccurrence.date;
-    update.start_time = isRecurring ? input.recurring_start_time ?? null : firstOccurrence.start_time ?? null;
-    update.end_time = isRecurring ? input.recurring_end_time ?? null : firstOccurrence.end_time ?? null;
-    update.end_date = isBounded ? (input.recurring_end_date ?? null) : null;
+    if (isSpecificDates) {
+      update.date = firstOccurrence.date;
+      update.start_time = firstOccurrence.start_time ?? null;
+      update.end_time = firstOccurrence.end_time ?? null;
+      update.end_date = null;
+    } else if (isMultiDayOnly) {
+      update.date = input.recurring_start_date!;
+      update.start_time = input.recurring_start_time ?? null;
+      update.end_time = input.recurring_end_time ?? null;
+      update.end_date = input.recurring_end_date!;
+    } else {
+      update.date = input.recurring_start_date ?? new Date().toISOString().slice(0, 10);
+      update.start_time = input.recurring_start_time ?? null;
+      update.end_time = input.recurring_end_time ?? null;
+      update.end_date = isBounded ? (input.recurring_end_date ?? null) : null;
+    }
 
-    // Replace occurrences atomically: wipe then re-insert (no occurrences for
-    // recurring events).
+    // Replace occurrences atomically: wipe then re-insert (only specific-dates
+    // mode has any).
     await supabaseAdmin.from("event_occurrences").delete().eq("event_id", eventId);
-    if (!isRecurring && sortedOccurrences.length > 0) {
+    if (isSpecificDates && sortedOccurrences.length > 0) {
       const occRows = sortedOccurrences.map((o, i) => ({
         event_id: eventId,
         date: o.date,
@@ -1049,15 +1118,35 @@ export function isEventOnDate(
 export async function getActiveActivityEventsForStudent(
   studentId: string,
 ): Promise<{ id: string; title: string; expiresLabel: string | null }[]> {
-  // Resolve the student's branch / company. If we can't, return [] safely.
+  // Resolve the targeted student's branch / company. The `studentId` may be
+  // either a real students.id (`branch:` aliased join below) or a trials.id
+  // (the modal passes trial.id through the same field). Try students first,
+  // fall back to trials, return [] if neither resolves.
+  let branchId: string | null = null;
+  let companyId: string | null = null;
   const { data: student } = await supabaseAdmin
     .from("students")
-    .select("branch_id, branches!students_branch_id_branches_id_fk(id, parent_id)")
+    .select("branch_id, branch:branches!students_branch_id_branches_id_fk(id, parent_id, type)")
     .eq("id", studentId)
     .maybeSingle();
-  if (!student) return [];
-  const branchId = student.branch_id as string | null;
-  const companyId = (student.branches as unknown as { id: string; parent_id: string | null } | null)?.parent_id ?? null;
+  if (student) {
+    branchId = student.branch_id as string | null;
+    const br = (student as unknown as { branch: { id: string; parent_id: string | null; type: string } | null }).branch;
+    companyId = br?.type === "company" ? br.id : (br?.parent_id ?? null);
+  } else {
+    const { data: trial } = await supabaseAdmin
+      .from("trials")
+      .select("branch_id, branch:branches!inner(id, parent_id, type)")
+      .eq("id", studentId)
+      .maybeSingle();
+    if (trial) {
+      branchId = trial.branch_id as string | null;
+      const br = (trial as unknown as { branch: { id: string; parent_id: string | null; type: string } | null }).branch;
+      companyId = br?.type === "company" ? br.id : (br?.parent_id ?? null);
+    } else {
+      return [];
+    }
+  }
 
   // Pull every activity-type event in scope. Filter recurrence + expiry in JS
   // since the rules differ per row.

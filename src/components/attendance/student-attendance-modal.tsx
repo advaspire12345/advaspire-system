@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Plus, Minus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -393,9 +394,10 @@ export function StudentAttendanceModal({
   // stale missions from a different lesson never sneak through. Inlined into
   // each row's onChange handler below — no global effect needed.
 
-  // Fetch active activity events when the targeted student changes.
+  // Fetch active activity events for the targeted student. Use selectedRow's
+  // studentId when marking present/absent, or selectedStudentId in add mode.
   useEffect(() => {
-    const studentId = selectedRow?.studentId;
+    const studentId = selectedRow?.studentId ?? selectedStudentId;
     if (!open || !studentId) {
       setActiveActivities([]);
       return;
@@ -411,7 +413,7 @@ export function StudentAttendanceModal({
         /* non-fatal — dropdown just lacks the ACTIVITY section */
       });
     return () => { cancelled = true; };
-  }, [open, selectedRow?.studentId]);
+  }, [open, selectedRow?.studentId, selectedStudentId]);
 
   // Update fields when student changes (for add mode)
   useEffect(() => {
@@ -830,7 +832,6 @@ export function StudentAttendanceModal({
                 {activities.map((row, idx) => {
                   const missionOpts = getMissionOptionsForLesson(row.lesson);
                   const missionDisabled = !row.lesson || missionOpts.length === 0;
-                  const isLast = idx === activities.length - 1;
                   return (
                     <div key={idx} className="flex items-center gap-2">
                       <div className="grid grid-cols-2 gap-4 flex-1">
@@ -865,30 +866,34 @@ export function StudentAttendanceModal({
                           searchable
                         />
                       </div>
-                      {idx > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActivities((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#ADAFCA] text-[#ADAFCA] hover:border-red-500 hover:text-red-500 transition"
-                          aria-label="Remove this activity"
-                        >
-                          <span className="text-lg leading-none">−</span>
-                        </button>
-                      ) : null}
-                      {isLast ? (
+                      {/* Matches the DynamicFieldList pattern (program-modal):
+                          first row carries the + (add another activity); every
+                          subsequent row carries a − (remove this row). */}
+                      {idx === 0 ? (
                         <button
                           type="button"
                           onClick={() =>
                             setActivities((prev) => [...prev, { lesson: "", mission: "" }])
                           }
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#23D2E2] text-[#23D2E2] hover:bg-[#23D2E2] hover:text-white transition"
+                          className="p-0.5 rounded-full border-2 border-[#23D2E2] hover:shadow-sm transition-all duration-200 flex items-center justify-center"
+                          title="Add another activity"
                           aria-label="Add another activity"
                         >
-                          <span className="text-lg leading-none">+</span>
+                          <Plus size={9} className="text-[#23D2E2]" strokeWidth={5} />
                         </button>
-                      ) : null}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActivities((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          className="p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10 transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
+                          title="Remove this activity"
+                          aria-label="Remove this activity"
+                        >
+                          <Minus size={9} className="text-[#fd434f]" strokeWidth={5} />
+                        </button>
+                      )}
                     </div>
                   );
                 })}

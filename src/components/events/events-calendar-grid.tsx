@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
-import { format, addDays, differenceInCalendarDays } from "date-fns";
+import { format, addDays, addMonths, differenceInCalendarDays } from "date-fns";
 import { getDefaultClassNames, type DayButton } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import type { Event } from "@/db/schema";
@@ -27,6 +28,18 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
   const isDraggingRef = useRef(false);
   const movedRef = useRef(false);
   const [dragRender, setDragRender] = useState(0);
+  // Take control of which month is visible so (a) the chevron buttons actually
+  // navigate (without explicit `month`/`onMonthChange` DayPicker can swallow
+  // re-renders) and (b) the recurring-event expansion below can use the
+  // currently-visible month instead of today (which would otherwise drop
+  // events when the user navigates).
+  const [month, setMonth] = useState<Date>(() => new Date());
+  const monthStart = useMemo(() => {
+    const d = new Date(month);
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [month]);
 
   const visibleEvents = useMemo(
     () => events.filter((e) => e.status !== "rejected" && !e.deleted_at),
@@ -48,9 +61,9 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
         // what matters for the user looking at "this month".
         const days = ev.recurring_days ?? [];
         if (days.length === 0) continue;
-        const winStart = new Date(new Date());
+        const winStart = new Date(monthStart);
         winStart.setMonth(winStart.getMonth() - 1);
-        const winEnd = new Date(new Date());
+        const winEnd = new Date(monthStart);
         winEnd.setMonth(winEnd.getMonth() + 2);
         const lowerBound = ev.is_bounded && ev.recurring_start_date
           ? new Date(ev.recurring_start_date + "T00:00:00")
@@ -81,27 +94,41 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
       }
     }
     return map;
-  }, [visibleEvents, new Date()]);
+  }, [visibleEvents, monthStart]);
+
+  // For each event, the sorted list of all dates it appears on, as YYYY-MM-DD.
+  // Derived from eventsByDate so it covers specific dates, multi-day ranges,
+  // and recurring-weekly patterns uniformly. Used both for slot assignment
+  // and for the per-day pill-shape adjacency check below.
+  const eventDates = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const [date, list] of eventsByDate.entries()) {
+      for (const ev of list) {
+        const arr = m.get(ev.id) ?? [];
+        arr.push(date);
+        m.set(ev.id, arr);
+      }
+    }
+    for (const arr of m.values()) arr.sort();
+    return m;
+  }, [eventsByDate]);
 
   const eventSlots = useMemo(() => {
     const slots = new Map<string, number>();
+    // Sort by first-appearance date, then by occurrence count (longer first
+    // so multi-day spans get the top slot — less visual hopping).
     const sorted = [...visibleEvents].sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-      const aDur = differenceInCalendarDays(
-        new Date((a.end_date ?? a.date) + "T00:00:00"),
-        new Date(a.date + "T00:00:00"),
-      );
-      const bDur = differenceInCalendarDays(
-        new Date((b.end_date ?? b.date) + "T00:00:00"),
-        new Date(b.date + "T00:00:00"),
-      );
-      return bDur - aDur;
+      const aDates = eventDates.get(a.id) ?? [];
+      const bDates = eventDates.get(b.id) ?? [];
+      const aFirst = aDates[0] ?? a.date;
+      const bFirst = bDates[0] ?? b.date;
+      if (aFirst !== bFirst) return aFirst < bFirst ? -1 : 1;
+      return bDates.length - aDates.length;
     });
     const slotUsageByDate = new Map<string, Set<number>>();
     for (const ev of sorted) {
-      const evStart = new Date(ev.date + "T00:00:00");
-      const evEnd = new Date((ev.end_date ?? ev.date) + "T00:00:00");
-      const dateStrs = getDateRange(evStart, evEnd).map((d) => format(d, "yyyy-MM-dd"));
+      const dateStrs = eventDates.get(ev.id) ?? [];
+      if (dateStrs.length === 0) continue;
       let slot = 0;
       while (dateStrs.some((ds) => slotUsageByDate.get(ds)?.has(slot))) slot++;
       slots.set(ev.id, slot);
@@ -111,7 +138,17 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
       }
     }
     return slots;
-  }, [visibleEvents]);
+  }, [visibleEvents, eventDates]);
+
+  // Set of "dateStr|eventId" pairs for O(1) adjacency lookup when drawing a
+  // pill — "is this event also on the previous / next calendar day?".
+  const dateEventKey = useMemo(() => {
+    const s = new Set<string>();
+    for (const [date, list] of eventsByDate.entries()) {
+      for (const ev of list) s.add(`${date}|${ev.id}`);
+    }
+    return s;
+  }, [eventsByDate]);
 
   const dragRangeSet = new Set<string>();
   if (isDraggingRef.current && dragStartRef.current && dragEndRef.current) {
@@ -210,37 +247,35 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
         pending: boolean;
       };
       const eventRows: (PillData | null)[] = [];
+      const isSunday = day.date.getDay() === 0;
+      const isSaturday = day.date.getDay() === 6;
+      const prevDateStr = format(addDays(day.date, -1), "yyyy-MM-dd");
+      const nextDateStr = format(addDays(day.date, 1), "yyyy-MM-dd");
       for (let s = 0; s <= maxSlot; s++) {
         const ev = uniqueDayEvents.find((e) => eventSlots.get(e.id) === s);
         if (ev) {
-          const isMultiDay = ev.end_date && ev.end_date !== ev.date;
-          if (!isMultiDay) {
-            eventRows.push({
-              label: ev.title,
-              color: ev.color,
-              id: ev.id,
-              event: ev,
-              roundLeft: true,
-              roundRight: true,
-              showLabel: true,
-              pending: ev.status === "pending",
-            });
-          } else {
-            const isStart = dateStr === ev.date;
-            const isEnd = dateStr === ev.end_date;
-            const isSunday = day.date.getDay() === 0;
-            const isSaturday = day.date.getDay() === 6;
-            eventRows.push({
-              label: ev.title,
-              color: ev.color,
-              id: ev.id,
-              event: ev,
-              roundLeft: isStart || isSunday,
-              roundRight: isEnd || isSaturday,
-              showLabel: isStart || (isSunday && !isStart),
-              pending: ev.status === "pending",
-            });
-          }
+          // Adjacency-driven pill shape — works uniformly for single-day
+          // events, multi-day continuous ranges, multi-occurrence specific
+          // dates (each occurrence isolated → own rounded pill with label),
+          // and recurring weekly patterns. The legacy date/end_date or
+          // is_multi_day flags are no longer consulted here.
+          const hasPrev = dateEventKey.has(`${prevDateStr}|${ev.id}`);
+          const hasNext = dateEventKey.has(`${nextDateStr}|${ev.id}`);
+          const continuesFromPrev = hasPrev && !isSunday; // week boundary: Sun is start of new row
+          const continuesToNext = hasNext && !isSaturday; // week boundary: Sat ends the row
+          eventRows.push({
+            label: ev.title,
+            color: ev.color,
+            id: ev.id,
+            event: ev,
+            roundLeft: !continuesFromPrev,
+            roundRight: !continuesToNext,
+            // Show the label whenever the pill starts here (no continuation
+            // from yesterday) OR a new week begins (Sunday) — so even a long
+            // continuous pill carries its title on every visible row.
+            showLabel: !continuesFromPrev,
+            pending: ev.status === "pending",
+          });
         } else {
           eventRows.push(null);
         }
@@ -346,12 +381,39 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [eventsByDate, eventSlots, dragRender, onEditEvent],
+    [eventsByDate, eventSlots, dateEventKey, dragRender, onEditEvent],
   );
 
   return (
+    <div className="space-y-3">
+      {/* Explicit header — replaces DayPicker's built-in nav (the chevrons
+          inside DayPicker get swallowed by our overridden classNames + the
+          drag-to-create handlers). Buttons here unambiguously navigate. */}
+      <div className="flex items-center justify-between gap-2 px-1">
+        <button
+          type="button"
+          onClick={() => setMonth((m) => addMonths(m, -1))}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#e5e5e5] text-[#3e3f5e] hover:bg-[#23D2E2]/10 hover:border-[#23D2E2] transition"
+          aria-label="Previous month"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <h3 className="text-sm md:text-base font-bold text-[#3e3f5e]">
+          {format(monthStart, "MMMM yyyy")}
+        </h3>
+        <button
+          type="button"
+          onClick={() => setMonth((m) => addMonths(m, 1))}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#e5e5e5] text-[#3e3f5e] hover:bg-[#23D2E2]/10 hover:border-[#23D2E2] transition"
+          aria-label="Next month"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
     <Calendar
       mode="single"
+      month={month}
+      onMonthChange={setMonth}
       onDayClick={() => {}}
       formatters={{
         formatWeekdayName: (date) => {
@@ -364,6 +426,10 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
       classNames={{
         root: "w-full",
         month: "flex flex-col w-full gap-4",
+        // Hide DayPicker's built-in nav + caption — our own header above
+        // handles month navigation.
+        nav: "hidden",
+        month_caption: "hidden",
         table: "w-full [border-spacing:0] rounded-lg overflow-hidden",
         weekdays: "flex w-full",
         weekday: "flex-1 text-center text-xs font-semibold text-[#8f91ac] py-2",
@@ -390,5 +456,6 @@ export function EventsCalendarGrid({ events, onCreateRange, onEditEvent }: Props
         },
       }}
     />
+    </div>
   );
 }

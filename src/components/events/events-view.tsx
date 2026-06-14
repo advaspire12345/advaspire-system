@@ -68,6 +68,9 @@ interface Props {
   canApprove: boolean;
   branchOptions: BranchOption[];
   companyOptions: Option[];
+  /** Logged-in user's branch_id (from public.users). Used to hide the Branch
+   *  field for company_admin and auto-fill it on the server. */
+  currentUserBranchId?: string | null;
 }
 
 function formatRange(e: Event): string {
@@ -88,6 +91,7 @@ export function EventsView({
   canApprove,
   branchOptions,
   companyOptions,
+  currentUserBranchId = null,
 }: Props) {
   const [events, setEvents] = useState<Event[]>(initialEvents);
   const [pending, setPending] = useState<Event[]>(initialPending);
@@ -155,19 +159,41 @@ export function EventsView({
     setError(null);
     startTransition(async () => {
       if (modalMode === "add") {
-        const res = await createEventAction(values);
-        if (!res.ok) {
-          setError(res.error);
-          return;
+        // Group_admin can select multiple branches → fan out into N events,
+        // one per branch. For everyone else branch_ids is a 1-element array
+        // (or empty for non-branch scopes) so the loop runs once normally.
+        const targets =
+          values.scope === "branch" && values.branch_ids.length > 1
+            ? values.branch_ids
+            : [values.branch_id ?? null];
+
+        const created: typeof initialEvents = [];
+        const pendingCreated: typeof initialEvents = [];
+        // Strip the `branch_ids` UI-only field before submitting — the server
+        // action only knows about `branch_id`.
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { branch_ids: _branchIds, ...payload } = values;
+        for (const targetBranch of targets) {
+          const res = await createEventAction({
+            ...payload,
+            branch_id: targetBranch,
+          });
+          if (!res.ok) {
+            setError(res.error);
+            return;
+          }
+          if (res.event.status === "pending") {
+            pendingCreated.push(res.event);
+          } else {
+            created.push(res.event);
+          }
         }
-        // Pending events go into the pending list; published into events list.
-        if (res.event.status === "pending") {
-          setPending((prev) => [res.event, ...prev]);
-        } else {
-          setEvents((prev) => [res.event, ...prev]);
-        }
+        if (pendingCreated.length > 0) setPending((prev) => [...pendingCreated, ...prev]);
+        if (created.length > 0) setEvents((prev) => [...created, ...prev]);
         setModalOpen(false);
       } else if (editing) {
+        // Edit always targets a single event — branch fan-out only applies on
+        // create. Update flows through the existing single-branch path.
         const res = await updateEventAction(editing.id, values);
         if (!res.ok) {
           setError(res.error);
@@ -411,6 +437,7 @@ export function EventsView({
         allowedScopes={allowedScopes}
         branchOptions={branchOptions}
         companyOptions={companyOptions}
+        currentUserBranchId={currentUserBranchId}
         onSubmit={onSave}
         isSubmitting={isPending}
       />

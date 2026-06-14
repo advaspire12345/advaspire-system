@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Plus, Minus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingSelect } from "@/components/ui/floating-select";
+import { FloatingMultiSelect } from "@/components/ui/floating-multiselect";
 import type {
   Event,
   EventAudience,
@@ -43,6 +45,10 @@ export interface EventFormValues {
   color: string;
   branch_id: string | null;
   company_id: string | null;
+  /** Group_admin multi-select: when length > 1, the events-view layer
+   *  creates one event per selected branch_id. For company_admin / others
+   *  this stays as a single-element array matching `branch_id`. */
+  branch_ids: string[];
   // Specific-dates mode
   occurrences: { date: string; start_time: string | null; end_time: string | null }[];
   // Recurring config
@@ -65,6 +71,8 @@ interface Props {
   allowedScopes: EventScope[];
   branchOptions: BranchOption[];
   companyOptions: Option[];
+  /** Auto-applied for company_admin (Branch field hidden). NULL for others. */
+  currentUserBranchId?: string | null;
   onSubmit: (values: EventFormValues) => void;
   isSubmitting: boolean;
 }
@@ -118,6 +126,7 @@ export function EventModal({
   allowedScopes,
   branchOptions,
   companyOptions,
+  currentUserBranchId = null,
   onSubmit,
   isSubmitting,
 }: Props) {
@@ -128,7 +137,11 @@ export function EventModal({
   const [audience, setAudience] = useState<EventAudience>("everyone");
   const [color, setColor] = useState("#22c55e");
   const [branchId, setBranchId] = useState("");
+  const [branchIds, setBranchIds] = useState<string[]>([]);
   const [companyId, setCompanyId] = useState("");
+
+  const isCompanyAdmin = callerRole === "company_admin" || callerRole === "assistant_admin";
+  const isGroupAdmin = callerRole === "group_admin";
 
   // Specific-dates mode — one row per occurrence with +/− icons.
   const [dateRows, setDateRows] = useState<DateRow[]>([blankDateRow()]);
@@ -151,16 +164,43 @@ export function EventModal({
       setScope(defaultScopeFor(callerRole, allowedScopes));
       setAudience("everyone");
       setColor("#22c55e");
-      setBranchId("");
-      setCompanyId("");
-      setDateRows([blankDateRow(defaults?.date ?? "")]);
-      setIsRecurring(false);
-      setIsBounded(false);
-      setRecurringDays([]);
-      setRecurringStartDate("");
-      setRecurringEndDate("");
-      setRecurringStartTime("");
-      setRecurringEndTime("");
+      // For company_admin: auto-fill their own branch so the (hidden) field
+      // still produces a valid submission. The Branch select is not rendered.
+      // For group_admin: leave both empty so they pick branches explicitly.
+      if (isCompanyAdmin && currentUserBranchId) {
+        setBranchId(currentUserBranchId);
+        setBranchIds([currentUserBranchId]);
+        const b = branchOptions.find((o) => o.value === currentUserBranchId);
+        setCompanyId(b?.companyId ?? "");
+      } else {
+        setBranchId("");
+        setBranchIds([]);
+        setCompanyId("");
+      }
+      // Drag-to-create on the calendar: when the user dragged across multiple
+      // days, defaults.end_date is set and we pre-arm Multi-day mode with the
+      // start/end dates filled. Single-day taps just pre-fill the first row's
+      // date in specific-dates mode.
+      const draggedRange = defaults?.end_date && defaults.end_date !== defaults?.date;
+      if (draggedRange) {
+        setDateRows([blankDateRow()]);
+        setIsRecurring(false);
+        setIsBounded(true);
+        setRecurringDays([]);
+        setRecurringStartDate(defaults?.date ?? "");
+        setRecurringEndDate(defaults?.end_date ?? "");
+        setRecurringStartTime("");
+        setRecurringEndTime("");
+      } else {
+        setDateRows([blankDateRow(defaults?.date ?? "")]);
+        setIsRecurring(false);
+        setIsBounded(false);
+        setRecurringDays([]);
+        setRecurringStartDate("");
+        setRecurringEndDate("");
+        setRecurringStartTime("");
+        setRecurringEndTime("");
+      }
     } else {
       setTitle(initial.title);
       setDescription(initial.description ?? "");
@@ -169,6 +209,7 @@ export function EventModal({
       setAudience(initial.audience);
       setColor(initial.color);
       setBranchId(initial.branch_id ?? "");
+      setBranchIds(initial.branch_id ? [initial.branch_id] : []);
       setCompanyId(initial.company_id ?? "");
 
       const recurring = !!initial.is_recurring;
@@ -221,11 +262,20 @@ export function EventModal({
     }
   }, [branchId, scope, branchOptions]);
 
-  // Toggling Recurring off auto-disables Bounded (Multi-day only makes sense
-  // when Recurring is on, per the user's spec).
+  // Group_admin doesn't see the Company picker — auto-derive from their only
+  // accessible company (which the page resolves into companyOptions).
   useEffect(() => {
-    if (!isRecurring) setIsBounded(false);
-  }, [isRecurring]);
+    if (isGroupAdmin && scope === "company" && !companyId && companyOptions.length === 1) {
+      setCompanyId(companyOptions[0].value);
+    }
+  }, [isGroupAdmin, scope, companyId, companyOptions]);
+
+  // Multi-day (=== isBounded) is independently meaningful from Recurring now:
+  //  - Recurring off + Multi-day off → specific dates (date rows)
+  //  - Recurring off + Multi-day on  → consecutive day range
+  //  - Recurring on + Multi-day off  → open-ended weekly pattern
+  //  - Recurring on + Multi-day on   → weekly pattern bounded to a range
+  // No auto-toggling — leave the checkboxes user-driven.
 
   const scopeOptions = useMemo(
     () => allowedScopes.map((s) => ({ value: s, label: SCOPE_LABEL[s] })),
@@ -240,6 +290,8 @@ export function EventModal({
 
   const submit = () => {
     if (!title.trim()) return;
+    const isMultiDayOnly = !isRecurring && isBounded;
+    const isSpecificDates = !isRecurring && !isBounded;
 
     const filledRows = dateRows.filter((r) => r.date);
     const occurrences = filledRows.map((r) => ({
@@ -255,23 +307,42 @@ export function EventModal({
       scope,
       audience,
       color,
-      branch_id: scope === "branch" ? branchId || null : null,
+      // branch_id stays the single primary value (the first picked branch for
+      // group_admin multi-select); branch_ids carries the full picked list so
+      // the events-view layer can fan out one event per branch.
+      branch_id:
+        scope === "branch"
+          ? (isGroupAdmin ? (branchIds[0] ?? null) : (branchId || null))
+          : null,
+      branch_ids:
+        scope === "branch"
+          ? (isGroupAdmin ? branchIds : branchId ? [branchId] : [])
+          : [],
       company_id: scope === "branch" || scope === "company" ? companyId || null : null,
-      occurrences: isRecurring ? [] : occurrences,
+      // Only specific-dates mode carries occurrences.
+      occurrences: isSpecificDates ? occurrences : [],
       is_recurring: isRecurring,
-      is_bounded: isRecurring && isBounded,
+      is_bounded: isBounded,
       recurring_days: isRecurring ? recurringDays : null,
-      recurring_start_date: isRecurring && isBounded ? recurringStartDate || null : null,
-      recurring_end_date: isRecurring && isBounded ? recurringEndDate || null : null,
-      recurring_start_time: isRecurring && recurringStartTime ? `${recurringStartTime}:00` : null,
-      recurring_end_time: isRecurring && recurringEndTime ? `${recurringEndTime}:00` : null,
+      // start_date / end_date set whenever Multi-day is on (modes 3 & 4).
+      recurring_start_date: isBounded ? recurringStartDate || null : null,
+      recurring_end_date: isBounded ? recurringEndDate || null : null,
+      // start_time / end_time set whenever Recurring OR Multi-day is on.
+      recurring_start_time:
+        (isRecurring || isMultiDayOnly) && recurringStartTime ? `${recurringStartTime}:00` : null,
+      recurring_end_time:
+        (isRecurring || isMultiDayOnly) && recurringEndTime ? `${recurringEndTime}:00` : null,
     });
   };
 
   // Submit gate per mode.
   const canSubmit = (() => {
     if (!title.trim()) return false;
-    if (scope === "branch" && (!branchId || !companyId)) return false;
+    if (scope === "branch") {
+      // group_admin picks a multi-select; everyone else uses the single field.
+      const hasBranch = isGroupAdmin ? branchIds.length > 0 : !!branchId;
+      if (!hasBranch || !companyId) return false;
+    }
     if (scope === "company" && !companyId) return false;
     if (isRecurring) {
       if (recurringDays.length === 0) return false;
@@ -280,6 +351,13 @@ export function EventModal({
         if (!recurringStartDate || !recurringEndDate) return false;
         if (recurringStartDate > recurringEndDate) return false;
       }
+      return true;
+    }
+    if (isBounded) {
+      // Multi-day-only mode
+      if (!recurringStartDate || !recurringEndDate) return false;
+      if (recurringStartDate > recurringEndDate) return false;
+      if (!recurringStartTime || !recurringEndTime) return false;
       return true;
     }
     // Specific dates: every filled row must have at least a date.
@@ -339,17 +417,71 @@ export function EventModal({
             />
           )}
 
-          {scope === "branch" && (
-            <FloatingSelect
-              label="Branch"
-              value={branchId}
-              onChange={setBranchId}
-              options={branchOptions.map((b) => ({ value: b.value, label: b.label }))}
-              searchable
-            />
+          {/* Branch picker.
+                - company_admin / assistant_admin: field is hidden, server uses
+                  their own branch (auto-filled in the init effect above).
+                - group_admin: multi-select; submit fans out one event per
+                  picked branch.
+                - super_admin / others: single-select.
+              The hidden case still leaves the rest of the form intact. */}
+          {scope === "branch" && !isCompanyAdmin && (
+            isGroupAdmin ? (
+              (() => {
+                // Virtual "All" option at the top of the list. Clicking it
+                // toggles every real branch on or off in one go.
+                const ALL_VALUE = "__all_branches__";
+                const allSelected = branchIds.length > 0 && branchIds.length === branchOptions.length;
+                const optionsWithAll = [
+                  { value: ALL_VALUE, label: "All branches" },
+                  ...branchOptions.map((b) => ({ value: b.value, label: b.label })),
+                ];
+                // Mirror the All-selected state into the visible value so the
+                // FloatingMultiSelect renders the All row as checked too.
+                const visibleValue = allSelected ? [ALL_VALUE, ...branchIds] : branchIds;
+                return (
+                  <FloatingMultiSelect
+                    label="Branches"
+                    value={visibleValue}
+                    onChange={(vals) => {
+                      const wasAllSelected = allSelected;
+                      const nowHasAll = vals.includes(ALL_VALUE);
+                      let next: string[];
+                      if (!wasAllSelected && nowHasAll) {
+                        // User just ticked All → select everything.
+                        next = branchOptions.map((b) => b.value);
+                      } else if (wasAllSelected && !nowHasAll) {
+                        // User just unticked All → clear.
+                        next = [];
+                      } else {
+                        // Individual branch toggled while All was off, OR
+                        // user picked a branch with All on (collapsing back).
+                        next = vals.filter((v) => v !== ALL_VALUE);
+                      }
+                      setBranchIds(next);
+                      if (next.length > 0) {
+                        const b = branchOptions.find((o) => o.value === next[0]);
+                        if (b?.companyId) setCompanyId(b.companyId);
+                      }
+                    }}
+                    options={optionsWithAll}
+                    searchable
+                  />
+                );
+              })()
+            ) : (
+              <FloatingSelect
+                label="Branch"
+                value={branchId}
+                onChange={setBranchId}
+                options={branchOptions.map((b) => ({ value: b.value, label: b.label }))}
+                searchable
+              />
+            )
           )}
 
-          {scope === "company" && (
+          {/* Company picker — group_admin doesn't see it (their company is
+              fixed and inferred from their own branch); everyone else picks. */}
+          {scope === "company" && !isGroupAdmin && (
             <FloatingSelect
               label="Company"
               value={companyId}
@@ -359,8 +491,9 @@ export function EventModal({
             />
           )}
 
-          {/* Mode toggles. Recurring exposes weekday + recurring-times; adding
-              Multi-day on top bounds the recurrence to a [start, end] range. */}
+          {/* Mode toggles. Independently meaningful — checking Multi-day on
+              its own gives a consecutive date range; combined with Recurring
+              it bounds the weekly pattern to that range. */}
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -370,98 +503,144 @@ export function EventModal({
               />
               Recurring
             </label>
-            <label
-              className={`flex items-center gap-2 cursor-pointer ${!isRecurring ? "opacity-50 cursor-not-allowed" : ""}`}
-              title={!isRecurring ? "Pick Recurring first" : ""}
-            >
+            <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={isBounded}
                 onChange={(e) => setIsBounded(e.target.checked)}
-                disabled={!isRecurring}
               />
               Multi-day (set start &amp; end date)
             </label>
           </div>
 
+          {/* MODE 4 — Multi-day only (consecutive date range) */}
+          {!isRecurring && isBounded && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground">Start Date</label>
+                  <input
+                    type="date"
+                    value={recurringStartDate}
+                    onChange={(e) => setRecurringStartDate(e.target.value)}
+                    className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground">End Date</label>
+                  <input
+                    type="date"
+                    value={recurringEndDate}
+                    onChange={(e) => setRecurringEndDate(e.target.value)}
+                    min={recurringStartDate}
+                    className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground">Start Time</label>
+                  <input
+                    type="time"
+                    value={recurringStartTime}
+                    onChange={(e) => setRecurringStartTime(e.target.value)}
+                    className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground">End Time</label>
+                  <input
+                    type="time"
+                    value={recurringEndTime}
+                    onChange={(e) => setRecurringEndTime(e.target.value)}
+                    className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground italic">
+                Event spans every day from {recurringStartDate || "start"} to {recurringEndDate || "end"} with the same daily times.
+              </p>
+            </div>
+          )}
+
           {/* MODE 1 — Specific dates */}
-          {!isRecurring && (
+          {!isRecurring && !isBounded && (
             <div className="space-y-3">
               <div className="text-xs font-semibold text-muted-foreground">
                 Dates &amp; times
               </div>
-              {dateRows.map((row, idx) => {
-                const isLast = idx === dateRows.length - 1;
-                return (
-                  <div key={idx} className="flex items-end gap-2">
-                    <div className="grid grid-cols-3 gap-2 flex-1">
-                      <div>
-                        <label className="text-[10px] font-semibold text-muted-foreground">Date</label>
-                        <input
-                          type="date"
-                          value={row.date}
-                          onChange={(e) =>
-                            setDateRows((prev) =>
-                              prev.map((r, i) => (i === idx ? { ...r, date: e.target.value } : r)),
-                            )
-                          }
-                          className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-muted-foreground">Start</label>
-                        <input
-                          type="time"
-                          value={row.start_time}
-                          onChange={(e) =>
-                            setDateRows((prev) =>
-                              prev.map((r, i) =>
-                                i === idx ? { ...r, start_time: e.target.value } : r,
-                              ),
-                            )
-                          }
-                          className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-muted-foreground">End</label>
-                        <input
-                          type="time"
-                          value={row.end_time}
-                          onChange={(e) =>
-                            setDateRows((prev) =>
-                              prev.map((r, i) =>
-                                i === idx ? { ...r, end_time: e.target.value } : r,
-                              ),
-                            )
-                          }
-                          className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
-                        />
-                      </div>
+              {dateRows.map((row, idx) => (
+                <div key={idx} className="flex items-end gap-2">
+                  <div className="grid grid-cols-3 gap-2 flex-1">
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground">Date</label>
+                      <input
+                        type="date"
+                        value={row.date}
+                        onChange={(e) =>
+                          setDateRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, date: e.target.value } : r)),
+                          )
+                        }
+                        className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
+                      />
                     </div>
-                    {idx > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setDateRows((prev) => prev.filter((_, i) => i !== idx))}
-                        className="flex h-[42px] w-8 shrink-0 items-center justify-center rounded-full border border-[#ADAFCA] text-[#ADAFCA] hover:border-red-500 hover:text-red-500 transition"
-                        aria-label="Remove this date"
-                      >
-                        <span className="text-lg leading-none">−</span>
-                      </button>
-                    ) : null}
-                    {isLast ? (
-                      <button
-                        type="button"
-                        onClick={() => setDateRows((prev) => [...prev, blankDateRow()])}
-                        className="flex h-[42px] w-8 shrink-0 items-center justify-center rounded-full border border-[#23D2E2] text-[#23D2E2] hover:bg-[#23D2E2] hover:text-white transition"
-                        aria-label="Add another date"
-                      >
-                        <span className="text-lg leading-none">+</span>
-                      </button>
-                    ) : null}
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground">Start</label>
+                      <input
+                        type="time"
+                        value={row.start_time}
+                        onChange={(e) =>
+                          setDateRows((prev) =>
+                            prev.map((r, i) =>
+                              i === idx ? { ...r, start_time: e.target.value } : r,
+                            ),
+                          )
+                        }
+                        className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground">End</label>
+                      <input
+                        type="time"
+                        value={row.end_time}
+                        onChange={(e) =>
+                          setDateRows((prev) =>
+                            prev.map((r, i) =>
+                              i === idx ? { ...r, end_time: e.target.value } : r,
+                            ),
+                          )
+                        }
+                        className="mt-1 w-full h-[42px] rounded-[10px] border border-[#ADAFCA] px-3 text-sm focus:border-[#23D2E2] focus:outline-none"
+                      />
+                    </div>
                   </div>
-                );
-              })}
+                  {/* First row: cyan + button. Others: red - button.
+                      Matches DynamicFieldList in program-modal. */}
+                  {idx === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setDateRows((prev) => [...prev, blankDateRow()])}
+                      className="p-0.5 rounded-full border-2 border-[#23D2E2] hover:shadow-sm transition-all duration-200 flex items-center justify-center"
+                      title="Add another date"
+                      aria-label="Add another date"
+                    >
+                      <Plus size={9} className="text-[#23D2E2]" strokeWidth={5} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDateRows((prev) => prev.filter((_, i) => i !== idx))}
+                      className="p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10 transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
+                      title="Remove this date"
+                      aria-label="Remove this date"
+                    >
+                      <Minus size={9} className="text-[#fd434f]" strokeWidth={5} />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 
