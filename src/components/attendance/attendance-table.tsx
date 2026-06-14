@@ -44,8 +44,10 @@ export interface AttendanceRow {
   lastAttendanceDate: string | null;
   lastAttendanceStatus: AttendanceStatus | null;
   lastActivityText: string | null;
-  lastLesson: string | null;
-  lastMission: string | null;
+  // Activities array from the most recent present/late attendance — used as
+  // a hint on the table row. First entry's lesson/mission are surfaced in
+  // the columns; the full list appears in the modal.
+  lastActivities: { lesson: string; mission: string }[] | null;
   lastAdcoin: number;
   sessionsRemaining: number;
   // Whether student has an active exam for this enrollment
@@ -70,8 +72,7 @@ export interface AttendanceRow {
     projectPhotos: string[] | null;
     notes: string | null;
     adcoin: number;
-    lesson: string | null;
-    mission: string | null;
+    activities: { lesson: string; mission: string }[] | null;
   } | null;
 }
 
@@ -244,8 +245,7 @@ export function AttendanceTable({
             projectPhotos: null,
             notes: null,
             adcoin: 0,
-            lesson: null,
-            mission: null,
+            activities: null,
           },
         });
       } else {
@@ -278,9 +278,10 @@ export function AttendanceTable({
             ? formData.projectPhotos
             : undefined,
         adcoin: formData.adcoin || 0,
-        // Lesson and mission
-        lesson: formData.lesson || undefined,
-        mission: formData.mission || undefined,
+        // Activities — flexible array of {lesson, mission} pairs
+        activities: (formData.activities ?? [])
+          .filter((a) => a.lesson || a.mission)
+          .map((a) => ({ lesson: a.lesson, mission: a.mission })),
         // Trial-specific fields
         instructorFeedback: formData.instructorFeedback || undefined,
         isTrial: formData.isTrial || false,
@@ -330,8 +331,7 @@ export function AttendanceTable({
                 projectPhotos: att?.project_photos ?? (formData.projectPhotos.length > 0 ? formData.projectPhotos : null),
                 notes: att?.notes ?? formData.notes ?? null,
                 adcoin: att?.adcoin ?? formData.adcoin ?? 0,
-                lesson: att?.lesson ?? formData.lesson ?? null,
-                mission: att?.mission ?? formData.mission ?? null,
+                activities: att?.activities ?? (formData.activities && formData.activities.length > 0 ? formData.activities : null),
               },
             };
           }));
@@ -561,24 +561,26 @@ export function AttendanceTable({
                         {formatTime(row.slotTime, null)}
                       </td>
 
-                      {/* Lesson */}
+                      {/* Lesson — show all activities stacked. */}
                       <td
                         className="px-4 py-3"
                         style={{ width: columns[6].width }}
                       >
-                        {row.existingAttendance
-                          ? (row.existingAttendance.lesson || "-")
-                          : (row.lastLesson || "-")}
+                        <AttendanceActivityCell
+                          activities={row.existingAttendance?.activities ?? row.lastActivities}
+                          field="lesson"
+                        />
                       </td>
 
-                      {/* Mission */}
+                      {/* Mission — show all activities stacked. */}
                       <td
                         className="px-4 py-3"
                         style={{ width: columns[7].width }}
                       >
-                        {row.existingAttendance
-                          ? (row.existingAttendance.mission || "-")
-                          : (row.lastMission || "-")}
+                        <AttendanceActivityCell
+                          activities={row.existingAttendance?.activities ?? row.lastActivities}
+                          field="mission"
+                        />
                       </td>
 
                       {/* Last Activity */}
@@ -710,5 +712,34 @@ export function AttendanceTable({
         currentUserName={currentUserName}
       />
     </>
+  );
+}
+
+/**
+ * Renders one column (lesson or mission) of a multi-activity attendance row.
+ * If the activities array is empty / null, shows "-". Multiple activities
+ * render stacked, one per line. The first line uses default text; subsequent
+ * lines are muted so the eye picks out the primary at a glance.
+ */
+function AttendanceActivityCell({
+  activities,
+  field,
+}: {
+  activities: { lesson: string; mission: string }[] | null | undefined;
+  field: "lesson" | "mission";
+}) {
+  const list = (activities ?? []).filter((a) => a[field]);
+  if (list.length === 0) return <>-</>;
+  return (
+    <div className="leading-tight">
+      {list.map((a, i) => (
+        <div
+          key={i}
+          className={i === 0 ? "text-sm" : "text-xs text-muted-foreground"}
+        >
+          {a[field]}
+        </div>
+      ))}
+    </div>
   );
 }

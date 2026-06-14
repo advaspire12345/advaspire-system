@@ -351,8 +351,10 @@ export interface MarkAttendanceData {
   notes?: string | null;
   markedBy?: string | null;
   adcoin?: number | null;
-  lesson?: string | null;
-  mission?: string | null;
+  // Flexible list of {lesson, mission} pairs done in this session. The first
+  // entry is the "primary" activity. Backward-compat callers that still send
+  // `lesson`/`mission` get wrapped into a 1-element array on the server side.
+  activities?: { lesson: string; mission: string }[] | null;
   attendanceId?: string;
   // Original slot info from enrollment schedule (never changes)
   slotDay?: string | null;
@@ -400,8 +402,7 @@ export async function markAttendance(
         last_activity: data?.lastActivity ?? null,
         project_photos: data?.projectPhotos ?? null,
         adcoin: data?.adcoin ?? 0,
-        lesson: data?.lesson ?? null,
-        mission: data?.mission ?? null,
+        activities: data?.activities ?? null,
       });
       return { attendance, isNew: false, previousStatus: directRecord.status as AttendanceStatus };
     }
@@ -489,8 +490,7 @@ export async function markAttendance(
       last_activity: data?.lastActivity ?? null,
       project_photos: data?.projectPhotos ?? null,
       adcoin: data?.adcoin ?? 0,
-      lesson: data?.lesson ?? null,
-      mission: data?.mission ?? null,
+      activities: data?.activities ?? null,
       // Set slot_day/slot_time if not already set on the record
       ...(!existing.slot_day && slotDay ? { slot_day: slotDay } : {}),
       ...(!existing.slot_time && slotTime ? { slot_time: slotTime } : {}),
@@ -514,8 +514,7 @@ export async function markAttendance(
     last_activity: data?.lastActivity ?? null,
     project_photos: data?.projectPhotos ?? null,
     adcoin: data?.adcoin ?? 0,
-    lesson: data?.lesson ?? null,
-    mission: data?.mission ?? null,
+    activities: data?.activities ?? null,
     slot_day: slotDay,
     slot_time: slotTime,
   };
@@ -719,8 +718,11 @@ export interface AttendanceTableRow {
   lastAttendanceDate: string | null;
   lastAttendanceStatus: AttendanceStatus | null;
   lastActivityText: string | null;
-  lastLesson: string | null;
-  lastMission: string | null;
+  // Most recent {lesson, mission} pairs the student worked on — surfaced
+  // as hints in the mark-attendance modal so the teacher doesn't have to
+  // remember last week's activity. First entry is the primary; UI may show
+  // just the first for table density and unfurl the rest in the modal.
+  lastActivities: { lesson: string; mission: string }[] | null;
   lastAdcoin: number;
   sessionsRemaining: number;
   // Whether student has an active exam for this enrollment
@@ -747,8 +749,7 @@ export interface AttendanceTableRow {
     projectPhotos: string[] | null;
     notes: string | null;
     adcoin: number;
-    lesson: string | null;
-    mission: string | null;
+    activities: { lesson: string; mission: string }[] | null;
   } | null;
 }
 
@@ -826,7 +827,7 @@ export async function getEnrollmentsForAttendance(
     ),
     course:courses!inner(id, name),
     package:course_pricing(description),
-    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin, lesson, mission, slot_day, slot_time)
+    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin, activities, slot_day, slot_time)
   `;
 
   let query = supabaseAdmin
@@ -958,8 +959,7 @@ export async function getEnrollmentsForAttendance(
       project_photos: string[] | null;
       notes: string | null;
       adcoin: number;
-      lesson: string | null;
-      mission: string | null;
+      activities: { lesson: string; mission: string }[] | null;
       slot_day: string | null;
       slot_time: string | null;
     }
@@ -991,11 +991,12 @@ export async function getEnrollmentsForAttendance(
     // If that record has no last_activity filled in, show null — don't fall through to an older record.
     const lastActivityText = lastPresentAttendance?.last_activity ?? null;
 
-    // Last lesson, mission, and adcoin from the most recent present/late attendance (previous weeks)
-    const lastLessonRecord = presentRecords.find((a) => a.lesson);
-    const lastLesson = lastLessonRecord?.lesson ?? null;
-    const lastMissionRecord = presentRecords.find((a) => a.mission);
-    const lastMission = lastMissionRecord?.mission ?? null;
+    // Most recent activities array (and adcoin) from previous present/late
+    // attendance. An "activity" counts as filled when its lesson is non-empty.
+    const lastActivitiesRecord = presentRecords.find(
+      (a) => (a.activities ?? []).some((act) => act.lesson),
+    );
+    const lastActivities = lastActivitiesRecord?.activities ?? null;
     const lastAdcoinRecord = presentRecords.find((a) => a.adcoin > 0);
     const lastAdcoin = lastAdcoinRecord?.adcoin ?? 0;
 
@@ -1136,8 +1137,7 @@ export async function getEnrollmentsForAttendance(
         const isPresentDone = (slotAttendance.status === 'present' || slotAttendance.status === 'late') &&
           slotAttendance.class_type &&
           slotAttendance.instructor_name &&
-          slotAttendance.lesson &&
-          slotAttendance.mission &&
+          (slotAttendance.activities ?? []).some((a) => a.lesson && a.mission) &&
           slotAttendance.last_activity;
 
         if (isAbsentDone || isPresentDone) {
@@ -1165,8 +1165,7 @@ export async function getEnrollmentsForAttendance(
         lastAttendanceDate: historicalLastAttendanceDate,
         lastAttendanceStatus: slotAttendance?.status ?? null,
         lastActivityText,
-        lastLesson,
-        lastMission,
+        lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
@@ -1185,8 +1184,7 @@ export async function getEnrollmentsForAttendance(
           projectPhotos: slotAttendance.project_photos,
           notes: slotAttendance.notes,
           adcoin: slotAttendance.adcoin ?? 0,
-          lesson: slotAttendance.lesson,
-          mission: slotAttendance.mission,
+          activities: slotAttendance.activities,
         } : null,
       });
     }
@@ -1200,8 +1198,7 @@ export async function getEnrollmentsForAttendance(
       const isPresentDone = (orphan.status === 'present' || orphan.status === 'late') &&
         orphan.class_type &&
         orphan.instructor_name &&
-        orphan.lesson &&
-        orphan.mission &&
+        (orphan.activities ?? []).some((a) => a.lesson && a.mission) &&
         orphan.last_activity;
 
       if (isAbsentDone || isPresentDone) {
@@ -1231,8 +1228,7 @@ export async function getEnrollmentsForAttendance(
         lastAttendanceDate: historicalLastAttendanceDate,
         lastAttendanceStatus: orphan.status,
         lastActivityText,
-        lastLesson,
-        lastMission,
+        lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
@@ -1250,8 +1246,7 @@ export async function getEnrollmentsForAttendance(
           projectPhotos: orphan.project_photos,
           notes: orphan.notes,
           adcoin: orphan.adcoin ?? 0,
-          lesson: orphan.lesson,
-          mission: orphan.mission,
+          activities: orphan.activities,
         },
       });
     }
@@ -1320,8 +1315,7 @@ export async function getEnrollmentsForAttendance(
         lastAttendanceDate: null,
         lastAttendanceStatus: null,
         lastActivityText: null,
-        lastLesson: null,
-        lastMission: null,
+        lastActivities: null,
         lastAdcoin: 0,
         sessionsRemaining: 1,
         hasExam: false,
@@ -1435,7 +1429,7 @@ export async function getEnrollmentsForAttendancePaginated(
     ),
     course:courses!inner(id, name),
     package:course_pricing(description),
-    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin, lesson, mission, slot_day, slot_time)
+    attendance(id, date, status, class_type, actual_day, actual_start_time, instructor_name, last_activity, project_photos, notes, adcoin, activities, slot_day, slot_time)
   `;
 
   let query = supabaseAdmin
@@ -1573,8 +1567,7 @@ export async function getEnrollmentsForAttendancePaginated(
       project_photos: string[] | null;
       notes: string | null;
       adcoin: number;
-      lesson: string | null;
-      mission: string | null;
+      activities: { lesson: string; mission: string }[] | null;
       slot_day: string | null;
       slot_time: string | null;
     }
@@ -1606,11 +1599,12 @@ export async function getEnrollmentsForAttendancePaginated(
     // If that record has no last_activity filled in, show null — don't fall through to an older record.
     const lastActivityText = lastPresentAttendance?.last_activity ?? null;
 
-    // Last lesson, mission, and adcoin from the most recent present/late attendance (previous weeks)
-    const lastLessonRecord = presentRecords.find((a) => a.lesson);
-    const lastLesson = lastLessonRecord?.lesson ?? null;
-    const lastMissionRecord = presentRecords.find((a) => a.mission);
-    const lastMission = lastMissionRecord?.mission ?? null;
+    // Most recent activities array (and adcoin) from previous present/late
+    // attendance. An "activity" counts as filled when its lesson is non-empty.
+    const lastActivitiesRecord = presentRecords.find(
+      (a) => (a.activities ?? []).some((act) => act.lesson),
+    );
+    const lastActivities = lastActivitiesRecord?.activities ?? null;
     const lastAdcoinRecord = presentRecords.find((a) => a.adcoin > 0);
     const lastAdcoin = lastAdcoinRecord?.adcoin ?? 0;
 
@@ -1751,8 +1745,7 @@ export async function getEnrollmentsForAttendancePaginated(
         const isPresentDone = (slotAttendance.status === 'present' || slotAttendance.status === 'late') &&
           slotAttendance.class_type &&
           slotAttendance.instructor_name &&
-          slotAttendance.lesson &&
-          slotAttendance.mission &&
+          (slotAttendance.activities ?? []).some((a) => a.lesson && a.mission) &&
           slotAttendance.last_activity;
 
         if (isAbsentDone || isPresentDone) {
@@ -1780,8 +1773,7 @@ export async function getEnrollmentsForAttendancePaginated(
         lastAttendanceDate: historicalLastAttendanceDate,
         lastAttendanceStatus: slotAttendance?.status ?? null,
         lastActivityText,
-        lastLesson,
-        lastMission,
+        lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
@@ -1800,8 +1792,7 @@ export async function getEnrollmentsForAttendancePaginated(
           projectPhotos: slotAttendance.project_photos,
           notes: slotAttendance.notes,
           adcoin: slotAttendance.adcoin ?? 0,
-          lesson: slotAttendance.lesson,
-          mission: slotAttendance.mission,
+          activities: slotAttendance.activities,
         } : null,
       });
     }
@@ -1815,8 +1806,7 @@ export async function getEnrollmentsForAttendancePaginated(
       const isPresentDone = (orphan.status === 'present' || orphan.status === 'late') &&
         orphan.class_type &&
         orphan.instructor_name &&
-        orphan.lesson &&
-        orphan.mission &&
+        (orphan.activities ?? []).some((a) => a.lesson && a.mission) &&
         orphan.last_activity;
 
       if (isAbsentDone || isPresentDone) {
@@ -1846,8 +1836,7 @@ export async function getEnrollmentsForAttendancePaginated(
         lastAttendanceDate: historicalLastAttendanceDate,
         lastAttendanceStatus: orphan.status,
         lastActivityText,
-        lastLesson,
-        lastMission,
+        lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
         hasExam: activeExamEnrollmentIds.has(enrollment.id),
@@ -1865,8 +1854,7 @@ export async function getEnrollmentsForAttendancePaginated(
           projectPhotos: orphan.project_photos,
           notes: orphan.notes,
           adcoin: orphan.adcoin ?? 0,
-          lesson: orphan.lesson,
-          mission: orphan.mission,
+          activities: orphan.activities,
         },
       });
     }
@@ -1935,8 +1923,7 @@ export async function getEnrollmentsForAttendancePaginated(
         lastAttendanceDate: null,
         lastAttendanceStatus: null,
         lastActivityText: null,
-        lastLesson: null,
-        lastMission: null,
+        lastActivities: null,
         lastAdcoin: 0,
         sessionsRemaining: 1,
         hasExam: false,
@@ -2166,8 +2153,7 @@ export async function getAllStudentsForManualAttendance(
       lastAttendanceDate: null,
       lastAttendanceStatus: null,
       lastActivityText: null,
-      lastLesson: null,
-      lastMission: null,
+      lastActivities: null,
       lastAdcoin: 0,
       sessionsRemaining: manualSessionsRemaining,
       hasExam: false,
@@ -2355,8 +2341,7 @@ export async function searchStudentsForManualAttendance(
       lastAttendanceDate: null,
       lastAttendanceStatus: null,
       lastActivityText: null,
-      lastLesson: null,
-      lastMission: null,
+      lastActivities: null,
       lastAdcoin: 0,
       sessionsRemaining: manualSessionsRemaining,
       hasExam: false,
@@ -3176,8 +3161,7 @@ export interface AttendanceLogRow {
   dayOfWeek: string | null;
   projectPhotos: string[] | null;
   adcoin: number;
-  lesson: string | null;
-  mission: string | null;
+  activities: { lesson: string; mission: string }[] | null;
   // Type to distinguish between enrollment and trial attendance
   type: 'enrollment' | 'trial';
   trialId?: string;
@@ -3233,8 +3217,7 @@ export async function getAttendanceLog(
       notes,
       project_photos,
       adcoin,
-      lesson,
-      mission,
+      activities,
       created_at,
       trial_id,
       enrollment:enrollments!inner(
@@ -3274,8 +3257,7 @@ export async function getAttendanceLog(
       notes,
       project_photos,
       adcoin,
-      lesson,
-      mission,
+      activities,
       created_at,
       trial_id,
       trial:trials!inner(
@@ -3402,8 +3384,7 @@ export async function getAttendanceLog(
       dayOfWeek: record.actual_day,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
-      lesson: record.lesson,
-      mission: record.mission,
+      activities: record.activities,
       type: 'enrollment' as const,
     };
   });
@@ -3452,8 +3433,7 @@ export async function getAttendanceLog(
       dayOfWeek: record.actual_day ?? null,
       projectPhotos: record.project_photos,
       adcoin: 0,
-      lesson: record.lesson,
-      mission: record.mission,
+      activities: record.activities,
       type: 'trial' as const,
       trialId: trial.id,
     };
@@ -3573,8 +3553,7 @@ export async function getAttendanceLogPaginated(
       notes,
       project_photos,
       adcoin,
-      lesson,
-      mission,
+      activities,
       created_at,
       trial_id,
       enrollment:enrollments!inner(
@@ -3628,8 +3607,7 @@ export async function getAttendanceLogPaginated(
       notes,
       project_photos,
       adcoin,
-      lesson,
-      mission,
+      activities,
       created_at,
       trial_id,
       trial:trials!inner(
@@ -3765,8 +3743,7 @@ export async function getAttendanceLogPaginated(
       dayOfWeek: record.actual_day,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
-      lesson: record.lesson,
-      mission: record.mission,
+      activities: record.activities,
       type: 'enrollment' as const,
     };
   });
@@ -3815,8 +3792,7 @@ export async function getAttendanceLogPaginated(
       dayOfWeek: record.actual_day ?? null,
       projectPhotos: record.project_photos,
       adcoin: 0,
-      lesson: record.lesson,
-      mission: record.mission,
+      activities: record.activities,
       type: 'trial' as const,
       trialId: trial.id,
     };

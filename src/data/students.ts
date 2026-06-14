@@ -873,6 +873,7 @@ export async function getStudentsForTable(
         adcoin_balance,
         expires_at,
         created_at,
+        deleted_at,
         course:courses(id, name),
         package:course_pricing(id, package_type, duration),
         pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
@@ -1214,7 +1215,13 @@ export async function getStudentsForTable(
   // schedule via groupEnrollmentsByCourse().
   const rows: StudentTableRow[] = [];
   for (const student of data ?? []) {
-    const enrollments = groupEnrollmentsByCourse(student.enrollments || []);
+    // Drop soft-deleted enrollments. The PostgREST nested select doesn't
+    // filter by `deleted_at IS NULL` automatically, so a per-row delete
+    // (`deleteEnrollmentAction`) leaves the cancelled row in the payload and
+    // it would otherwise still appear in the /student list.
+    const liveEnrollments = ((student.enrollments as unknown as { deleted_at: string | null }[]) || [])
+      .filter((e) => !e.deleted_at);
+    const enrollments = groupEnrollmentsByCourse(liveEnrollments as never);
     if (enrollments.length === 0) {
       rows.push(buildRow(student, null));
     } else {
@@ -1318,6 +1325,7 @@ export async function getStudentsForTablePaginated(
         adcoin_balance,
         expires_at,
         created_at,
+        deleted_at,
         course:courses(id, name),
         package:course_pricing(id, package_type, duration),
         pool:shared_session_pools(id, sessions_remaining, total_sessions, name),
@@ -1630,7 +1638,10 @@ export async function getStudentsForTablePaginated(
   const rows: StudentTableRow[] = [];
   for (const student of data ?? []) {
     // Same grouping as the main /student list: one row per (student, program).
-    const enrollments = groupEnrollmentsByCourse(student.enrollments || []);
+    // Drop soft-deleted enrollments first — see comment in the other call site.
+    const liveEnrollments = ((student.enrollments as unknown as { deleted_at: string | null }[]) || [])
+      .filter((e) => !e.deleted_at);
+    const enrollments = groupEnrollmentsByCourse(liveEnrollments as never);
     const xferLabel = student.transferred_to_student_id
       ? xferBranchByStudentId.get(student.transferred_to_student_id) ?? null
       : null;

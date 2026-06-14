@@ -29,6 +29,11 @@ interface StudentTableProps {
   onAdd?: (payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
   onEdit?: (studentId: string, payload: StudentFormPayload) => Promise<{ success: boolean; error?: string }>;
   onDelete?: (studentId: string) => Promise<{ success: boolean; error?: string }>;
+  /** Per-row enrollment delete. When the selected row has an enrollmentId the
+   *  table calls this instead of onDelete so only that enrollment is removed —
+   *  the student record + other enrollments stay. Falls back to onDelete when
+   *  the row has no enrollment (a "no-program" student row). */
+  onDeleteEnrollment?: (enrollmentId: string) => Promise<{ success: boolean; error?: string }>;
   hideBranch?: boolean;
 }
 
@@ -87,6 +92,7 @@ export function StudentTable({
   onAdd,
   onEdit,
   onDelete,
+  onDeleteEnrollment,
   hideBranch,
 }: StudentTableProps) {
   const router = useRouter();
@@ -105,7 +111,16 @@ export function StudentTable({
     searchTerm: searchQuery,
     itemsPerPage: ITEMS_PER_PAGE,
     apiUrl: useCallback((offset, limit) => `/api/student/table?offset=${offset}&limit=${limit}`, []),
-    getId: useCallback((r: StudentTableRow) => r.id, []),
+    // Row-level dedup: a student with N enrollments produces N rows that
+    // share `r.id` — composite key disambiguates them so the dedup doesn't
+    // drop the extra enrollment rows.
+    getId: useCallback(
+      (r: StudentTableRow) => `${r.id}|${r.enrollmentId ?? "none"}`,
+      [],
+    ),
+    // Entity-level identity: the API paginates by student, so the loader
+    // must advance offset by *unique student count*, not by row count.
+    getEntityId: useCallback((r: StudentTableRow) => r.id, []),
     setData: setAllData,
   });
 
@@ -210,11 +225,22 @@ export function StudentTable({
   };
 
   const handleDelete = async () => {
-    if (!onDelete) return;
     if (!selectedRecord) return;
-    const result = await onDelete(selectedRecord.id);
+    // Per-row delete: if this row represents one of the student's enrollments,
+    // remove just that enrollment via onDeleteEnrollment. The student record,
+    // other enrollments, parent links, attendance, and adcoin balance stay
+    // intact. A "no-program" row (enrollmentId null) falls back to the
+    // student-wide onDelete so the staff can still clean up shell records.
+    let result: { success: boolean; error?: string };
+    if (selectedRecord.enrollmentId && onDeleteEnrollment) {
+      result = await onDeleteEnrollment(selectedRecord.enrollmentId);
+    } else if (onDelete) {
+      result = await onDelete(selectedRecord.id);
+    } else {
+      return;
+    }
     if (!result.success) {
-      throw new Error(result.error || "Failed to delete student");
+      throw new Error(result.error || "Failed to delete");
     }
     router.refresh();
   };
@@ -582,7 +608,7 @@ export function StudentTable({
                               </span>
                             )}
                           </div>
-                        ) : row.packageType ? (
+                        ) : row.enrollmentId ? (
                           <div>
                             <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                               Individual

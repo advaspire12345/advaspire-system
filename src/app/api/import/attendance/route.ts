@@ -146,8 +146,30 @@ export async function POST(request: NextRequest) {
               return null;
             })(),
             instructor_name: row.instructor_name?.trim() || null,
-            lesson: row.lesson?.trim() || null,
-            mission: row.mission?.trim() || null,
+            // Assemble up to 3 (lesson, mission) pairs from the CSV columns
+            // lesson/lesson_2/lesson_3 + matching mission columns. Empty
+            // pairs are dropped. A pair with only one side filled is rejected
+            // so the data never lands half-recorded.
+            activities: (() => {
+              const pairs = [
+                { lesson: row.lesson?.trim() || "", mission: row.mission?.trim() || "" },
+                { lesson: row.lesson_2?.trim() || "", mission: row.mission_2?.trim() || "" },
+                { lesson: row.lesson_3?.trim() || "", mission: row.mission_3?.trim() || "" },
+              ];
+              const kept: { lesson: string; mission: string }[] = [];
+              pairs.forEach((p, i) => {
+                const filled = p.lesson || p.mission;
+                if (!filled) return;
+                if (!p.lesson || !p.mission) {
+                  const which = i === 0 ? "" : `_${i + 1}`;
+                  throw new Error(
+                    `lesson${which} and mission${which} must be filled together (got "${p.lesson}" / "${p.mission}")`,
+                  );
+                }
+                kept.push(p);
+              });
+              return kept.length > 0 ? kept : null;
+            })(),
             last_activity: row.activity?.trim() || null,
             adcoin,
             notes: absenceReason,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Plus, Minus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -58,9 +59,9 @@ export interface AttendanceFormData {
   adcoin: number;
   projectPhotos: string[];
   notes: string;
-  // Lesson and mission fields
-  lesson: string;
-  mission: string;
+  // Flexible array of activities done in this session. Each entry is one
+  // {lesson, mission} pair. The first entry is the primary activity.
+  activities: { lesson: string; mission: string }[];
   // Trial-specific field
   instructorFeedback?: string;
   isTrial?: boolean;
@@ -194,13 +195,20 @@ export function StudentAttendanceModal({
   const [adcoinTouched, setAdcoinTouched] = useState(false);
   const originalAdcoinRef = useRef<number>(0);
 
-  // Lesson and mission state
-  const [lesson, setLesson] = useState("");
-  const [mission, setMission] = useState("");
+  // Activities done in this session. Flexible array; teacher can `+ / −` rows
+  // to record multiple lesson + mission pairs in one attendance. First entry
+  // is the primary; the exam-handoff fires if any entry's lesson === "Exam".
+  const [activities, setActivities] = useState<{ lesson: string; mission: string }[]>([
+    { lesson: "", mission: "" },
+  ]);
   const [curriculumLessons, setCurriculumLessons] = useState<CurriculumLesson[]>([]);
   const [isLoadingCurriculum, setIsLoadingCurriculum] = useState(false);
-  // Ref to skip mission reset when lesson is pre-filled on modal open
-  const skipMissionResetRef = useRef(false);
+  // Active activity events for this student — feed the "ACTIVITY" section of
+  // the Lesson dropdown so the teacher can record participation in things like
+  // "Spring Showcase" or a 4-week tournament. Cleared when the student changes.
+  const [activeActivities, setActiveActivities] = useState<
+    { id: string; title: string; expiresLabel: string | null }[]
+  >([]);
 
   // Async student search results — populated lazily as the user types in
   // the student dropdown's search box (mode === "add"). Replaces the old
@@ -289,8 +297,7 @@ export function StudentAttendanceModal({
         setProjectPhotos([]);
         setReason("");
         setInstructorFeedback("");
-        setLesson("");
-        setMission("");
+        setActivities([{ lesson: "", mission: "" }]);
         setCurriculumLessons([]);
       } else if (selectedRow) {
         // Present or Absent mode - pre-fill with selected row
@@ -310,11 +317,12 @@ export function StudentAttendanceModal({
           originalAdcoinRef.current = existing.adcoin ?? 0;
           setProjectPhotos(existing.projectPhotos || []);
           setReason(existing.notes || "");
-          const initialLesson = existing.lesson || "";
-          const initialMission = existing.mission || "";
-          if (initialMission) skipMissionResetRef.current = true;
-          setLesson(initialLesson);
-          setMission(initialMission);
+          // Pre-fill existing activities, or start with one empty row.
+          setActivities(
+            existing.activities && existing.activities.length > 0
+              ? existing.activities.map((a) => ({ lesson: a.lesson, mission: a.mission }))
+              : [{ lesson: "", mission: "" }],
+          );
         } else {
           // New attendance — default to current day and current time
           setClassType("Physical");
@@ -327,8 +335,7 @@ export function StudentAttendanceModal({
           setProjectPhotos([]);
           setReason("");
           setInstructorFeedback("");
-          setLesson("");
-          setMission("");
+          setActivities([{ lesson: "", mission: "" }]);
         }
       }
     }
@@ -383,14 +390,30 @@ export function StudentAttendanceModal({
     }
   }, [open, mode, selectedEnrollment, selectedRow, fetchCurriculumLessons]);
 
-  // Reset mission when lesson changes (but skip on initial pre-fill)
+  // Per-row helpers: changing a row's lesson resets that row's mission so
+  // stale missions from a different lesson never sneak through. Inlined into
+  // each row's onChange handler below — no global effect needed.
+
+  // Fetch active activity events for the targeted student. Use selectedRow's
+  // studentId when marking present/absent, or selectedStudentId in add mode.
   useEffect(() => {
-    if (skipMissionResetRef.current) {
-      skipMissionResetRef.current = false;
+    const studentId = selectedRow?.studentId ?? selectedStudentId;
+    if (!open || !studentId) {
+      setActiveActivities([]);
       return;
     }
-    setMission("");
-  }, [lesson]);
+    let cancelled = false;
+    fetch(`/api/events/active-activities?studentId=${encodeURIComponent(studentId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.activities) return;
+        setActiveActivities(data.activities);
+      })
+      .catch(() => {
+        /* non-fatal — dropdown just lacks the ACTIVITY section */
+      });
+    return () => { cancelled = true; };
+  }, [open, selectedRow?.studentId, selectedStudentId]);
 
   // Update fields when student changes (for add mode)
   useEffect(() => {
@@ -474,8 +497,10 @@ export function StudentAttendanceModal({
         adcoin: mode === "absent" ? 0 : (isTrial ? 0 : adcoin),
         projectPhotos: mode === "absent" ? [] : projectPhotos,
         notes: mode === "absent" ? reason : "",
-        lesson: mode === "absent" ? "" : lesson,
-        mission: mode === "absent" ? "" : mission,
+        activities:
+          mode === "absent"
+            ? []
+            : activities.filter((a) => a.lesson || a.mission),
         instructorFeedback: isTrial ? instructorFeedback : undefined,
         isTrial: isTrial,
         attendanceId: selectedRow?.existingAttendance?.id || undefined,
@@ -539,54 +564,60 @@ export function StudentAttendanceModal({
     label: i.name,
   }));
 
-  // Lesson options: curriculum lessons + Competition + (Exam if student has scheduled exam)
+  // Activity entries are prefixed so a downstream check can distinguish them
+  // from curriculum lessons by value alone (which decides whether Mission is
+  // disabled for that row).
+  const ACTIVITY_PREFIX = "Activity: ";
+
+  // Lesson options grouped by category. Categories rendered as disabled
+  // header rows so the dropdown is visually grouped without needing a new
+  // grouping component. ACTIVITY rows disable Mission when chosen.
   const lessonOptions = useMemo(() => {
-    const options = curriculumLessons.map((l) => ({
-      value: l.title,
-      label: l.title,
-    }));
-    options.push({ value: "Competition", label: "Competition" });
-    if (selectedRow?.hasExam) {
-      options.push({ value: "Exam", label: "Exam" });
+    const opts: { value: string; label: string; disabled?: boolean }[] = [];
+    opts.push({ value: "__hdr_curriculum", label: "— CURRICULUM —", disabled: true });
+    for (const l of curriculumLessons) {
+      opts.push({ value: l.title, label: l.title });
     }
-    return options;
-  }, [curriculumLessons, selectedRow?.hasExam]);
+    opts.push({ value: "__hdr_special", label: "— SPECIAL —", disabled: true });
+    opts.push({ value: "Competition", label: "Competition" });
+    if (selectedRow?.hasExam) {
+      opts.push({ value: "Exam", label: "Exam" });
+    }
+    if (activeActivities.length > 0) {
+      opts.push({ value: "__hdr_activity", label: "— ACTIVITY —", disabled: true });
+      for (const a of activeActivities) {
+        opts.push({
+          value: `${ACTIVITY_PREFIX}${a.title}`,
+          label: a.expiresLabel ? `${a.title} (until ${a.expiresLabel})` : a.title,
+        });
+      }
+    }
+    return opts;
+  }, [curriculumLessons, selectedRow?.hasExam, activeActivities]);
 
-  // Mission options: depends on selected lesson
-  const missionOptions = useMemo(() => {
-    if (!lesson) return [];
-
-    // Exam: only one option — the level the student is sitting for
+  // Mission options for a given lesson value. Empty array means "no mission
+  // to pick" — the picker is then disabled (used for activity-event lessons
+  // and unselected lessons).
+  const getMissionOptionsForLesson = (lesson: string): { value: string; label: string }[] => {
+    if (!lesson || lesson.startsWith("__hdr_")) return [];
+    // Activity events don't have missions — the picker stays disabled.
+    if (lesson.startsWith(ACTIVITY_PREFIX)) return [];
     if (lesson === "Exam" && selectedRow?.examLevel) {
       return [{ value: `Level ${selectedRow.examLevel}`, label: `Level ${selectedRow.examLevel}` }];
     }
+    if (lesson === "Competition") return COMPETITION_MISSIONS;
 
-    // If Competition is selected, show Preparation and Showcase
-    if (lesson === "Competition") {
-      return COMPETITION_MISSIONS;
-    }
-
-    // Find the selected lesson in curriculum
     const selectedLesson = curriculumLessons.find((l) => l.title === lesson);
     if (!selectedLesson || !selectedLesson.missions || selectedLesson.missions.length === 0) {
-      // Even if no missions defined, show Build Only option
       return [{ value: "Build Only", label: "Build Only" }];
     }
-
-    // Start with "Build Only" option for curriculum lessons
     const options = [{ value: "Build Only", label: "Build Only" }];
-
-    // Map missions to options - use level as the display text if no other identifier
     selectedLesson.missions.forEach((m, index) => {
       const label = m.level !== null ? `Level ${m.level}` : `Mission ${index + 1}`;
-      options.push({
-        value: label,
-        label: label,
-      });
+      options.push({ value: label, label });
     });
-
     return options;
-  }, [lesson, curriculumLessons]);
+  };
 
   // Determine what's editable based on mode
   const isStudentEditable = mode === "add";
@@ -796,30 +827,76 @@ export function StudentAttendanceModal({
             {/* Activity Fields - Only for add/present modes */}
             {showActivityFields && (
               <>
-                {/* Lesson and Mission Selection */}
-                <div className="grid grid-cols-2 gap-4">
-                  <FloatingSelect
-                    id="select-lesson"
-                    label="Lesson"
-                    placeholder={isLoadingCurriculum ? "Loading..." : "Select lesson..."}
-                    value={lesson}
-                    onChange={setLesson}
-                    options={lessonOptions}
-                    disabled={isLoadingCurriculum}
-                    searchable
-                  />
-
-                  <FloatingSelect
-                    id="select-mission"
-                    label="Mission"
-                    placeholder={lesson ? "Select mission..." : "Select lesson first..."}
-                    value={mission}
-                    onChange={setMission}
-                    options={missionOptions}
-                    disabled={!lesson || missionOptions.length === 0}
-                    searchable
-                  />
-                </div>
+                {/* Activities — one row per {lesson, mission}. `+` on the
+                    last row adds a new pair; `−` on any row removes it. */}
+                {activities.map((row, idx) => {
+                  const missionOpts = getMissionOptionsForLesson(row.lesson);
+                  const missionDisabled = !row.lesson || missionOpts.length === 0;
+                  return (
+                    <div key={idx} className="flex items-center gap-2">
+                      <div className="grid grid-cols-2 gap-4 flex-1">
+                        <FloatingSelect
+                          id={`select-lesson-${idx}`}
+                          label="Lesson"
+                          placeholder={isLoadingCurriculum ? "Loading..." : "Select lesson..."}
+                          value={row.lesson}
+                          onChange={(v) =>
+                            setActivities((prev) =>
+                              prev.map((a, i) =>
+                                i === idx ? { lesson: v, mission: "" } : a,
+                              ),
+                            )
+                          }
+                          options={lessonOptions}
+                          disabled={isLoadingCurriculum}
+                          searchable
+                        />
+                        <FloatingSelect
+                          id={`select-mission-${idx}`}
+                          label="Mission"
+                          placeholder={row.lesson ? "Select mission..." : "Select lesson first..."}
+                          value={row.mission}
+                          onChange={(v) =>
+                            setActivities((prev) =>
+                              prev.map((a, i) => (i === idx ? { ...a, mission: v } : a)),
+                            )
+                          }
+                          options={missionOpts}
+                          disabled={missionDisabled}
+                          searchable
+                        />
+                      </div>
+                      {/* Matches the DynamicFieldList pattern (program-modal):
+                          first row carries the + (add another activity); every
+                          subsequent row carries a − (remove this row). */}
+                      {idx === 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActivities((prev) => [...prev, { lesson: "", mission: "" }])
+                          }
+                          className="p-0.5 rounded-full border-2 border-[#23D2E2] hover:shadow-sm transition-all duration-200 flex items-center justify-center"
+                          title="Add another activity"
+                          aria-label="Add another activity"
+                        >
+                          <Plus size={9} className="text-[#23D2E2]" strokeWidth={5} />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActivities((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          className="p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10 transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
+                          title="Remove this activity"
+                          aria-label="Remove this activity"
+                        >
+                          <Minus size={9} className="text-[#fd434f]" strokeWidth={5} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
 
                 <FloatingInput
                   id="activity-completed"

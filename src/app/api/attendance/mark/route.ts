@@ -21,9 +21,10 @@ interface MarkAttendanceRequest {
   lastActivity?: string;
   projectPhotos?: string[];
   adcoin?: number;
-  // Lesson and mission
-  lesson?: string;
-  mission?: string;
+  // Activities done in this session — flexible array of {lesson, mission}.
+  // First entry is the primary; the exam-handoff fires if any activity has
+  // lesson === "Exam".
+  activities?: { lesson: string; mission: string }[];
   // Trial-specific fields
   instructorFeedback?: string;
   isTrial?: boolean;
@@ -199,8 +200,7 @@ export async function POST(request: NextRequest) {
             notes: body.instructorFeedback || body.notes || null,
             marked_by: user.id,
             adcoin: 0, // Trials always have 0 adcoin
-            lesson: body.lesson || null,
-            mission: body.mission || null,
+            activities: body.activities && body.activities.length > 0 ? body.activities : null,
           })
           .select()
           .single();
@@ -401,8 +401,7 @@ export async function POST(request: NextRequest) {
       actualStartTime: body.actualStartTime,
       slotDay: resolvedSlotDay,
       slotTime: resolvedSlotTime,
-      lesson: body.lesson,
-      mission: body.mission,
+      activities: body.activities,
     });
 
     const result = await markAttendance(
@@ -422,8 +421,7 @@ export async function POST(request: NextRequest) {
         notes: body.notes,
         markedBy: user.id,
         adcoin: body.adcoin ?? 0,
-        lesson: body.lesson,
-        mission: body.mission,
+        activities: body.activities && body.activities.length > 0 ? body.activities : null,
         attendanceId: body.attendanceId,
         slotDay: resolvedSlotDay,
         slotTime: resolvedSlotTime,
@@ -664,10 +662,13 @@ export async function POST(request: NextRequest) {
         console.warn("[Notify child_attendance_marked] failed:", notifyErr);
       }
 
-      // Exam auto-progression: if the user picked lesson="Exam" while marking present,
-      // bump the active scheduled exam to in_progress (only if it's still 'scheduled').
-      // Already-pass / already-fail rows are NOT re-touched (per spec).
-      if (body.lesson === "Exam") {
+      // Exam auto-progression: if "Exam" is logged in ANY activity for this
+      // session, bump the active scheduled exam to in_progress (only if it's
+      // still 'scheduled'). The teacher might log "Exam" as the primary or as
+      // a secondary activity — either way the student sat the exam. The flip
+      // is idempotent (only fires when status='scheduled') so duplicates are
+      // harmless. Already-pass / already-fail rows are NOT re-touched.
+      if (body.activities?.some((a) => a.lesson === "Exam")) {
         const { error: examUpdateError } = await supabaseAdmin
           .from("examinations")
           .update({ status: "in_progress", updated_at: new Date().toISOString() })

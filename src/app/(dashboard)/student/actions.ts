@@ -1286,6 +1286,108 @@ export async function updateStudentAction(
   }
 }
 
+/**
+ * Soft-delete a single enrollment row. Used when the user clicks the per-row
+ * delete in /student where one student with N programs shows as N rows — we
+ * remove only the targeted enrollment, leaving the student record, other
+ * enrollments, parent links, attendance history, and adcoin balance intact.
+ *
+ * Pending payments scoped to this enrollment (matched by student+course+package
+ * since payments doesn't carry an enrollment_id column) are hard-deleted so
+ * stale "pending" rows don't dangle on dashboards.
+ */
+export async function deleteEnrollmentAction(
+  enrollmentId: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await authorizeAction("students", "can_delete");
+
+    // Resolve the enrollment's identifying tuple for scoped cleanup below.
+    const { data: enrollment } = await supabaseAdmin
+      .from("enrollments")
+      .select("id, student_id, course_id, package_id, pool_id")
+      .eq("id", enrollmentId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (!enrollment) {
+      return { success: false, error: "Enrollment not found or already deleted." };
+    }
+
+    // Refuse to delete an enrollment that has attended classes — history is
+    // load-bearing for reporting and shouldn't quietly vanish. Same rule as
+    // the whole-student delete; just scoped to this enrollment now.
+    const { count: attendanceCount } = await supabaseAdmin
+      .from("attendance")
+      .select("id", { count: "exact", head: true })
+      .eq("enrollment_id", enrollmentId)
+      .in("status", ["present", "late"]);
+
+    if (attendanceCount && attendanceCount > 0) {
+      return {
+        success: false,
+        error:
+          "Cannot delete an enrollment with attended classes. Cancel the enrollment instead.",
+      };
+    }
+
+    // Pool handling — if this enrollment is in a sibling pool, redistribute
+    // its remaining sessions to the rest of the pool before removal so the
+    // siblings keep what was already paid for.
+    if (enrollment.pool_id) {
+      const { redistributePoolOnInactive } = await import("@/data/pools");
+      await redistributePoolOnInactive(enrollment.id, enrollment.student_id);
+    }
+
+    // Drop this enrollment's row in pool_students (the redistribute helper
+    // usually does this, but belt-and-braces in case the pool was already gone).
+    await supabaseAdmin
+      .from("pool_students")
+      .delete()
+      .eq("enrollment_id", enrollmentId);
+
+    // Hard-delete pending payments tied to THIS enrollment only. Scoping by
+    // (student, course, package) is the closest we can get without a direct
+    // FK from payments to enrollments. Paid / refunded rows stay (financial
+    // history preservation).
+    if (enrollment.course_id && enrollment.package_id) {
+      await supabaseAdmin
+        .from("payments")
+        .delete()
+        .eq("student_id", enrollment.student_id)
+        .eq("course_id", enrollment.course_id)
+        .eq("package_id", enrollment.package_id)
+        .eq("status", "pending");
+    }
+
+    // Soft-delete just this enrollment.
+    const { error: enrErr } = await supabaseAdmin
+      .from("enrollments")
+      .update({
+        deleted_at: new Date().toISOString(),
+        pool_id: null,
+        status: "cancelled",
+      })
+      .eq("id", enrollmentId);
+
+    if (enrErr) {
+      console.error("Error in deleteEnrollmentAction:", enrErr);
+      return { success: false, error: "Failed to delete enrollment" };
+    }
+
+    revalidatePath("/student");
+    revalidatePath("/pending-payments");
+    revalidateTag("dashboard", "max");
+    return { success: true };
+  } catch (error) {
+    console.error("Error in deleteEnrollmentAction:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
 export async function deleteStudentAction(
   studentId: string
 ): Promise<{ success: boolean; error?: string }> {

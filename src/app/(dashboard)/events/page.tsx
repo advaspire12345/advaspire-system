@@ -89,6 +89,7 @@ export default async function EventsPage() {
           canApprove={canApprove}
           branchOptions={branchOptions}
           companyOptions={companyOptions}
+          currentUserBranchId={staff.branch_id ?? null}
         />
       </div>
     </main>

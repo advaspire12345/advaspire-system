@@ -64,9 +64,15 @@ export async function POST(req: NextRequest) {
   if (!body || typeof body !== "object")
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
-  const required = ["title", "event_type", "scope", "date"] as const;
+  const required = ["title", "event_type", "scope"] as const;
   for (const k of required) {
     if (!body[k]) return NextResponse.json({ error: `Missing ${k}` }, { status: 400 });
+  }
+
+  // Either occurrences[] (specific-dates mode) or recurrence config must be
+  // present — createEvent enforces the full shape, this is the cheap gate.
+  if (!body.is_recurring && (!Array.isArray(body.occurrences) || body.occurrences.length === 0)) {
+    return NextResponse.json({ error: "Missing occurrences" }, { status: 400 });
   }
 
   const input: CreateEventInput = {
@@ -75,13 +81,17 @@ export async function POST(req: NextRequest) {
     event_type: body.event_type,
     scope: body.scope,
     audience: body.audience,
-    date: body.date,
-    end_date: body.end_date ?? null,
-    start_time: body.start_time ?? null,
-    end_time: body.end_time ?? null,
     color: body.color,
     branch_id: body.branch_id ?? null,
     company_id: body.company_id ?? null,
+    occurrences: Array.isArray(body.occurrences) ? body.occurrences : undefined,
+    is_recurring: body.is_recurring === true,
+    is_bounded: body.is_bounded === true,
+    recurring_days: body.recurring_days ?? null,
+    recurring_start_date: body.recurring_start_date ?? null,
+    recurring_end_date: body.recurring_end_date ?? null,
+    recurring_start_time: body.recurring_start_time ?? null,
+    recurring_end_time: body.recurring_end_time ?? null,
   };
 
   const res = await createEvent(caller, input);
@@ -117,13 +127,19 @@ export async function PATCH(req: NextRequest) {
   if (body.event_type !== undefined) update.event_type = body.event_type;
   if (body.scope !== undefined) update.scope = body.scope;
   if (body.audience !== undefined) update.audience = body.audience;
-  if (body.date !== undefined) update.date = body.date;
-  if (body.end_date !== undefined) update.end_date = body.end_date;
-  if (body.start_time !== undefined) update.start_time = body.start_time;
-  if (body.end_time !== undefined) update.end_time = body.end_time;
   if (body.color !== undefined) update.color = body.color;
   if (body.branch_id !== undefined) update.branch_id = body.branch_id;
   if (body.company_id !== undefined) update.company_id = body.company_id;
+  // Scheduling — pass through the same fields createEvent understands. If
+  // any one is provided, updateEvent treats the full bundle as the source.
+  if (body.occurrences !== undefined) update.occurrences = body.occurrences;
+  if (body.is_recurring !== undefined) update.is_recurring = body.is_recurring === true;
+  if (body.is_bounded !== undefined) update.is_bounded = body.is_bounded === true;
+  if (body.recurring_days !== undefined) update.recurring_days = body.recurring_days ?? null;
+  if (body.recurring_start_date !== undefined) update.recurring_start_date = body.recurring_start_date ?? null;
+  if (body.recurring_end_date !== undefined) update.recurring_end_date = body.recurring_end_date ?? null;
+  if (body.recurring_start_time !== undefined) update.recurring_start_time = body.recurring_start_time ?? null;
+  if (body.recurring_end_time !== undefined) update.recurring_end_time = body.recurring_end_time ?? null;
 
   const res = await updateEvent(caller, String(body.id), update);
   if (!res.ok) return NextResponse.json({ error: res.error }, { status: 400 });
