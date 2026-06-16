@@ -9,4 +9,5 @@ and would not travel with the repo.
 - [Testing harness](testing-harness.md) — the 5 Claude Code testing skills, what each answers, and how to run them
 - [UI/DB drift testing](ui-drift-testing.md) — why we observe the rendered UI, not just the DB (the bug class that justifies lms-simulator)
 - [Roles and entities](roles-and-entities.md) — the role hierarchy and the entities the permission matrix covers
+- [Roles and permissions](roles-and-permissions.md) — all 7 roles + the full per-role permission matrix (what each role can do)
 - [Simulator architecture](simulator-architecture.md) — scripts/simulator/ runner, action library, YAML scenarios
