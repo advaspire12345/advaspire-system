@@ -1,0 +1,87 @@
+name: scenario-5b-three-sibling-cancel-with-sessions
+description: |
+  Doc scenario 5b — Cancel from 3-Sibling Pool with sessions remaining.
+
+  Three siblings in a 4-session pool (post-approval). Cancel one — pool stays
+  active with 2 members, sessions redistribute among them.
+
+  Doc uses 6 remaining for clean 2/2/2 → 3/3. With 4 paid sessions and 3
+  siblings, the post-cancel split is floor(4/2) = 2 each. Same mechanic.
+
+fixtures:
+  branch:
+    name: "Sim S5b Branch"
+    code: "S5BB"
+    parent: "ADS"
+  course:
+    name: "S5bCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali5b"
+      parent_name: "S5b Parent"
+      parent_email: "p5b@sim.local"
+      parent_phone: "0123450051"
+      course: "S5bCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu5b"
+      parent_email: "p5b@sim.local"
+      parent_existing: true
+      course: "S5bCourse"
+      share_with_sibling: true
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Aminah5b"
+      parent_email: "p5b@sim.local"
+      parent_existing: true
+      course: "S5bCourse"
+      share_with_sibling: true
+      date_of_birth: "2019-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali5b"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali5b"
+    observers: auto
+
+  - actor: aa
+    action: cancel_enrollment
+    with:
+      student: "Aminah5b"
+    observers: auto
+
+teardown: auto

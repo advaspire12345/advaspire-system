@@ -1,0 +1,90 @@
+name: scenario-14-shared-pool-invoice-snapshot
+description: |
+  Doc scenario 14 — Shared Pool Invoice: Frozen Snapshot with Equal Split.
+
+  Two siblings share a 4-session pool. When the pool payment is approved,
+  `payments.invoice_snapshot` is populated with a frozen JSONB blob that
+  includes:
+    - Equal-split line items (RM200 / 2 = RM100 per sibling)
+    - Sessions split (4 / 2 = 2 sessions per sibling)
+    - Company info, parent name, course name, sibling names
+
+  The snapshot is immutable from that point — even if a sibling is later
+  cancelled, the invoice still shows the original siblings.
+
+  Simulator chain:
+    1. Add Ali14   — fresh parent, 4-session.
+    2. Add Abu14   — same parent, share_with_sibling=true → pool.
+    3. mark_offline_paid + approve_pending_payment → invoice_snapshot written.
+    4. (Bonus) cancel_enrollment Abu → snapshot unchanged (immutability).
+
+  Verification is done post-run via DB query: payments.invoice_snapshot
+  is non-null and includes both Ali14 and Abu14 in its items.
+
+fixtures:
+  branch:
+    name: "Sim 14 Branch"
+    code: "S14B"
+    parent: "ADS"
+  course:
+    name: "Coding101"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 200
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali14"
+      parent_name: "14 Parent"
+      parent_email: "p14@sim.local"
+      parent_phone: "0123450140"
+      course: "Coding101"
+      package: "4-session"
+      date_of_birth: "2015-04-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu14"
+      parent_email: "p14@sim.local"
+      parent_existing: true
+      course: "Coding101"
+      share_with_sibling: true
+      date_of_birth: "2017-08-15"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali14"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali14"
+    observers: auto
+
+  # Bonus — cancel Abu after the snapshot is written. The snapshot row stays
+  # unchanged (immutable). Verified post-run by SQL query against the paid
+  # payment's invoice_snapshot.
+  - actor: aa
+    action: cancel_enrollment
+    with:
+      student: "Abu14"
+    observers: auto
+
+teardown: auto

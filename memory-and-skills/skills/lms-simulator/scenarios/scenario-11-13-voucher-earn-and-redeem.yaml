@@ -1,0 +1,117 @@
+name: scenario-11-13-voucher-earn-and-redeem
+description: |
+  Doc scenarios 11 (Fast-Usage Voucher) + 13 (Voucher Redemption) — covered
+  together because they form a single end-to-end flow.
+
+  When a student completes all sessions within `completion_months` of their
+  first attendance, an enrollment-earned voucher row is created
+  (status=available, amount=template.discount_value). On the next payment's
+  approval, the highest-value available voucher is auto-applied and its
+  status flips to redeemed.
+
+  Uses a 1-session pricing (smallest valid pack) so a single mark_present
+  satisfies the totalAttended==duration trigger in checkAndCreateVoucher
+  without the simulator needing a separate stamp_attendance action. The
+  voucher mechanic is independent of the package size — what matters is
+  attendance==duration within the completion window.
+
+  Doc invariants:
+    - After completing all sessions within deadline:
+        vouchers row created, status='available', amount = template.amount
+    - After approving the next pending payment:
+        voucher status='redeemed', payment.discount_amount = amount
+
+  Simulator chain:
+    1. Add Ali — 1-session pricing wired to a voucher template
+       (amount=50, completion_months=3).
+    2. mark_offline_paid + approve → enrollment.sessions_remaining = 1.
+    3. mark_present → sessions=0 → checkAndCreateVoucher fires →
+       voucher.available_count = 1 (covers Scenario 11).
+       Auto-renewal pending payment is also created here.
+    4. mark_offline_paid + approve_pending_payment on the renewal →
+       voucher auto-applied → voucher.redeemed_count = 1 (Scenario 13).
+
+fixtures:
+  branch:
+    name: "Sim S11 Branch"
+    code: "S11B"
+    parent: "ADS"
+  course:
+    name: "Course11"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 1
+    price: 100
+    voucher:
+      amount: 50
+      completion_months: 3
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Add Ali — INDIVIDUAL, 1-session.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali11"
+      parent_name: "S11 Parent"
+      parent_email: "p11@sim.local"
+      parent_phone: "0123450110"
+      course: "Course11"
+      package: "1-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Pay + approve initial payment → sessions = 1.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali11"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali11"
+    observers: auto
+
+  # 3. Mark present — completes all sessions; voucher earned + auto-renewal
+  #    pending payment created.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali11"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "earn-voucher session"
+    observers: auto
+    expect:
+      # Scenario 11 invariants
+      "*.voucher.available_count": 1
+      "*.voucher.total_amount_available": 50
+      "*.pending_payments_table.row_visible": true
+
+  # 4. Pay + approve the renewal — voucher auto-applies and is redeemed.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali11"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali11"
+    observers: auto
+    expect:
+      # Scenario 13 invariants — voucher consumed.
+      "*.voucher.available_count": 0
+      "*.voucher.redeemed_count": 1
+
+teardown: auto

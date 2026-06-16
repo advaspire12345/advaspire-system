@@ -1,0 +1,81 @@
+name: scenario-6b-pool-dissolve
+description: |
+  Doc scenario 6b — 2-sibling pool auto-dissolves on cancel.
+
+  Two siblings (Ali, Abu) share a pool with paid sessions remaining. When one
+  sibling is cancelled, the pool auto-dissolves: the remaining sibling becomes
+  individual and inherits ALL of pool.sessions_remaining; the cancelled
+  sibling shows 0; the pool row is soft-deleted; both keep enrollment.pool_id
+  as a breadcrumb for restoration.
+
+  Simulator chain:
+    1. Ali enrolls (4-session)
+    2. Abu joins with share_with_sibling=true → pool created
+    3. Offline-paid + approve → pool.sessions_remaining = 4
+    4. Cancel Abu's enrollment
+    5. Verify pool is soft-deleted, Ali has 4 sessions individually, Abu has 0
+
+fixtures:
+  branch:
+    name: "Sim Dissolve Branch"
+    code: "SDIS"
+    parent: "ADS"
+  course:
+    name: "DissolveCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali6b"
+      parent_name: "Dissolve Parent"
+      parent_email: "dissolve@sim.local"
+      parent_phone: "0123450060"
+      course: "DissolveCourse"
+      package: "4-session"
+      date_of_birth: "2015-04-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu6b"
+      parent_email: "dissolve@sim.local"
+      parent_existing: true
+      course: "DissolveCourse"
+      share_with_sibling: true
+      date_of_birth: "2017-08-15"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali6b"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali6b"
+    observers: auto
+
+  - actor: aa
+    action: cancel_enrollment
+    with:
+      student: "Abu6b"
+    observers: auto
+
+teardown: auto

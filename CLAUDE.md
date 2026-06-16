@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important: Read Memory First
+
+**At the start of every session, read `memory-and-skills/memory/MEMORY.md` and the
+files it indexes before doing anything else.** That folder is the committed source of
+truth for this project's Claude Code context (project overview, testing harness, role
+model, simulator architecture, UI/DB drift lessons). It captures knowledge that is NOT
+derivable from the code alone. See `memory-and-skills/RECALL-PROMPT.md` for the standard
+session-kickoff prompt.
+
 ## Important: Documentation First
 
 **ALWAYS refer to the relevant docs file within the `/docs` directory before generating any code.** The docs directory contains specifications, patterns, and guidelines that must be followed when implementing features or making changes.

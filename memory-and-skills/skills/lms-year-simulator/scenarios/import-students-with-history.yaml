@@ -1,0 +1,60 @@
+name: import-students-with-history
+description: |
+  Admin uploads a CSV with two pre-existing students carrying
+  historical `sessions_remaining`. Verifies the import lands the
+  enrollments at the correct sessions_remaining.
+
+fixtures:
+  branch:
+    name: "Imp Branch"
+    code: "IMP"
+    parent: "ADS"
+  course:
+    name: "ImpCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    # /import requires can_create which only group_admin + super_admin have
+    # by default (assistant_admin/company_admin/instructor have it disabled).
+    - { handle: ga, role: group_admin, in_charge: true }
+
+steps:
+  - actor: ga
+    action: import_students_csv
+    with:
+      rows:
+        - student_name: "ImpStuA"
+          date_of_birth: "2014-05-05"
+          gender: "male"
+          school_name: "Sim School"
+          parent_name: "Imp Parent A"
+          parent_email: "impa@sim.local"
+          parent_phone: "0123451001"
+          package_type: "session"
+          package_duration: 4
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: 3
+          share_with_sibling: "false"
+        - student_name: "ImpStuB"
+          date_of_birth: "2015-06-06"
+          gender: "female"
+          school_name: "Sim School"
+          parent_name: "Imp Parent B"
+          parent_email: "impb@sim.local"
+          parent_phone: "0123451002"
+          package_type: "session"
+          package_duration: 4
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: 1
+          share_with_sibling: "false"
+    observers: auto
+
+teardown: manual

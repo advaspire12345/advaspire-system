@@ -1,0 +1,95 @@
+name: scenario-6c-restoration
+description: |
+  Doc scenario 6c — Restoration: revert cancelled sibling back to pool.
+
+  Continuing from 6b: Abu was cancelled, the 2-sibling pool dissolved, and
+  Ali became individual with all sessions. Admin sets Abu's enrollment status
+  back to "active". The pool_id breadcrumb both students kept lets the server
+  un-delete the pool, re-add both siblings, and re-absorb Ali's sessions
+  back into the pool.
+
+  Final state per doc:
+    Ali: 2 (pooled), Abu: 2 (pooled), pool.sessions_remaining = 4
+
+fixtures:
+  branch:
+    name: "Sim S6c Branch"
+    code: "S6CB"
+    parent: "ADS"
+  course:
+    name: "S6cCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali6c"
+      parent_name: "S6c Parent"
+      parent_email: "p6c@sim.local"
+      parent_phone: "0123450063"
+      course: "S6cCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu6c"
+      parent_email: "p6c@sim.local"
+      parent_existing: true
+      course: "S6cCourse"
+      share_with_sibling: true
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali6c"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali6c"
+    observers: auto
+
+  # Cancel — 2-sibling pool dissolves; Ali6c gets all 4 sessions individually.
+  - actor: aa
+    action: cancel_enrollment
+    with:
+      student: "Abu6c"
+    observers: auto
+
+  # Restore — set Abu's status back to active. Pool is un-deleted, both
+  # rejoin, Ali's 4 sessions re-absorbed into the pool.
+  - actor: aa
+    action: cancel_enrollment
+    with:
+      student: "Abu6c"
+      status: "active"
+    observers: auto
+
+teardown: auto
+
+# KNOWN DIVERGENCE: Doc 6c says restoration should un-delete the pool and
+# re-pool both siblings. Empirically the chain runs (Abu's status returns to
+# active) but the pool stays soft-deleted and Abu's pool_id breadcrumb is
+# cleared — Ali keeps the 4 sessions individually, Abu has 0 individually.
+# Either the doc describes intended-but-unimplemented behaviour, or the
+# server-side restoreStudentToPool flow clears the breadcrumb when the pool
+# is fresh-deleted. Worth following up on the LMS code path.

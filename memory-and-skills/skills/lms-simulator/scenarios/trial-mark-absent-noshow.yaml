@@ -1,0 +1,56 @@
+name: trial-mark-absent-noshow
+description: |
+  Trial absent path:
+   1. company_admin adds a trial for TODAY.
+   2. Verify it appears in mark-attendance for instructor (week-window).
+   3. Instructor marks Absent.
+   4. Trial table status auto-flips to "No Show".
+
+fixtures:
+  branch:
+    name: "Sim Trial Branch 2"
+    code: "STB2"
+    parent: "ADS"
+  course:
+    name: "TrialPython2"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: ca,   role: company_admin,   in_charge: true }
+    - { handle: aa,   role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,      in_charge: true }
+
+steps:
+  - actor: ca
+    action: add_trial
+    with:
+      parent_name: "Trial Parent 2"
+      parent_email: "tp2@sim.local"
+      parent_phone: "0123456782"
+      child_name: "TrialKid2"
+      child_age: 9
+      course: "TrialPython2"
+      scheduled_date: "TODAY"
+      scheduled_time: "17:00"
+      source: "website"
+    observers: auto
+    expect:
+      "*.trial_table.status": "Pending"
+      "inst.attendance_table.row_visible(TrialKid2 (Trial))": true
+
+  - actor: inst
+    action: mark_absent
+    with:
+      student: "TrialKid2 (Trial)"
+      reason: "didn't show up"
+    observers: auto
+    expect:
+      "*.trial_table.status": "No Show"
+      "*.trial_table.row_visible": true
+      "*.attendance_table.row_visible(TrialKid2 (Trial))": false
+
+teardown: auto

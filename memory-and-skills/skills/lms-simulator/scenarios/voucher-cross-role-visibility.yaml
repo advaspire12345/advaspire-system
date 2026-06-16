@@ -1,0 +1,30 @@
+name: voucher-cross-role-visibility
+description: |
+  Group admin creates a voucher; verify every subordinate role under the same
+  company sees the voucher in their /voucher table — and that the discount
+  value rendered in DOM matches the value sent. Proves the simulator pipeline
+  end-to-end on a small, low-friction action.
+
+fixtures:
+  branch:
+    name: "Sim Voucher Branch"
+    code: "SIVB"
+    parent: "ADS"
+  users:
+    - { handle: ga,   role: group_admin }
+    - { handle: ca,   role: company_admin }
+    - { handle: aa,   role: assistant_admin }
+    - { handle: inst, role: instructor }
+
+steps:
+  - actor: ga
+    action: add_voucher
+    with:
+      code: "SIMVCH1"
+      discount_type: "fixed"
+      discount_value: 25
+      expiry_type: "monthly"
+      expiry_months: 3
+    observers: auto
+
+teardown: auto

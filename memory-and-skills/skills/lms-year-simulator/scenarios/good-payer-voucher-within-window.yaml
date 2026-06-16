@@ -1,0 +1,86 @@
+name: good-payer-voucher-within-window
+description: |
+  Verify Phase A3 — when a parent pays the next renewal within
+  good_payer_voucher_window_days of the cycle anchor (first attendance
+  after the previous credit), a voucher is granted. Cycle anchor is
+  cleared post-grant so the next cycle is judged independently.
+
+  Setup quirk: this scenario assumes you've manually configured the
+  fixture pricing row's `good_payer_voucher_id` + `good_payer_voucher_window_days`
+  (defaults to 35d but no voucher template until you wire one). Run
+  the bootstrap SQL block at the bottom before the scenario, OR use
+  the mixed-year mega-scenario which sets everything up for you.
+
+fixtures:
+  branch:
+    name: "GoodPay Branch"
+    code: "GPB"
+    parent: "ADS"
+  course:
+    name: "GoodCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "ReliableRita"
+      parent_name: "Reliable Parent"
+      parent_email: "pRR@sim.local"
+      parent_phone: "0123450600"
+      course: "GoodCourse"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "ReliableRita" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "ReliableRita" }
+    observers: auto
+
+  # First attendance — stamps cycle_anchor_date.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "ReliableRita"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  # Parent renews promptly — same day. Well within the 35-day window.
+  - actor: ca
+    action: add_payment_for_student
+    with:
+      student: "ReliableRita"
+      course: "GoodCourse"
+      package: "4 Sessions"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "ReliableRita" }
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "ReliableRita" }
+    observers: auto
+
+teardown: manual

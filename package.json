@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "simulate": "node scripts/simulator/runner.mjs"
+    "simulate": "node scripts/simulator/runner.mjs",
+    "sync-skills": "node scripts/sync-skills.mjs",
+    "sync-skills:check": "node scripts/sync-skills.mjs --check",
+    "prepare": "node scripts/setup-hooks.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

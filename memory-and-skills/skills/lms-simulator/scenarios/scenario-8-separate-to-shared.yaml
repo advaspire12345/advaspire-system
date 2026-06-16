@@ -1,0 +1,131 @@
+name: scenario-8-separate-to-shared
+description: |
+  Doc scenario 8 — Separate to Shared Transition.
+
+  Two siblings each have an individual enrollment in the same course with
+  different session balances. Admin switches one to shared; the server
+  creates a pool, absorbs BOTH siblings' individual sessions_remaining into
+  pool.sessions_remaining, and zeros out each enrollment's individual
+  session count.
+
+  Doc invariant: Ali(8) + Abu(10) → pool.sessions_remaining = 18.
+  Per-student display = floor(18 / 2) = 9 each.
+
+  Simulator chain:
+    1. Add Abu — new parent, INDIVIDUAL 4-session.
+    2. mark_offline_paid + approve Abu → enrollment.sessions_remaining = 4.
+    3. stamp_sessions_remaining Abu to 10.
+    4. Add Ali — same parent, INDIVIDUAL via force_individual=true.
+    5. mark_offline_paid + approve Ali → enrollment.sessions_remaining = 4.
+    6. stamp_sessions_remaining Ali to 8.
+    7. switch_to_shared Ali → pool created, both absorbed → pool=18, each
+       enrollment.sessions_remaining = 0.
+
+fixtures:
+  branch:
+    name: "Sim S8 Branch"
+    code: "S8B1"
+    parent: "ADS"
+  course:
+    name: "Course8"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # 1. Abu — added first, individual, 4-session.
+  - actor: aa
+    action: add_student
+    with:
+      name: "Abu8"
+      parent_name: "S8 Parent"
+      parent_email: "p8@sim.local"
+      parent_phone: "0123450081"
+      course: "Course8"
+      package: "4-session"
+      date_of_birth: "2016-02-10"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 2. Pay + approve Abu — sessions_remaining=4.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Abu8"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Abu8"
+    observers: auto
+
+  # 3. Stamp Abu to 10 (simulates partial-use of a larger package).
+  - actor: aa
+    action: stamp_sessions_remaining
+    with:
+      student: "Abu8"
+      value: 10
+    observers: auto
+
+  # 4. Ali — same parent, INDIVIDUAL (force_individual avoids auto-shared).
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali8"
+      parent_email: "p8@sim.local"
+      parent_existing: true
+      course: "Course8"
+      package: "4-session"
+      force_individual: true
+      date_of_birth: "2014-03-05"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  # 5. Pay + approve Ali — sessions_remaining=4.
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali8"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali8"
+    observers: auto
+
+  # 6. Stamp Ali to 8.
+  - actor: aa
+    action: stamp_sessions_remaining
+    with:
+      student: "Ali8"
+      value: 8
+    observers: auto
+
+  # 7. Switch Ali to shared — pool created absorbing both → 18 sessions.
+  - actor: aa
+    action: switch_to_shared
+    with:
+      student: "Ali8"
+    observers: auto
+    expect:
+      # Pool absorbed Ali(8) + Abu(10) into sessions_remaining = 18. Both
+      # enrollments now zeroed. pool.total_sessions stays 0 because that
+      # field only counts PAID sessions (incremented in addPoolSessions),
+      # not absorbed-from-individual amounts. The doc invariant is the
+      # 18-session pool balance, which is sessions_remaining only.
+      "*.pool.sessions_remaining": 18
+      "*.pool.active_students": 2
+      "*.enrollment.sessions_remaining": 0
+
+teardown: auto

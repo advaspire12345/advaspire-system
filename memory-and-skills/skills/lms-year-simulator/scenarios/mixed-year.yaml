@@ -1,0 +1,441 @@
+name: mixed-year
+description: |
+  Compressed 12-month simulator. Five student archetypes flow through
+  the year and exercise every Phase A feature plus the existing
+  payment + attendance + level-up + auto-pool stack:
+
+    - Steady Sam      : regular weekly attendance, renewals, level-up
+    - Bouncing Bobo   : enrols, stops attending in M4, receives
+                        inactivity reminders M5-M7, admin cancels in M8
+    - Reliable Rita   : pays each renewal within the 35-day window
+                        and earns the good-payer voucher each time
+    - Sibling Sam     : joins Steady's family in M4, auto-pools
+    - Trial Tina      : trial in M1, converts in M6, enrolled + paid M7
+    - Switching Sara  : enrols M7 in Course A, switches to Course B M9
+
+  Time advances via `stamp_attendance_date` after each month's UI
+  activity, then `run_cron` fires the daily sweeps. End-of-run SQL
+  in the report confirms expected outcomes per archetype.
+
+fixtures:
+  branch:
+    name: "Year Branch"
+    code: "YRB"
+    parent: "ADS"
+  course:
+    name: "YearCourseA"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+    max_students_per_pool: 2
+    expiry_months: 6
+    good_payer_voucher:
+      amount: 20
+      window_days: 35
+  extra_courses:
+    - { name: "YearCourseB" }
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  # =========================================================
+  # MONTH 1 — enrol everyone, first attendances
+  # =========================================================
+  - actor: aa
+    action: add_student
+    with:
+      name: "SteadySam"
+      parent_name: "Steady Family"
+      parent_email: "steady@sim.local"
+      parent_phone: "0123450001"
+      course: "YearCourseA"
+      package: "4-session"
+      date_of_birth: "2014-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "SteadySam" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "SteadySam" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "SteadySam", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "BouncingBobo"
+      parent_name: "Bouncing Family"
+      parent_email: "bouncing@sim.local"
+      parent_phone: "0123450002"
+      course: "YearCourseA"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "BouncingBobo" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "BouncingBobo" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "BouncingBobo", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "ReliableRita"
+      parent_name: "Reliable Family"
+      parent_email: "reliable@sim.local"
+      parent_phone: "0123450003"
+      course: "YearCourseA"
+      package: "4-session"
+      date_of_birth: "2014-06-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "ReliableRita" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "ReliableRita" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "ReliableRita", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+
+  - actor: aa
+    action: add_trial
+    with:
+      child_name: "TrialTina"
+      parent_name: "Trial Family"
+      parent_phone: "0123450004"
+      parent_email: "trial@sim.local"
+      course: "YearCourseA"
+      child_age: 10
+      scheduled_date: "TODAY+7"
+      scheduled_time: "10:00"
+    observers: auto
+
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SteadySam", date: "TODAY-330", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "BouncingBobo", date: "TODAY-330", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "ReliableRita", date: "TODAY-330", n_back: 1 }
+    observers: auto
+
+  # =========================================================
+  # MONTH 2 — everyone attends weekly
+  # =========================================================
+  - actor: inst
+    action: mark_present
+    with: { student: "SteadySam", lesson: "Lesson 1", mission: "Level 2", activity: "loops" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "BouncingBobo", lesson: "Lesson 1", mission: "Level 2", activity: "loops" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "ReliableRita", lesson: "Lesson 1", mission: "Level 2", activity: "loops" }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SteadySam", date: "TODAY-300", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "BouncingBobo", date: "TODAY-300", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "ReliableRita", date: "TODAY-300", n_back: 1 }
+    observers: auto
+
+  # =========================================================
+  # MONTH 3 — Rita renews early -> good-payer voucher
+  # Bobo's last attendance was M2 (~60 days ago, still under window)
+  # =========================================================
+  - actor: ca
+    action: add_payment_for_student
+    with:
+      student: "ReliableRita"
+      course: "YearCourseA"
+      package: "4 Sessions"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "ReliableRita" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "ReliableRita" }
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with: { student: "SteadySam", lesson: "Lesson 2", mission: "Level 1", activity: "conditions" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "ReliableRita", lesson: "Lesson 2", mission: "Level 1", activity: "conditions" }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SteadySam", date: "TODAY-270", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "ReliableRita", date: "TODAY-270", n_back: 1 }
+    observers: auto
+
+  # =========================================================
+  # MONTH 4 — Sibling Sam joins Steady's family (auto-pool)
+  # =========================================================
+  - actor: aa
+    action: add_student
+    with:
+      name: "SiblingSam"
+      parent_email: "steady@sim.local"
+      parent_existing: true
+      course: "YearCourseA"
+      package: "4-session"
+      date_of_birth: "2017-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "SiblingSam" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "SiblingSam" }
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with: { student: "SteadySam", lesson: "Lesson 2", mission: "Level 2", activity: "drills" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "ReliableRita", lesson: "Lesson 2", mission: "Level 2", activity: "drills" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "SiblingSam", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SteadySam", date: "TODAY-240", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "ReliableRita", date: "TODAY-240", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SiblingSam", date: "TODAY-240", n_back: 1 }
+    observers: auto
+
+  # =========================================================
+  # MONTH 5 — cron fires; Bobo crosses inactivity threshold
+  # (last attended TODAY-300 ~ 10 months ago, exceeds 12-week
+  # warning window derived from expiry_months=6)
+  # =========================================================
+  - actor: inst
+    action: mark_present
+    with: { student: "SteadySam", lesson: "Lesson 1", mission: "Level 1", activity: "review" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "ReliableRita", lesson: "Lesson 1", mission: "Level 1", activity: "review" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "SiblingSam", lesson: "Lesson 1", mission: "Level 2", activity: "loops" }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SteadySam", date: "TODAY-210", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "ReliableRita", date: "TODAY-210", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SiblingSam", date: "TODAY-210", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: run_cron
+    with: {}
+    observers: auto
+
+  # =========================================================
+  # MONTH 6 — Trial Tina converts (add_student with matching phone)
+  # =========================================================
+  - actor: aa
+    action: add_student
+    with:
+      name: "TrialTina"
+      parent_name: "Trial Family"
+      parent_email: "trial@sim.local"
+      parent_phone: "0123450004"
+      course: "YearCourseA"
+      package: "4-session"
+      date_of_birth: "2015-06-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "TrialTina" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "TrialTina" }
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with: { student: "SteadySam", lesson: "Lesson 2", mission: "Level 1", activity: "exam-prep" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "ReliableRita", lesson: "Lesson 2", mission: "Level 1", activity: "exam-prep" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "SiblingSam", lesson: "Lesson 2", mission: "Level 1", activity: "exam-prep" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "TrialTina", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SteadySam", date: "TODAY-180", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "ReliableRita", date: "TODAY-180", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SiblingSam", date: "TODAY-180", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "TrialTina", date: "TODAY-180", n_back: 1 }
+    observers: auto
+  - actor: aa
+    action: run_cron
+    with: {}
+    observers: auto
+
+  # =========================================================
+  # MONTH 7 — Switching Sara enrolls
+  # =========================================================
+  - actor: aa
+    action: add_student
+    with:
+      name: "SaraSwitch"
+      parent_name: "Switching Family"
+      parent_email: "switching@sim.local"
+      parent_phone: "0123450005"
+      course: "YearCourseA"
+      package: "4-session"
+      date_of_birth: "2014-12-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "SaraSwitch" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "SaraSwitch" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "SaraSwitch", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: aa
+    action: stamp_attendance_date
+    with: { student: "SaraSwitch", date: "TODAY-150", n_back: 1 }
+    observers: auto
+
+  # =========================================================
+  # MONTH 8 — admin manually cancels Bouncing Bobo after months of pings
+  # =========================================================
+  - actor: aa
+    action: cancel_enrollment
+    with: { student: "BouncingBobo" }
+    observers: auto
+  - actor: aa
+    action: run_cron
+    with: {}
+    observers: auto
+
+  # =========================================================
+  # MONTH 9 — Switching Sara moves to Course B
+  # =========================================================
+  - actor: aa
+    action: switch_course
+    with:
+      student: "SaraSwitch"
+      target_course: "YearCourseB"
+      notes: "Sara requested a course change"
+    observers: auto
+
+  # =========================================================
+  # MONTH 12 — Rita's second renewal (still inside window since
+  # her most recent attendance was M6, ~180 days ago). This is OUTSIDE
+  # the 35-day window so she should NOT earn the voucher this time —
+  # verifies the negative case too.
+  # =========================================================
+  - actor: ca
+    action: add_payment_for_student
+    with:
+      student: "ReliableRita"
+      course: "YearCourseA"
+      package: "4 Sessions"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "ReliableRita" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "ReliableRita" }
+    observers: auto
+
+teardown: manual

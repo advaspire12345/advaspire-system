@@ -1,0 +1,84 @@
+name: trial-delete-cascade-and-guard
+description: |
+  Two trials, two delete paths:
+   • TrialKidDelA: never marked → delete should succeed AND remove from /attendance.
+   • TrialKidDelB: marked Present first → delete should be BLOCKED (button greyed,
+     or toast "cannot delete trial with attendance record").
+
+fixtures:
+  branch:
+    name: "Sim Trial Del Branch"
+    code: "STDB"
+    parent: "ADS"
+  course:
+    name: "TrialDelCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: ca,   role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,      in_charge: true }
+
+steps:
+  # --- TrialKidDelA: never attended; should be cleanly deletable. ---
+  - actor: ca
+    action: add_trial
+    with:
+      parent_name: "Del Parent A"
+      parent_email: "delA@sim.local"
+      parent_phone: "0123456784"
+      child_name: "TrialKidDelA"
+      child_age: 7
+      course: "TrialDelCourse"
+      scheduled_date: "TODAY"
+      scheduled_time: "17:00"
+      source: "facebook"
+    observers: auto
+
+  - actor: ca
+    action: delete_trial
+    with: { child_name: "TrialKidDelA" }
+    observers: auto
+    expect:
+      "*.trial_table.row_visible(TrialKidDelA)": false                     # row gone from /trial
+      "inst.attendance_table.row_visible(TrialKidDelA (Trial))": false     # cascaded off /attendance
+
+  # --- TrialKidDelB: attendance marked first; delete must be blocked. ---
+  - actor: ca
+    action: add_trial
+    with:
+      parent_name: "Del Parent B"
+      parent_email: "delB@sim.local"
+      parent_phone: "0123456785"
+      child_name: "TrialKidDelB"
+      child_age: 9
+      course: "TrialDelCourse"
+      scheduled_date: "TODAY"
+      scheduled_time: "18:30"
+      source: "facebook"
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "TrialKidDelB (Trial)"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "trial taken"
+    observers: auto
+    expect:
+      "*.trial_table.status(TrialKidDelB)": "Completed"
+
+  - actor: ca
+    action: delete_trial
+    with: { child_name: "TrialKidDelB" }
+    expect_failure: true                                                    # delete should be blocked
+    observers: auto
+    expect:
+      "*.trial_table.row_visible(TrialKidDelB)": true                       # still there
+      "ca.delete_button(TrialKidDelB).disabled_or_toast": true              # blocked signal
+
+teardown: auto

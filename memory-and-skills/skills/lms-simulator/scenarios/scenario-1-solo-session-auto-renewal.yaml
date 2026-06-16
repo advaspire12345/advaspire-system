@@ -1,0 +1,85 @@
+name: scenario-1-solo-session-auto-renewal
+description: |
+  Doc scenario 1 — Solo Enrollment with 4-Session Package and Auto-Renewal.
+
+  After approving a 4-session package, sessions_remaining = 4. After 4
+  attendances, sessions reaches 0 and the LMS auto-creates a renewal
+  pending payment for the same package price.
+
+  The simulator skips the intermediate attendances (Take-Attendance-Extra
+  UI flow isn't built yet) and DB-stamps sessions_remaining=1 just before
+  the final mark_present. The 4th attendance then crosses zero via the
+  real markAttendance code path, which is what triggers the auto-renewal.
+
+  Simulator chain:
+    1. Add Ali1 (4-session) + approve → sessions = 4 (also marks an initial
+       attendance so this-week's session is "complete" per isPresentDone).
+       Actually we let mark_present happen below.
+    2. stamp_sessions_remaining Ali1 = 1
+    3. mark_present Ali1 → sessions decremented to 0; auto-renewal fires.
+    4. Verify a second pending payment exists for the same course/student.
+
+fixtures:
+  branch:
+    name: "Sim S1 Branch"
+    code: "S1B1"
+    parent: "ADS"
+  course:
+    name: "S1Course"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali1"
+      parent_name: "S1 Parent"
+      parent_email: "p1@sim.local"
+      parent_phone: "0123450010"
+      course: "S1Course"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali1"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali1"
+    observers: auto
+
+  # Shortcut to the pre-final-attendance state.
+  - actor: aa
+    action: stamp_sessions_remaining
+    with:
+      student: "Ali1"
+      value: 1
+    observers: auto
+
+  # Final attendance crosses zero — should trigger auto-renewal pending payment.
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali1"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+teardown: auto

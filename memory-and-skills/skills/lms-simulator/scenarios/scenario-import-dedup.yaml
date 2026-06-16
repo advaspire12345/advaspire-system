@@ -1,0 +1,119 @@
+name: scenario-import-dedup
+description: |
+  Verify the import endpoint is idempotent — uploading the same file twice
+  doesn't produce duplicate student/parent rows. Two skip paths covered:
+    a) Second upload: every row's (student_name, parent_email, branch) combo
+       already exists → server skips silently via the name+parent dedup check.
+    b) (Implicit) student_id column behaviour — leaving it blank in both
+       uploads still triggers (a). A separate scenario could test the
+       student_id round-trip after a real export, but the dedup-by-name path
+       is what protects the common "re-upload same file" mistake.
+
+  Simulator chain:
+    1. Import a 2-row CSV (Alex + Bella, both individual, blank student_id).
+       Expect 2 imported, 0 skipped.
+    2. Import the SAME 2-row CSV again.
+       Expect 0 imported, 2 skipped — both rows hit the dup check.
+
+  Doc invariant: after step 2, the DB still has exactly 2 students, not 4.
+
+fixtures:
+  branch:
+    name: "Sim Dedup Branch"
+    code: "SDED"
+    parent: "ADS"
+  course:
+    name: "DedupCourse"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: sa, role: super_admin, in_charge: true }
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  # First upload — both students new, both should be created.
+  - actor: sa
+    action: import_students_csv
+    with:
+      student: "Alex"
+      rows:
+        - student_id: ""
+          student_name: "Alex"
+          date_of_birth: "2015-01-01"
+          gender: "male"
+          school_name: "Sim School"
+          parent_name: "Dedup Parent"
+          parent_email: "dedup.parent@sim.local"
+          parent_phone: "0123450200"
+          package_type: "session"
+          package_duration: "4"
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: "0"
+          share_with_sibling: ""
+        - student_id: ""
+          student_name: "Bella"
+          date_of_birth: "2016-02-02"
+          gender: "female"
+          school_name: "Sim School"
+          parent_name: "Dedup Parent2"
+          parent_email: "dedup.parent2@sim.local"
+          parent_phone: "0123450201"
+          package_type: "session"
+          package_duration: "4"
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: "0"
+          share_with_sibling: ""
+    observers: auto
+
+  # Second upload — identical payload. Expect both to be skipped, no dupes.
+  - actor: sa
+    action: import_students_csv
+    with:
+      student: "Alex"
+      rows:
+        - student_id: ""
+          student_name: "Alex"
+          date_of_birth: "2015-01-01"
+          gender: "male"
+          school_name: "Sim School"
+          parent_name: "Dedup Parent"
+          parent_email: "dedup.parent@sim.local"
+          parent_phone: "0123450200"
+          package_type: "session"
+          package_duration: "4"
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: "0"
+          share_with_sibling: ""
+        - student_id: ""
+          student_name: "Bella"
+          date_of_birth: "2016-02-02"
+          gender: "female"
+          school_name: "Sim School"
+          parent_name: "Dedup Parent2"
+          parent_email: "dedup.parent2@sim.local"
+          parent_phone: "0123450201"
+          package_type: "session"
+          package_duration: "4"
+          schedule_day: "monday"
+          schedule_time: "10:00"
+          enrollment_status: "active"
+          sessions_remaining: "0"
+          share_with_sibling: ""
+    observers: auto
+    expect:
+      # Alex still has the same single enrollment after the second upload.
+      "*.enrollment.sessions_remaining": 0
+      "*.attendance.count": 0
+
+teardown: auto

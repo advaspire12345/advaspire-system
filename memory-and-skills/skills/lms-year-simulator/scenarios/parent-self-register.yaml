@@ -1,0 +1,41 @@
+name: parent-self-register
+description: |
+  Public registration page — unauthenticated visitor fills the parent
+  + first-child form and submits. Verifies parents, students, and
+  parent_students rows land + assistant_admin gets a "new parent" ping.
+
+  Requires fixtures.branch and fixtures.course to be created so the
+  /register/[companyCode]/[branchCode] route resolves to a valid form.
+
+fixtures:
+  branch:
+    name: "PSR Branch"
+    code: "PSR"
+    parent: "ADS"
+  course:
+    name: "PSRCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+
+steps:
+  - actor: aa
+    action: parent_self_register
+    with:
+      company_code: "ADS"
+      branch_code: "PSR"
+      parent_name: "Self-Reg Parent"
+      parent_phone: "0123450990"
+      parent_email: "selfreg@sim.local"
+      child_name: "SelfRegChild"
+      date_of_birth: "2015-08-08"
+      gender: "male"
+      course: "PSRCourse"
+    observers: auto
+
+teardown: manual

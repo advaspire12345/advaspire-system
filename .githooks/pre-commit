@@ -1,0 +1,10 @@
+#!/bin/sh
+# Block commits when the committed skills mirror (memory-and-skills/skills/) has
+# drifted from the live .claude/skills/. Keeps the source-of-truth folder honest.
+node scripts/sync-skills.mjs --check
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "✗ pre-commit blocked: skills mirror is stale."
+  echo "  Run 'npm run sync-skills', stage the result, and commit again."
+  exit 1
+fi

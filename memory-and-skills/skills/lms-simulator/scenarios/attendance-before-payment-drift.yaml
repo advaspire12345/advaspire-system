@@ -1,0 +1,54 @@
+name: attendance-before-payment-drift
+description: |
+  Catch the UI/DB drift bug — assistant_admin creates a student, instructor
+  marks present BEFORE payment, sessions go negative. Verify both the
+  /attendance table cell AND the mark-present modal stay consistent for
+  every observer role.
+
+fixtures:
+  branch:
+    name: "Sim Branch A"
+    code: "SBA"
+    parent: "ADS"               # parent company code (must already exist)
+  course:
+    name: "PythonSim"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 12
+    price: 600
+  users:
+    - { handle: aa,   role: assistant_admin }
+    - { handle: inst, role: instructor, in_charge: true }
+    - { handle: ca,   role: company_admin, in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "SimStu1"
+      parent_name: "Parent One"
+      parent_email: "p1@sim.local"
+      parent_phone: "0123456789"
+      course: "PythonSim"
+      package: "12-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "SimStu1"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro coding"
+    observers: auto
+    expect:
+      "*.attendance_table.sessions_remaining": -1
+      "*.mark_present_modal.sessions_remaining": -1
+      "*.student_table.period_active": -1
+
+teardown: auto

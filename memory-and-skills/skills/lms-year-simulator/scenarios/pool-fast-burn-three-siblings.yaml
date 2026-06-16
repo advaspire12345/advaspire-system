@@ -1,0 +1,93 @@
+name: pool-fast-burn-three-siblings
+description: |
+  Three siblings under same parent + course. Pricing has
+  max_students_per_pool=3 so all three auto-pool on the same package.
+  All three attend rapidly until any per-student count drops to 2,
+  which should trigger the renewal-pending-payment + low-sessions
+  notification flow.
+
+fixtures:
+  branch:
+    name: "FB Branch"
+    code: "FBB"
+    parent: "ADS"
+  course:
+    name: "FBCourse"
+    levels: 4
+    sessions_to_level_up: 5
+  pricing:
+    type: session
+    count: 12
+    price: 600
+    max_students_per_pool: 3
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "FBAli"
+      parent_name: "FB Family"
+      parent_email: "fb@sim.local"
+      parent_phone: "0123450940"
+      course: "FBCourse"
+      package: "12-session"
+      date_of_birth: "2014-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+  - actor: ca
+    action: mark_offline_paid
+    with: { student: "FBAli" }
+    observers: auto
+  - actor: ca
+    action: approve_pending_payment
+    with: { student: "FBAli" }
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "FBAbu"
+      parent_email: "fb@sim.local"
+      parent_existing: true
+      course: "FBCourse"
+      date_of_birth: "2016-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: aa
+    action: add_student
+    with:
+      name: "FBAminah"
+      parent_email: "fb@sim.local"
+      parent_existing: true
+      course: "FBCourse"
+      date_of_birth: "2018-01-01"
+      gender: "female"
+      school_name: "Sim School"
+    observers: auto
+
+  # Burn sessions: each sibling attends twice in quick succession.
+  - actor: inst
+    action: mark_present
+    with: { student: "FBAli", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "FBAbu", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "FBAminah", lesson: "Lesson 1", mission: "Level 1", activity: "intro" }
+    observers: auto
+  - actor: inst
+    action: mark_present
+    with: { student: "FBAli", lesson: "Lesson 1", mission: "Level 2", activity: "loops" }
+    observers: auto
+
+teardown: manual

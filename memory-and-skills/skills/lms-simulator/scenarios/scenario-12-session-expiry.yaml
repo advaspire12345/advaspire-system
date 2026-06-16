@@ -1,0 +1,78 @@
+name: scenario-12-session-expiry
+description: |
+  Doc scenario 12 — Session Expiry.
+
+  Ali has a 4-session package whose `expires_at` is set on first attendance
+  (now + expiry_months). If the deadline passes without using all sessions,
+  on-demand `checkAndExpireEnrollments()` (runs on student/attendance/
+  dashboard page loads) flips status to 'expired' and zeroes sessions.
+
+  Simulator chain:
+    1. Add Ali (4-session) + approve payment → sessions = 4
+    2. mark_present → expires_at set to today + 2 months
+    3. expire_enrollment → DB-stamp expires_at to yesterday
+       (the action also visits /student to trigger the on-demand sweep)
+    4. Verify enrollment.status='expired', sessions_remaining=0
+
+fixtures:
+  branch:
+    name: "Sim S12 Branch"
+    code: "S12B"
+    parent: "ADS"
+  course:
+    name: "S12Course"
+    levels: 4
+    sessions_to_level_up: 4
+  pricing:
+    type: session
+    count: 4
+    price: 220
+  users:
+    - { handle: aa, role: assistant_admin, in_charge: true }
+    - { handle: inst, role: instructor,    in_charge: true }
+    - { handle: ca, role: company_admin,   in_charge: true }
+
+steps:
+  - actor: aa
+    action: add_student
+    with:
+      name: "Ali12"
+      parent_name: "S12 Parent"
+      parent_email: "p12@sim.local"
+      parent_phone: "0123450120"
+      course: "S12Course"
+      package: "4-session"
+      date_of_birth: "2015-01-01"
+      gender: "male"
+      school_name: "Sim School"
+    observers: auto
+
+  - actor: ca
+    action: mark_offline_paid
+    with:
+      student: "Ali12"
+    observers: auto
+
+  - actor: ca
+    action: approve_pending_payment
+    with:
+      student: "Ali12"
+    observers: auto
+
+  - actor: inst
+    action: mark_present
+    with:
+      student: "Ali12"
+      lesson: "Lesson 1"
+      mission: "Level 1"
+      activity: "intro"
+    observers: auto
+
+  - actor: aa
+    action: expire_enrollment
+    with:
+      student: "Ali12"
+      days_ago: 1
+    observers: auto
+
+teardown: auto
