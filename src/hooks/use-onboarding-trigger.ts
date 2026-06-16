@@ -6,6 +6,12 @@ const STORAGE_PREFIX = "lms-onboarding-seen-";
 const MAX_AUTO_OPENS = 2; // first + second login
 const PULSE_BEFORE_OPEN_MS = 1500;
 
+// The tour is opt-in: it must NOT launch (or pulse) automatically on login.
+// Users open help themselves via the ? button, and "Re-take tour" in the dialog
+// still starts the spotlight walkthrough on demand. Flip to `true` to restore the
+// first/second-login auto-nudge.
+const AUTO_TOUR_ENABLED = false;
+
 // Global kill-switch — set by the lms-simulator before each automation run
 // (and available to anyone debugging) so the tour never blocks scripted UI.
 const DISABLE_FLAG = "lms-onboarding-disabled";
@@ -25,6 +31,10 @@ function writeCount(userId: string, n: number): void {
 
 /**
  * Drives the first/second-login help nudge.
+ *
+ * NOTE: auto-firing is currently OFF (`AUTO_TOUR_ENABLED = false`) — the tour is
+ * opt-in via the ? button / "Re-take tour". The logic below only runs if that
+ * flag is flipped back on.
  *
  * On mount, if the user has seen the dialog fewer than MAX_AUTO_OPENS times:
  *   1. Returns `shouldPulse=true` immediately (the icon glows for ~1.5s).
@@ -47,6 +57,7 @@ export function useOnboardingTrigger(userId: string | null): {
   const didFireRef = useRef(false);
 
   useEffect(() => {
+    if (!AUTO_TOUR_ENABLED) return; // tour is manual-only; never auto-fire on login
     if (!userId) return;
     if (didFireRef.current) return; // StrictMode double-effect guard
     const count = readCount(userId);
