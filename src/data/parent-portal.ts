@@ -600,6 +600,15 @@ export interface ParentEvent {
   scope: "self" | "branch" | "company" | "global";
   eventType: "activity" | "competition" | "own_schedule" | "holiday";
   isOwn: boolean;
+  // Recurring metadata — needed so the parent calendar can expand a recurring
+  // event into its individual weekday occurrences instead of rendering a single
+  // continuous multi-day span (which is what the company-admin grid does).
+  isRecurring: boolean;
+  isBounded: boolean;
+  recurringDays: string[] | null;
+  recurringStartDate: string | null;
+  recurringEndDate: string | null;
+  occurrences: { date: string; startTime: string | null; endTime: string | null }[];
 }
 
 export async function getParentEvents(
@@ -618,6 +627,16 @@ export async function getParentEvents(
     scope: e.scope,
     eventType: e.event_type,
     isOwn: e.created_by_parent_id === parentId,
+    isRecurring: !!e.is_recurring,
+    isBounded: !!e.is_bounded,
+    recurringDays: (e.recurring_days as string[] | null) ?? null,
+    recurringStartDate: e.recurring_start_date ?? null,
+    recurringEndDate: e.recurring_end_date ?? null,
+    occurrences: (e.occurrences ?? []).map((o) => ({
+      date: o.date,
+      startTime: o.start_time ?? null,
+      endTime: o.end_time ?? null,
+    })),
   }));
 }
 

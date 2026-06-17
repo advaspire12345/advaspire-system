@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { getUser } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/db";
 import { getUserByAuthId, getUserBranchIds } from "@/data/users";
+import { createParentWithAuth, ensureParentAuth } from "@/data/parents";
 
 // Rows whose student_name starts with this token are treated as template
 // guidance and skipped during import.
@@ -170,7 +171,11 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // 1. Parent (lookup-or-create by email)
+        // 1. Parent (lookup-or-create by email). Use the same auth-provisioning
+        //    path as manual /student → Add (createParentWithAuth + ensureParentAuth)
+        //    so every imported parent gets a Supabase auth row and can log in
+        //    to the parent portal. Previously this path did a plain insert and
+        //    left imported parents without auth, blocking portal login.
         const parentEmail = row.parent_email.trim().toLowerCase();
         const { data: existingParent } = await supabaseAdmin
           .from("parents")
@@ -182,23 +187,21 @@ export async function POST(request: NextRequest) {
         let parentId: string;
         if (existingParent) {
           parentId = existingParent.id as string;
+          // Backfill auth for parents that pre-date this fix (no-op if linked).
+          await ensureParentAuth(parentId);
         } else {
-          const { data: newParent, error: parentError } = await supabaseAdmin
-            .from("parents")
-            .insert({
-              name: row.parent_name.trim(),
-              email: parentEmail,
-              phone: row.parent_phone?.trim() || null,
-              address: row.parent_address?.trim() || null,
-              city: row.parent_city?.trim() || null,
-            })
-            .select("id")
-            .single();
+          const newParent = await createParentWithAuth({
+            name: row.parent_name.trim(),
+            email: parentEmail,
+            phone: row.parent_phone?.trim() || null,
+            address: row.parent_address?.trim() || null,
+            city: row.parent_city?.trim() || null,
+          });
 
-          if (parentError || !newParent) {
-            throw new Error(`Failed to create parent: ${parentError?.message}`);
+          if (!newParent) {
+            throw new Error("Failed to create parent");
           }
-          parentId = newParent.id as string;
+          parentId = newParent.id;
         }
 
         // Parse `level` once — used on both student insert and enrollment
