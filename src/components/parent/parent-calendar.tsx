@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import {
   CalendarDays,
@@ -79,59 +79,115 @@ export function ParentCalendar({
   const [endTime, setEndTime] = useState("");
   const [color, setColor] = useState("#615DFA");
 
-  // Build a map of date -> events for quick lookup, expanding multi-day events
-  const eventsByDate = new Map<string, ParentEvent[]>();
-  for (const ev of events) {
-    if (ev.endDate && ev.endDate !== ev.date) {
-      const start = new Date(ev.date + "T00:00:00");
-      const end = new Date(ev.endDate + "T00:00:00");
-      const range = getDateRange(start, end);
-      for (const d of range) {
-        const key = format(d, "yyyy-MM-dd");
-        if (!eventsByDate.has(key)) eventsByDate.set(key, []);
-        eventsByDate.get(key)!.push(ev);
+  // Track visible month so the recurring-event expansion below has the right
+  // window to expand over. Mirrors the company-admin grid pattern — without
+  // this, navigating months wouldn't shift the recurring occurrences.
+  const [month, setMonth] = useState<Date>(() => new Date());
+  const monthStart = useMemo(() => {
+    const d = new Date(month);
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [month]);
+
+  // Build a date → events map. Mirrors the company-admin grid's expansion so
+  // recurring multi-weekday events (e.g. a competition every Sat + Sun) render
+  // as separate occurrences instead of one continuous month-long span.
+  const eventsByDate = useMemo(() => {
+    const map = new Map<string, ParentEvent[]>();
+    const weekdayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const pushAt = (dateStr: string, ev: ParentEvent) => {
+      if (!map.has(dateStr)) map.set(dateStr, []);
+      map.get(dateStr)!.push(ev);
+    };
+    for (const ev of events) {
+      if (ev.isRecurring) {
+        const days = ev.recurringDays ?? [];
+        if (days.length === 0) continue;
+        const winStart = new Date(monthStart);
+        winStart.setMonth(winStart.getMonth() - 1);
+        const winEnd = new Date(monthStart);
+        winEnd.setMonth(winEnd.getMonth() + 2);
+        const lowerBound = ev.isBounded && ev.recurringStartDate
+          ? new Date(ev.recurringStartDate + "T00:00:00")
+          : winStart;
+        const upperBound = ev.isBounded && ev.recurringEndDate
+          ? new Date(ev.recurringEndDate + "T00:00:00")
+          : winEnd;
+        const lo = winStart > lowerBound ? winStart : lowerBound;
+        const hi = winEnd < upperBound ? winEnd : upperBound;
+        for (const d of getDateRange(lo, hi)) {
+          if (days.includes(weekdayNames[d.getDay()])) {
+            pushAt(format(d, "yyyy-MM-dd"), ev);
+          }
+        }
+      } else if (ev.occurrences && ev.occurrences.length > 0) {
+        for (const o of ev.occurrences) {
+          pushAt(o.date, ev);
+        }
+      } else {
+        const start = new Date(ev.date + "T00:00:00");
+        const endStr = ev.endDate && ev.endDate !== ev.date ? ev.endDate : ev.date;
+        const end = new Date(endStr + "T00:00:00");
+        for (const d of getDateRange(start, end)) {
+          pushAt(format(d, "yyyy-MM-dd"), ev);
+        }
       }
-    } else {
-      const key = ev.date;
-      if (!eventsByDate.has(key)) eventsByDate.set(key, []);
-      eventsByDate.get(key)!.push(ev);
     }
-  }
+    return map;
+  }, [events, monthStart]);
 
-  // Compute stable slot assignment for events so each event stays on the same
-  // visual row across all days it spans (prevents "jumping" when events overlap)
-  const eventSlots = new Map<string, number>();
-  const sortedEventsForSlots = [...events].sort((a, b) => {
-    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    const aDur = differenceInCalendarDays(
-      new Date((a.endDate ?? a.date) + "T00:00:00"),
-      new Date(a.date + "T00:00:00")
-    );
-    const bDur = differenceInCalendarDays(
-      new Date((b.endDate ?? b.date) + "T00:00:00"),
-      new Date(b.date + "T00:00:00")
-    );
-    return bDur - aDur; // longer events first
-  });
-
-  const slotUsageByDate = new Map<string, Set<number>>();
-  for (const ev of sortedEventsForSlots) {
-    const evStart = new Date(ev.date + "T00:00:00");
-    const evEnd = new Date((ev.endDate ?? ev.date) + "T00:00:00");
-    const range = getDateRange(evStart, evEnd);
-    const dateStrs = range.map((d) => format(d, "yyyy-MM-dd"));
-
-    let slot = 0;
-    while (dateStrs.some((ds) => slotUsageByDate.get(ds)?.has(slot))) {
-      slot++;
+  // For each event, the sorted list of dates it appears on. Derived from
+  // eventsByDate so it covers specific dates, multi-day ranges, and recurring
+  // patterns uniformly — same approach as the admin grid.
+  const eventDates = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const [date, list] of eventsByDate.entries()) {
+      for (const ev of list) {
+        const arr = m.get(ev.id) ?? [];
+        arr.push(date);
+        m.set(ev.id, arr);
+      }
     }
+    for (const arr of m.values()) arr.sort();
+    return m;
+  }, [eventsByDate]);
 
-    eventSlots.set(ev.id, slot);
-    for (const ds of dateStrs) {
-      if (!slotUsageByDate.has(ds)) slotUsageByDate.set(ds, new Set());
-      slotUsageByDate.get(ds)!.add(slot);
+  // Slot allocation driven by eventDates so recurring + range events keep the
+  // same visual row across all occurrences.
+  const eventSlots = useMemo(() => {
+    const slots = new Map<string, number>();
+    const sorted = [...events].sort((a, b) => {
+      const aDates = eventDates.get(a.id) ?? [];
+      const bDates = eventDates.get(b.id) ?? [];
+      const aFirst = aDates[0] ?? a.date;
+      const bFirst = bDates[0] ?? b.date;
+      if (aFirst !== bFirst) return aFirst < bFirst ? -1 : 1;
+      return bDates.length - aDates.length;
+    });
+    const slotUsageByDate = new Map<string, Set<number>>();
+    for (const ev of sorted) {
+      const dateStrs = eventDates.get(ev.id) ?? [];
+      if (dateStrs.length === 0) continue;
+      let slot = 0;
+      while (dateStrs.some((ds) => slotUsageByDate.get(ds)?.has(slot))) slot++;
+      slots.set(ev.id, slot);
+      for (const ds of dateStrs) {
+        if (!slotUsageByDate.has(ds)) slotUsageByDate.set(ds, new Set());
+        slotUsageByDate.get(ds)!.add(slot);
+      }
     }
-  }
+    return slots;
+  }, [events, eventDates]);
+
+  // "dateStr|eventId" set for O(1) adjacency lookup when drawing pills.
+  const dateEventKey = useMemo(() => {
+    const s = new Set<string>();
+    for (const [date, list] of eventsByDate.entries()) {
+      for (const ev of list) s.add(`${date}|${ev.id}`);
+    }
+    return s;
+  }, [eventsByDate]);
 
   // Build a map of date -> upcoming classes
   const classesByDate = new Map<string, UpcomingClass[]>();
@@ -259,6 +315,12 @@ export function ParentCalendar({
           scope: event.scope,
           eventType: event.event_type,
           isOwn: true,
+          isRecurring: false,
+          isBounded: false,
+          recurringDays: null,
+          recurringStartDate: null,
+          recurringEndDate: null,
+          occurrences: [],
         };
         setEvents((prev) => [...prev, newEvent]);
         setShowAddModal(false);
@@ -354,37 +416,30 @@ export function ParentCalendar({
         showLabel: boolean;
       };
       const eventRows: (PillData | null)[] = [];
+      const isSunday = day.date.getDay() === 0;
+      const isSaturday = day.date.getDay() === 6;
+      const prevDateStr = format(addDays(day.date, -1), "yyyy-MM-dd");
+      const nextDateStr = format(addDays(day.date, 1), "yyyy-MM-dd");
       for (let s = 0; s <= maxSlot; s++) {
         const ev = uniqueDayEvents.find(
           (e) => eventSlots.get(e.id) === s
         );
         if (ev) {
-          const isMultiDay = ev.endDate && ev.endDate !== ev.date;
-          if (!isMultiDay) {
-            eventRows.push({
-              label: ev.title,
-              color: ev.color,
-              id: ev.id,
-              roundLeft: true,
-              roundRight: true,
-              showLabel: true,
-            });
-          } else {
-            const isEventStart = dateStr === ev.date;
-            const isEventEnd = dateStr === ev.endDate;
-            const isSunday = day.date.getDay() === 0;
-            const isSaturday = day.date.getDay() === 6;
-
-            eventRows.push({
-              label: ev.title,
-              color: ev.color,
-              id: ev.id,
-              roundLeft: isEventStart || isSunday,
-              roundRight: isEventEnd || isSaturday,
-              showLabel:
-                isEventStart || (isSunday && !isEventStart),
-            });
-          }
+          // Adjacency-driven pill shape — mirrors the company-admin grid so
+          // recurring weekday events render as isolated rounded pills (each
+          // Sat / Sun gets its own pill) rather than a single continuous span.
+          const hasPrev = dateEventKey.has(`${prevDateStr}|${ev.id}`);
+          const hasNext = dateEventKey.has(`${nextDateStr}|${ev.id}`);
+          const continuesFromPrev = hasPrev && !isSunday;
+          const continuesToNext = hasNext && !isSaturday;
+          eventRows.push({
+            label: ev.title,
+            color: ev.color,
+            id: ev.id,
+            roundLeft: !continuesFromPrev,
+            roundRight: !continuesToNext,
+            showLabel: !continuesFromPrev,
+          });
         } else {
           eventRows.push(null); // empty placeholder
         }
@@ -525,6 +580,8 @@ export function ParentCalendar({
           mode="multiple"
           selected={scheduledDates}
           onDayClick={handleDayClick}
+          month={month}
+          onMonthChange={setMonth}
           modifiers={{
             attended: attendanceDates,
             scheduled: scheduledDates,
