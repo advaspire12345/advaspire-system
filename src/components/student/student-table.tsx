@@ -21,6 +21,11 @@ import type { StudentFormPayload } from "@/app/(dashboard)/student/actions";
 interface StudentTableProps {
   initialData: StudentTableRow[];
   totalStudents: number;
+  /** Total (student × enrollment) row count — the table renders one row per
+   *  enrollment, so paging at 10/page over this number is what the user
+   *  actually scrolls through. `totalStudents` is only used to bound the
+   *  entity-level loader. */
+  totalRows: number;
   branches: BranchOption[];
   courses: CourseOption[];
   coursePricing: CoursePricingOption[];
@@ -84,6 +89,7 @@ const ENROLLMENT_STATUS_LABELS: Record<string, string> = {
 export function StudentTable({
   initialData,
   totalStudents,
+  totalRows,
   branches,
   courses,
   coursePricing,
@@ -278,12 +284,14 @@ export function StudentTable({
     return [...directMatches, ...siblings];
   }, [allData, searchQuery]);
 
-  // Pagination — when not searching, total pages reflects the *server-side*
-  // total so the user can paginate past the bounded-loaded window. The
-  // progressive loader expands as needed when the page crosses a 100-block.
+  // Pagination — when not searching, page count is based on the row total
+  // (one row per student×enrollment pair), NOT the unique student count.
+  // Using totalStudents would undercount: a student with 2 programs takes
+  // 2 rows but only 1 student, so the user would max out paging well before
+  // seeing the tail of their data.
   const totalPages = searchQuery.trim()
     ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
-    : Math.max(1, Math.ceil(totalStudents / ITEMS_PER_PAGE));
+    : Math.max(1, Math.ceil(totalRows / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredData.slice(start, start + ITEMS_PER_PAGE);
@@ -787,7 +795,7 @@ export function StudentTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={searchQuery.trim() ? filteredData.length : totalStudents}
+            totalResults={searchQuery.trim() ? filteredData.length : totalRows}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />

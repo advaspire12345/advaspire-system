@@ -138,6 +138,7 @@ export default async function StudentsPage() {
         <StudentTable
           initialData={studentsResult.rows}
           totalStudents={studentsResult.totalStudents}
+          totalRows={studentsResult.totalRows}
           branches={branches}
           hideBranch={permData!.role === "company_admin" || permData!.role === "instructor"}
           courses={courses}

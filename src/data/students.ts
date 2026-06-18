@@ -1241,7 +1241,7 @@ export async function getStudentsForTable(
 export async function getStudentsForTablePaginated(
   userEmail: string,
   options: { offset: number; limit: number; branchId?: string }
-): Promise<{ rows: StudentTableRow[]; totalStudents: number }> {
+): Promise<{ rows: StudentTableRow[]; totalStudents: number; totalRows: number }> {
   // Get user's branch access — resolve company IDs to all child HQ/branch IDs
   const { getUserBranchIds, getUserByEmail, isSuperAdmin } = await import("./users");
   let branchIds = await getUserBranchIds(userEmail);
@@ -1286,6 +1286,37 @@ export async function getStudentsForTablePaginated(
   }
 
   const { count: totalStudents } = await countQuery;
+
+  // Row count for pagination — the table renders one row per (student,
+  // enrollment) pair, so totalStudents (people) under-counts pages whenever
+  // students have multiple programs. Compute the LEFT-JOIN row count so the
+  // pagination control reflects what the user actually scrolls through.
+  // No-program students are still 1 row in the LEFT JOIN, matching the UI.
+  let totalRows = 0;
+  {
+    const scopedStudentIds = await (async () => {
+      let q = supabaseAdmin.from('students').select('id').is('deleted_at', null);
+      if (options.branchId) q = q.eq('branch_id', options.branchId);
+      else if (branchIds) q = q.in('branch_id', branchIds);
+      const { data } = await q;
+      return (data ?? []).map((r) => r.id as string);
+    })();
+    if (scopedStudentIds.length > 0) {
+      const { count: enrCount } = await supabaseAdmin
+        .from('enrollments')
+        .select('id', { count: 'exact', head: true })
+        .in('student_id', scopedStudentIds)
+        .is('deleted_at', null);
+      const { data: scoredEnr } = await supabaseAdmin
+        .from('enrollments')
+        .select('student_id')
+        .in('student_id', scopedStudentIds)
+        .is('deleted_at', null);
+      const studentsWithEnrollments = new Set((scoredEnr ?? []).map((r) => r.student_id as string)).size;
+      const studentsWithoutEnrollments = scopedStudentIds.length - studentsWithEnrollments;
+      totalRows = (enrCount ?? 0) + studentsWithoutEnrollments;
+    }
+  }
 
   // Main paginated query
   let query = supabaseAdmin
@@ -1362,7 +1393,7 @@ export async function getStudentsForTablePaginated(
 
   if (error) {
     console.error('Error fetching paginated students for table:', error);
-    return { rows: [], totalStudents: 0 };
+    return { rows: [], totalStudents: 0, totalRows: 0 };
   }
 
   // Pre-fetch all course pricing so we can look up duration per payment's package_id
@@ -1658,7 +1689,7 @@ export async function getStudentsForTablePaginated(
     }
   }
 
-  return { rows, totalStudents: totalStudents ?? 0 };
+  return { rows, totalStudents: totalStudents ?? 0, totalRows };
 }
 
 // ============================================
