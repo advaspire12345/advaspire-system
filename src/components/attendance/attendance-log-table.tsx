@@ -12,8 +12,6 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
-import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
-import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import {
   Tooltip,
   TooltipContent,
@@ -37,6 +35,7 @@ import type { AttendanceStatus } from "@/db/schema";
 import {
   updateAttendanceLogAction,
   deleteAttendanceLogAction,
+  deleteAttendanceLogBulkAction,
 } from "@/app/(dashboard)/attendance-log/actions";
 
 interface InstructorOption {
@@ -53,6 +52,8 @@ interface AttendanceLogTableProps {
   canDelete?: boolean;
   initialStartDate?: string;
   initialEndDate?: string;
+  /** Slot options for matching the slot window label, built from the LMS scheduled slots (course_slots). */
+  slotOptions?: { value: string; label: string; course: string; day: string; startTime: string; endTime: string }[];
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -60,31 +61,29 @@ const ITEMS_PER_PAGE = 10;
 type StatusFilter = "All" | "Present" | "Absent";
 const STATUS_FILTERS: StatusFilter[] = ["All", "Present", "Absent"];
 
+// Visible data columns, in display order: Username, Slot, Date, Lesson,
+// Exact Timing, Attendance, Actions — mirroring the Mark Attendance table.
+// The body `<td>` blocks below are written positionally to match this exact
+// order — keep them in sync. (A bulk-select checkbox column is rendered
+// separately as the first column when canDelete is set.)
 const columns = [
-  { key: "photo", label: "Photo", width: "80px", align: "center" as const },
-  { key: "username", label: "Username", width: "140px" },
-  { key: "branch", label: "Branch", width: "100px" },
-  { key: "program", label: "Program", width: "120px" },
-  { key: "type", label: "Type", width: "80px", align: "center" as const },
-  { key: "date", label: "Date", width: "100px" },
-  { key: "day", label: "Day", width: "80px" },
-  { key: "time", label: "Time", width: "70px" },
+  { key: "username", label: "Username", width: "160px" },
+  { key: "slot", label: "Slot", width: "200px" },
+  { key: "date", label: "Date", width: "130px", hideOnMobile: true },
+  { key: "lesson", label: "Lesson", width: "140px", hideOnMobile: true },
+  { key: "exactTiming", label: "Exact Timing", width: "110px", hideOnMobile: true },
   {
     key: "attendance",
     label: "Attendance",
-    width: "90px",
+    width: "100px",
     align: "center" as const,
   },
-  { key: "lesson", label: "Lesson", width: "120px" },
-  { key: "mission", label: "Mission", width: "100px" },
-  { key: "activity", label: "Activity", width: "120px" },
-  { key: "adcoin", label: "Adcoin", width: "70px", align: "center" as const },
-  { key: "pic", label: "PIC", width: "100px" },
   {
     key: "actions",
     label: "Actions",
     width: "100px",
     align: "center" as const,
+    hideOnMobile: true,
   },
 ];
 
@@ -92,11 +91,11 @@ export function AttendanceLogTable({
   initialData,
   totalCount,
   instructors = [],
-  hideBranch,
   canEdit = true,
   canDelete = true,
   initialStartDate,
   initialEndDate,
+  slotOptions = [],
 }: AttendanceLogTableProps) {
   const [data, setData] = useState<AttendanceLogRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
@@ -191,6 +190,10 @@ export function AttendanceLogTable({
 
     return () => controller.abort();
   }, [target, activeStartDate, activeEndDate]);
+
+  // Bulk-selection state — set of selected row ids.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -352,6 +355,68 @@ export function AttendanceLogTable({
     }
   }, [selectedRecord]);
 
+  // --- Bulk selection helpers ---
+  // Toggle a single row's selection.
+  const toggleRowSelection = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Select-all toggles all currently-visible (paginated) rows.
+  const visibleIds = useMemo(
+    () => paginatedData.map((row) => row.id),
+    [paginatedData],
+  );
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected =
+        visibleIds.length > 0 && visibleIds.every((id) => next.has(id));
+      if (allSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  }, [visibleIds]);
+
+  // Bulk delete selected rows after confirmation.
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete ${ids.length} selected attendance record${ids.length === 1 ? "" : "s"}? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setIsBulkDeleting(true);
+    try {
+      const result = await deleteAttendanceLogBulkAction(ids);
+      if (result.success) {
+        const deletedSet = new Set(ids);
+        setData((prev) => prev.filter((item) => !deletedSet.has(item.id)));
+        setSelectedIds(new Set());
+      } else {
+        console.error("Failed to bulk delete:", result.error);
+        window.alert(result.error ?? "Failed to delete selected records");
+      }
+    } catch (err) {
+      console.error("Failed to bulk delete:", err);
+      window.alert("Failed to delete selected records");
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }, [selectedIds]);
+
   // Compute the actual calendar date from actual_day relative to the slot date's week
   const getActualDate = (slotDate: string, actualDay: string | null): Date => {
     const base = new Date(slotDate + 'T00:00:00');
@@ -385,6 +450,23 @@ export function AttendanceLogTable({
     return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : time;
   };
 
+  // Match an attendance row to its LMS scheduled-slot window so the Slot column
+  // shows the SAME label as the Mark page (e.g. "EV3 · Friday 3:00 PM - 4:30 PM").
+  // Prefer an EXACT slot-start match (slot_time is saved as the slot's start);
+  // fall back to window-containment only for legacy exact-time records.
+  const findSlotOption = useCallback(
+    (row: AttendanceLogRow) => {
+      if (!row.slotDay || !row.slotTime) return undefined;
+      const t = row.slotTime.split(":").slice(0, 2).join(":");
+      const day = row.slotDay.toLowerCase();
+      return (
+        slotOptions.find((o) => o.course === row.courseName && o.day === day && o.startTime === t) ||
+        slotOptions.find((o) => o.course === row.courseName && o.day === day && t >= o.startTime && t < o.endTime)
+      );
+    },
+    [slotOptions],
+  );
+
   // Get status badge style
   const getStatusBadge = (status: AttendanceStatus) => {
     const styles: Record<AttendanceStatus, string> = {
@@ -402,27 +484,6 @@ export function AttendanceLogTable({
         )}
       >
         {status}
-      </span>
-    );
-  };
-
-  // Get type badge
-  const getTypeBadge = (type: "Physical" | "Online" | null) => {
-    if (!type) return "-";
-
-    const styles = {
-      Physical: "bg-purple-100 text-purple-700",
-      Online: "bg-cyan-100 text-cyan-700",
-    };
-
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-          styles[type],
-        )}
-      >
-        {type}
       </span>
     );
   };
@@ -601,21 +662,59 @@ export function AttendanceLogTable({
             </div>
           </div>
 
+          {/* Bulk actions bar */}
+          {canDelete && (
+            <div className="flex items-center justify-end px-1">
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={selectedIds.size === 0 || isBulkDeleting}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition",
+                  selectedIds.size === 0 || isBulkDeleting
+                    ? "cursor-not-allowed border border-muted-foreground/30 text-muted-foreground/50"
+                    : "bg-[#fd434f] text-white hover:bg-[#fd434f]/90",
+                )}
+              >
+                {isBulkDeleting ? (
+                  <div className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Delete selected ({selectedIds.size})
+              </button>
+            </div>
+          )}
+
           {/* Table */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1350px] w-full table-fixed border-separate border-spacing-0">
+            <table className="md:min-w-[988px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
+                  {canDelete && (
+                    <th
+                      className="hidden md:table-cell bg-transparent px-4 py-3 text-center text-base font-bold text-foreground"
+                      style={{ width: "48px", minWidth: "48px", maxWidth: "48px" }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all visible rows"
+                        className="h-4 w-4 cursor-pointer accent-[#fd434f]"
+                      />
+                    </th>
+                  )}
                   {columns.map((col, idx) => (
                     <th
                       key={col.key}
                       className={cn(
                         "bg-transparent px-4 py-3 text-left text-base font-bold text-foreground",
-                        idx === 0 && "rounded-tl-lg",
+                        idx === 0 && !canDelete && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.key === "branch" && hideBranch && "hidden",
+                        col.hideOnMobile && "hidden md:table-cell",
                         col.key === "actions" && !canEdit && !canDelete && "hidden",
                       )}
                       style={{
@@ -632,12 +731,12 @@ export function AttendanceLogTable({
             </table>
 
             {/* Body Table */}
-            <table className="min-w-[1350px] w-full table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="md:min-w-[988px] w-full table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={hideBranch ? columns.length - 1 : columns.length}
+                      colSpan={columns.length + (canDelete ? 1 : 0)}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       {isLoadingMore ? (
@@ -660,90 +759,65 @@ export function AttendanceLogTable({
                           "rounded-bl-lg rounded-br-lg",
                       )}
                     >
-                      {/* Photo */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[0].width }}
-                      >
-                        <div className="relative flex justify-center">
-                          <div className="relative">
-                            <HexagonAvatar
-                              size={50}
-                              imageUrl={row.studentPhoto ?? undefined}
-                              percentage={0.5}
-                              animated={false}
-                              fallbackInitials={row.studentName.charAt(0)}
-                              cornerRadius={8}
-                            />
-                            <div className="absolute -bottom-1 -right-1 z-10">
-                              <HexagonNumberBadge
-                                value={row.studentLevel}
-                                size={22}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </td>
+                      {/* Select checkbox */}
+                      {canDelete && (
+                        <td
+                          className="hidden md:table-cell px-4 py-3 text-center"
+                          style={{ width: "48px" }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(row.id)}
+                            onChange={() => toggleRowSelection(row.id)}
+                            aria-label={`Select attendance record for ${row.studentName}`}
+                            className="h-4 w-4 cursor-pointer accent-[#fd434f]"
+                          />
+                        </td>
+                      )}
 
                       {/* Username */}
                       <td
                         className="px-4 py-3 font-bold text-[#23d2e2]"
+                        style={{ width: columns[0].width }}
+                      >
+                        <TruncatedText text={row.studentName} maxLength={18} />
+                      </td>
+
+                      {/* Slot — shown with the SAME label as the Mark page so the
+                          column values line up with the scheduled slot window. */}
+                      <td
+                        className="px-4 py-3 font-bold"
                         style={{ width: columns[1].width }}
                       >
-                        <TruncatedText text={row.studentName} maxLength={15} />
+                        {(() => {
+                          const opt = findSlotOption(row);
+                          if (opt) return opt.label;
+                          return row.slotDay
+                            ? `${row.courseName} · ${row.slotDay} ${formatTime(row.slotTime)}`
+                            : "-";
+                        })()}
                       </td>
 
-                      {/* Branch */}
+                      {/* Date — the record date */}
                       <td
-                        className={cn("px-4 py-3", hideBranch && "hidden")}
+                        className="hidden md:table-cell px-4 py-3 font-bold"
                         style={{ width: columns[2].width }}
-                      >
-                        <TruncatedText text={row.branchName} maxLength={12} />
-                      </td>
-
-                      {/* Program */}
-                      <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[3].width }}
-                      >
-                        <TruncatedText text={row.courseName} maxLength={15} />
-                      </td>
-
-                      {/* Type */}
-                      <td
-                        className="px-4 py-3 text-center"
-                        style={{ width: columns[4].width }}
-                      >
-                        {getTypeBadge(row.classType)}
-                      </td>
-
-                      {/* Date */}
-                      <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[5].width }}
                       >
                         {formatDate(row.date, row.dayOfWeek)}
                       </td>
 
-                      {/* Day — prefer the explicit actual_day if set (a
-                          make-up class on a non-scheduled day), else derive
-                          from the attendance date itself so the column always
-                          has something to show. */}
+                      {/* Lesson — one line per activity stacked. */}
                       <td
-                        className="px-4 py-3"
-                        style={{ width: columns[6].width }}
+                        className="hidden md:table-cell px-4 py-3"
+                        style={{ width: columns[3].width }}
                       >
-                        {row.dayOfWeek ?? (
-                          row.date
-                            ? new Date(row.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" }).toLowerCase()
-                            : "-"
-                        )}
+                        <ActivityLogCell activities={row.activities} field="lesson" maxLength={18} />
                       </td>
 
-                      {/* Time */}
+                      {/* Exact Timing — the exact marking time */}
                       <td
-                        className="px-4 py-3"
-                        style={{ width: columns[7].width }}
+                        className="hidden md:table-cell px-4 py-3"
+                        style={{ width: columns[4].width }}
                       >
                         {formatTime(row.actualStartTime)}
                       </td>
@@ -751,58 +825,16 @@ export function AttendanceLogTable({
                       {/* Attendance */}
                       <td
                         className="px-4 py-3 text-center"
-                        style={{ width: columns[8].width }}
+                        style={{ width: columns[5].width }}
                       >
                         {getStatusBadge(row.status)}
                       </td>
 
-                      {/* Lesson — one line per activity stacked. */}
+                      {/* Actions — history is immutable except student name; absent
+                          records can be removed. */}
                       <td
-                        className="px-4 py-3"
-                        style={{ width: columns[9].width }}
-                      >
-                        <ActivityLogCell activities={row.activities} field="lesson" maxLength={15} />
-                      </td>
-
-                      {/* Mission — one line per activity stacked. */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[10].width }}
-                      >
-                        <ActivityLogCell activities={row.activities} field="mission" maxLength={12} />
-                      </td>
-
-                      {/* Activity */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[11].width }}
-                      >
-                        <TruncatedText text={row.lastActivity} maxLength={15} />
-                      </td>
-
-                      {/* Adcoin */}
-                      <td
-                        className="px-4 py-3 text-center font-bold text-[#23d2e2]"
-                        style={{ width: columns[12].width }}
-                      >
-                        {row.adcoin ?? 0}
-                      </td>
-
-                      {/* PIC (Instructor/Marked By) */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[13].width }}
-                      >
-                        <TruncatedText
-                          text={row.instructorName ?? row.markedBy}
-                          maxLength={12}
-                        />
-                      </td>
-
-                      {/* Actions — attendance history is immutable except student name */}
-                      <td
-                        className={cn("px-4 py-3", !canEdit && "hidden")}
-                        style={{ width: columns[14].width }}
+                        className={cn("hidden md:table-cell px-4 py-3", !canEdit && !canDelete && "hidden")}
+                        style={{ width: columns[6].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
                           {canEdit && (
@@ -814,6 +846,17 @@ export function AttendanceLogTable({
                               title="Edit student name"
                             >
                               <Pencil className="h-5 w-5" />
+                            </button>
+                          )}
+                          {canDelete && row.status === "absent" && (
+                            <button
+                              type="button"
+                              onClick={() => openModal("delete", row)}
+                              className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
+                              aria-label={`Remove absence record for ${row.studentName}`}
+                              title="Remove absence record"
+                            >
+                              <Trash2 className="h-5 w-5" />
                             </button>
                           )}
                         </div>

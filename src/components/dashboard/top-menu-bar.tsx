@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Coins, Search, Settings, Bell, X, Check } from "lucide-react";
+import { Coins, Settings, Bell, X, Check } from "lucide-react";
 import { HelpButton } from "@/components/help/help-button";
 import type { UserRole } from "@/db/schema";
 import { notify } from "@/lib/notify";
@@ -55,7 +55,6 @@ interface TopMenuBarProps {
 
 export function TopMenuBar({ role, userId }: TopMenuBarProps) {
   const router = useRouter();
-  const [searchValue, setSearchValue] = useState("");
   const [user, setUser] = useState<UserProfile | null>(null);
   const [adcoinStats, setAdcoinStats] = useState<AdcoinStats | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -147,11 +146,6 @@ export function TopMenuBar({ role, userId }: TopMenuBarProps) {
     fetchAdcoinStats();
   }, [supabase]);
 
-  const handleClearSearch = () => {
-    setSearchValue("");
-  };
-
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/");
@@ -176,39 +170,17 @@ export function TopMenuBar({ role, userId }: TopMenuBarProps) {
       <div className="flex items-center gap-2">
         <SidebarTrigger className="-ml-1 text-white hover:bg-white/20 hover:text-white" />
         <Separator orientation="vertical" className="mx-2 h-4 bg-white/30" />
-        <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard")}
+          className="flex items-center gap-2"
+          aria-label="Go to dashboard"
+        >
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-white">
             <Coins className="h-4 w-4" />
           </div>
           <span className="font-semibold text-white">Advaspire</span>
-        </div>
-      </div>
-
-      {/* Middle: Search bar */}
-      <div className="relative flex h-[52px] w-[375px] items-center rounded-md bg-black/30">
-        <input
-          type="text"
-          placeholder="Search..."
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
-          className={`h-full w-full rounded-md bg-transparent pl-3 pr-10 text-sm caret-white focus:outline-none ${
-            searchValue ? "font-bold text-white" : "font-semibold text-white/70"
-          } placeholder:text-white/50`}
-        />
-        {searchValue ? (
-          <X
-            size={20}
-            className="absolute right-3 cursor-pointer text-white/60 hover:text-white"
-            aria-hidden="true"
-            onClick={handleClearSearch}
-          />
-        ) : (
-          <Search
-            size={20}
-            className="pointer-events-none absolute right-3 text-white/60"
-            aria-hidden="true"
-          />
-        )}
+        </button>
       </div>
 
       {/* End: Progress bar, notifications, settings, user */}
@@ -350,6 +322,18 @@ export function TopMenuBar({ role, userId }: TopMenuBarProps) {
                 </div>
               </DropdownMenuLabel>
 
+              <DropdownMenuItem
+                onClick={() => router.push("/")}
+                className="font-bold"
+              >
+                <span>Home</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push("/dashboard")}
+                className="font-bold"
+              >
+                <span>Dashboard</span>
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => router.push("/profile")}
                 className="font-bold hover:translate-x-1 !hover:bg-white backdrop-blur-sm border-white/20 hover:text-[#23D2E2] data-[highlighted]:translate-x-1 data-[highlighted]:text-[#23D2E2]"

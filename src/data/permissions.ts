@@ -59,7 +59,7 @@ const ALL_RESOURCE_KEYS: PermissionResource[] = [
   "dashboard", "companies", "branches", "trials", "students", "examinations",
   "programs", "slots", "vouchers", "team", "attendance", "attendance_log",
   "payment_record", "pending_payments", "leaderboard", "transactions",
-  "marketplace", "import", "events",
+  "marketplace", "import", "events", "student_progress",
 ];
 
 // ============================================
@@ -94,6 +94,7 @@ const GROUP_ADMIN_DEFAULTS: PermissionsMap = {
   marketplace: VIEW_ONLY, // sees the topup-request table; no actions (super_admin only approves)
   import: VIEW_CREATE, // view = download templates, create = upload CSV
   events: FULL_ACCESS,
+  student_progress: VIEW_CREATE_EDIT, // staff tick lesson/mission progress for the group's students
 };
 
 const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
@@ -116,6 +117,7 @@ const COMPANY_ADMIN_DEFAULTS: PermissionsMap = {
   marketplace: VIEW_CREATE, // can browse + create top-up requests
   import: VIEW_CREATE, // view = download templates, create = upload CSV
   events: FULL_ACCESS,
+  student_progress: VIEW_CREATE_EDIT, // staff tick lesson/mission progress for the company's students
 };
 
 const ASSISTANT_ADMIN_DEFAULTS: PermissionsMap = {
@@ -138,6 +140,7 @@ const ASSISTANT_ADMIN_DEFAULTS: PermissionsMap = {
   marketplace: NO_ACCESS,
   import: NO_ACCESS,
   events: { can_view: true, can_create: true, can_edit: true, can_delete: true },
+  student_progress: VIEW_CREATE_EDIT, // staff tick lesson/mission progress for their branch
 };
 
 const INSTRUCTOR_DEFAULTS: PermissionsMap = {
@@ -160,6 +163,7 @@ const INSTRUCTOR_DEFAULTS: PermissionsMap = {
   marketplace: NO_ACCESS,
   import: NO_ACCESS,
   events: { can_view: true, can_create: true, can_edit: true, can_delete: false },
+  student_progress: VIEW_CREATE_EDIT, // the teacher ticks their branch's learning progress
 };
 
 /** Hardcoded fallback when DB has no role_permissions rows */
@@ -707,7 +711,8 @@ const NAV_ORDER: { resource: PermissionResource; href: string }[] = [
   { resource: "trials", href: "/trial" },
   { resource: "students", href: "/student" },
   { resource: "examinations", href: "/examination" },
-  { resource: "programs", href: "/program" },
+  { resource: "student_progress", href: "/student-progress" },
+  { resource: "programs", href: "/courses" },
   { resource: "slots", href: "/slot" },
   { resource: "vouchers", href: "/voucher" },
   { resource: "team", href: "/team" },
@@ -746,7 +751,7 @@ export const RESOURCE_LABELS: Record<PermissionResource, string> = {
   trials: "Trial",
   students: "Student",
   examinations: "Examination",
-  programs: "Program",
+  programs: "Courses",
   slots: "Slot",
   vouchers: "Voucher",
   team: "Team",
@@ -759,6 +764,7 @@ export const RESOURCE_LABELS: Record<PermissionResource, string> = {
   marketplace: "Marketplace",
   import: "Import",
   events: "Events",
+  student_progress: "Student Progress",
 };
 
 // ============================================

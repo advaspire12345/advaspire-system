@@ -115,7 +115,7 @@ export async function createTeamMemberAction(
     }
 
     revalidatePath("/team");
-    revalidatePath("/program");
+    revalidatePath("/courses");
     return { success: true, userId: user.id };
   } catch (error) {
     console.error("Error in createTeamMemberAction:", error);
@@ -164,7 +164,7 @@ export async function updateTeamMemberAction(
     }
 
     revalidatePath("/team");
-    revalidatePath("/program");
+    revalidatePath("/courses");
     return { success: true };
   } catch (error) {
     console.error("Error in updateTeamMemberAction:", error);

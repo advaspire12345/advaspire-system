@@ -128,8 +128,8 @@ export default async function ProgramsPage() {
       <div className="space-y-2">
         <Banner
           backgroundImage="/banners/dashboard-bg.png"
-          title="Programs"
-          description="Manage courses, curriculum, and pricing packages"
+          title="Courses"
+          description="Manage courses and pricing packages"
           mascotImage="/banners/mascot.png"
         />
 

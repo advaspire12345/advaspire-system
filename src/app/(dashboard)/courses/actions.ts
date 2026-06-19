@@ -23,6 +23,8 @@ export interface ProgramFormPayload {
   number_of_levels: number | null;
   sessions_to_level_up: number | null;
   program_type: string | null;
+  // Links the course to a Hub lesson catalog (public.lessons.course_code).
+  lesson_catalog?: string | null;
   status: string;
   branch_id: string;
   cover_image_url: string | null;
@@ -43,8 +45,10 @@ export interface ProgramFormPayload {
   outcomes: string[];
   faqs: { question: string; answer: string }[];
 
-  // Curriculum
-  sections: {
+  // Curriculum — lessons are now authored in the Hub and read from the shared
+  // `lessons` table, so the LMS no longer builds curriculum. Kept optional for
+  // backward compatibility; defaults to [].
+  sections?: {
     title: string;
     description: string;
     lessons: {
@@ -100,7 +104,7 @@ export async function createProgramAction(
       console.warn("[createProgramAction] syncEventFromProgram failed:", e);
     }
 
-    revalidatePath("/program");
+    revalidatePath("/courses");
     revalidatePath("/events");
     return { success: true, programId };
   } catch (error) {
@@ -131,7 +135,7 @@ export async function updateProgramAction(
       console.warn("[updateProgramAction] syncEventFromProgram failed:", e);
     }
 
-    revalidatePath("/program");
+    revalidatePath("/courses");
     revalidatePath("/events");
     return { success: true };
   } catch (error) {
@@ -161,7 +165,7 @@ export async function deleteProgramAction(
       console.warn("[deleteProgramAction] softDeleteEventForProgram failed:", e);
     }
 
-    revalidatePath("/program");
+    revalidatePath("/courses");
     revalidatePath("/events");
     return { success: true };
   } catch (error) {
@@ -188,7 +192,7 @@ export async function createCategoryAction(
       return { success: false, error: "Failed to create category" };
     }
 
-    revalidatePath("/program");
+    revalidatePath("/courses");
     return { success: true, categoryId: category.id };
   } catch (error) {
     console.error("Error in createCategoryAction:", error);
@@ -208,7 +212,7 @@ export async function updateCategoryAction(
     const { updateCategory } = await import("@/data/programs");
     const result = await updateCategory(id, { name });
     if (!result) return { success: false, error: "Failed to update category" };
-    revalidatePath("/program");
+    revalidatePath("/courses");
     return { success: true };
   } catch (error) {
     return {
@@ -231,7 +235,7 @@ export async function deleteCategoryAction(
       }
       return { success: false, error: result.error ?? "Failed to delete category" };
     }
-    revalidatePath("/program");
+    revalidatePath("/courses");
     return { success: true };
   } catch (error) {
     return {

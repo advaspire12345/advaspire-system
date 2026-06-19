@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { markAttendance, updateSessionTracking } from "@/data/attendance";
 import { getUserByAuthId, getUserByEmail } from "@/data/users";
-import { updateAdcoinBalance, getStudentById } from "@/data/students";
 import { supabaseAdmin } from "@/db";
 import type { AttendanceStatus, TrialStatus } from "@/db/schema";
 
@@ -20,7 +18,6 @@ interface MarkAttendanceRequest {
   instructorName?: string;
   lastActivity?: string;
   projectPhotos?: string[];
-  adcoin?: number;
   // Activities done in this session — flexible array of {lesson, mission}.
   // First entry is the primary; the exam-handoff fires if any activity has
   // lesson === "Exam".
@@ -33,8 +30,6 @@ interface MarkAttendanceRequest {
   // Original slot info from enrollment schedule
   slotDay?: string;
   slotTime?: string;
-  // Password for adcoin transfer verification
-  adcoinPassword?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -309,19 +304,26 @@ export async function POST(request: NextRequest) {
         if (enrollmentIds.length > 0) {
           const { data: allStudentRecords } = await supabaseAdmin
             .from('attendance')
-            .select('id, actual_day, actual_start_time, enrollment_id')
+            .select('id, slot_day, slot_time, actual_day, actual_start_time, enrollment_id')
             .in('enrollment_id', enrollmentIds)
             .gte('date', mondayStr)
             .lte('date', sundayStr);
 
-          const timeDup = (allStudentRecords ?? []).find(r =>
-            normalizeDay(r.actual_day) === enteredDay &&
-            normalizeTime(r.actual_start_time) === enteredTime
+          // A student can't be in two classes in the SAME slot at once (even across
+          // programs). Match by the scheduled SLOT, not the marking time — so a
+          // student CAN attend multiple different slots on the same day.
+          const useSlot = !!(body.slotDay && body.slotTime);
+          const slotConflict = (allStudentRecords ?? []).find(r =>
+            useSlot
+              ? (normalizeDay(r.slot_day) === normalizeDay(body.slotDay!) &&
+                 normalizeTime(r.slot_time) === normalizeTime(body.slotTime!))
+              : (normalizeDay(r.actual_day) === enteredDay &&
+                 normalizeTime(r.actual_start_time) === enteredTime)
           );
-          if (timeDup) {
-            const isSameEnrollment = timeDup.enrollment_id === body.enrollmentId;
+          if (slotConflict) {
+            const isSameEnrollment = slotConflict.enrollment_id === body.enrollmentId;
             return NextResponse.json(
-              { error: `This student already has attendance on ${body.actualDay} at ${body.actualStartTime} this week${isSameEnrollment ? '' : ' (different program)'}.` },
+              { error: `This student already has attendance for this slot this week${isSameEnrollment ? '' : ' (different program)'}.` },
               { status: 409 }
             );
           }
@@ -415,18 +417,28 @@ export async function POST(request: NextRequest) {
         actualStartTime: body.actualStartTime,
         actualEndTime: body.actualEndTime,
         classType: body.classType,
-        instructorName: body.instructorName,
-        lastActivity: body.lastActivity,
-        projectPhotos: body.projectPhotos,
+        // These fields are no longer collected by the mark-attendance dialog.
+        // The DB columns remain; we simply persist neutral values.
+        instructorName: null,
+        lastActivity: null,
+        projectPhotos: null,
         notes: body.notes,
         markedBy: user.id,
-        adcoin: body.adcoin ?? 0,
+        adcoin: 0,
         activities: body.activities && body.activities.length > 0 ? body.activities : null,
         attendanceId: body.attendanceId,
         slotDay: resolvedSlotDay,
         slotTime: resolvedSlotTime,
       }
     );
+
+    // Auto-tick "Learnt" in the per-lesson progress grid for any curriculum
+    // lesson recorded on this (present/late) attendance.
+    if (result.attendance && body.activities && body.activities.length > 0) {
+      const { syncLearntProgress } = await import("@/data/attendance");
+      await syncLearntProgress(body.enrollmentId, body.activities, body.status);
+      revalidatePath("/student-progress");
+    }
 
     console.log('[API Mark Attendance] Result:', {
       success: !!result.attendance,
@@ -441,103 +453,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create/update adcoin transaction if adcoin > 0 and student is present/late
-    if (body.adcoin && body.adcoin > 0 && (body.status === 'present' || body.status === 'late')) {
-      // Verify password before processing adcoin transfer
-      if (!body.adcoinPassword) {
-        return NextResponse.json(
-          { error: "Password is required to transfer adcoin." },
-          { status: 400 }
-        );
-      }
-
-      const verifyClient = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const { error: signInError } = await verifyClient.auth.signInWithPassword({
-        email: authUser.email!,
-        password: body.adcoinPassword,
-      });
-
-      if (signInError) {
-        return NextResponse.json(
-          { error: "Invalid password. Adcoin transfer denied." },
-          { status: 401 }
-        );
-      }
-      // Get student_id from enrollment
-      const { data: enrollment } = await supabaseAdmin
-        .from('enrollments')
-        .select('student_id')
-        .eq('id', body.enrollmentId)
-        .single();
-
-      if (enrollment?.student_id) {
-        const student = await getStudentById(enrollment.student_id);
-        if (student) {
-          const txDescription = `Attendance reward - ${body.date}`;
-
-          // Check if a transaction already exists for this attendance date + student
-          const { data: existingTx } = await supabaseAdmin
-            .from('adcoin_transactions')
-            .select('id, amount')
-            .eq('receiver_id', enrollment.student_id)
-            .eq('type', 'earned')
-            .eq('description', txDescription)
-            .maybeSingle();
-
-          // Determine how much the sender's balance needs to change.
-          //   New tx:        delta = +body.adcoin   (deduct full amount)
-          //   Updated tx:    delta = body.adcoin - existingTx.amount  (deduct only the difference)
-          //   Same amount:   delta = 0              (no-op)
-          const senderDelta = existingTx ? body.adcoin - existingTx.amount : body.adcoin;
-
-          // Reject if sender lacks enough adcoin to cover the delta.
-          if (senderDelta > 0 && (user.adcoin_balance ?? 0) < senderDelta) {
-            return NextResponse.json(
-              { error: `Insufficient adcoin. You have ${user.adcoin_balance ?? 0}, need ${senderDelta}.` },
-              { status: 400 }
-            );
-          }
-
-          if (!existingTx) {
-            // No existing transaction — create one
-            const { error: txError } = await supabaseAdmin
-              .from('adcoin_transactions')
-              .insert({
-                sender_id: user.id,
-                receiver_id: enrollment.student_id,
-                type: 'earned',
-                amount: body.adcoin,
-                description: txDescription,
-                verified_by: user.id,
-              });
-
-            if (txError) {
-              console.warn('[Attendance Mark] Failed to create adcoin transaction:', txError);
-            } else {
-              await updateAdcoinBalance(enrollment.student_id, student.adcoin_balance + body.adcoin);
-              await updateAdcoinBalance(user.id, (user.adcoin_balance ?? 0) - body.adcoin);
-            }
-          } else if (existingTx.amount !== body.adcoin) {
-            // Transaction exists but amount changed — update and adjust both balances by the diff
-            const { error: updateTxError } = await supabaseAdmin
-              .from('adcoin_transactions')
-              .update({ amount: body.adcoin })
-              .eq('id', existingTx.id);
-
-            if (updateTxError) {
-              console.warn('[Attendance Mark] Failed to update adcoin transaction:', updateTxError);
-            } else {
-              await updateAdcoinBalance(enrollment.student_id, student.adcoin_balance + senderDelta);
-              await updateAdcoinBalance(user.id, (user.adcoin_balance ?? 0) - senderDelta);
-            }
-          }
-          // If existingTx.amount === body.adcoin, no change needed
-        }
-      }
-    }
+    // Adcoin is no longer collected in the mark-attendance dialog, so there is
+    // no adcoin transfer/transaction to process here.
 
     // Update session tracking when:
     // 1. NEW attendance marked as present/late

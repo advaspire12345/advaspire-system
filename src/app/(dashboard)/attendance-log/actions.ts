@@ -87,3 +87,40 @@ export async function deleteAttendanceLogAction(
     };
   }
 }
+
+export async function deleteAttendanceLogBulkAction(
+  ids: string[]
+): Promise<{ success: boolean; deleted: number; error?: string }> {
+  try {
+    await authorizeAction('attendance_log', 'can_delete');
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { success: false, deleted: 0, error: "No records selected" };
+    }
+
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        const result = await deleteAttendance(id);
+        if (result) deleted++;
+      } catch (err) {
+        console.error("Error deleting attendance record:", id, err);
+      }
+    }
+
+    // Revalidate all affected pages once at the end.
+    revalidatePath("/attendance-log");
+    revalidatePath("/attendance");
+    revalidatePath("/student");
+    revalidateTag("dashboard", "max");
+
+    return { success: deleted > 0, deleted };
+  } catch (error) {
+    console.error("Error bulk deleting attendance:", error);
+    return {
+      success: false,
+      deleted: 0,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}

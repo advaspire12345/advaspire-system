@@ -11,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { FloatingSelect } from "@/components/ui/floating-select";
-import { PhotoUpload } from "@/components/ui/photo-upload";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import type { AttendanceRow } from "@/components/attendance/attendance-table";
@@ -54,10 +53,6 @@ export interface AttendanceFormData {
   classType: "Physical" | "Online";
   actualDay: string;
   actualStartTime: string;
-  instructorName: string;
-  lastActivity: string;
-  adcoin: number;
-  projectPhotos: string[];
   notes: string;
   // Flexible array of activities done in this session. Each entry is one
   // {lesson, mission} pair. The first entry is the primary activity.
@@ -70,8 +65,6 @@ export interface AttendanceFormData {
   // Original slot info from enrollment schedule (never changes)
   slotDay?: string;
   slotTime?: string;
-  // Password for adcoin transfer verification
-  adcoinPassword?: string;
 }
 
 const DAYS_OF_WEEK = [
@@ -105,6 +98,15 @@ function getCurrentDayOfWeek(): string {
     "Saturday",
   ];
   return days[new Date().getDay()];
+}
+
+/** Day-of-week name for a 'yyyy-MM-dd' string, computed in local time. */
+function dayNameFromDateStr(dateStr: string): string {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return days[new Date(y, m - 1, d).getDay()];
 }
 
 /**
@@ -159,11 +161,27 @@ function formatTimeForInput(time: string | null): string {
   return time;
 }
 
-// Competition missions constants
-const COMPETITION_MISSIONS = [
-  { value: "Preparation", label: "Preparation" },
-  { value: "Showcase", label: "Showcase" },
-];
+interface SlotWindow {
+  startTime: string;
+  endTime: string;
+  label: string;
+}
+
+/**
+ * Pick the default slot for the current time:
+ *  - the window containing now (start <= now < end), else
+ *  - the first window starting after now (next slot), else
+ *  - the last window.
+ * Returns "" if there are no windows.
+ */
+function pickDefaultSlotStart(windows: SlotWindow[], now: string): string {
+  if (windows.length === 0) return "";
+  const containing = windows.find((w) => now >= w.startTime && now < w.endTime);
+  if (containing) return containing.startTime;
+  const next = windows.find((w) => w.startTime > now);
+  if (next) return next.startTime;
+  return windows[windows.length - 1].startTime;
+}
 
 export function StudentAttendanceModal({
   open,
@@ -182,18 +200,20 @@ export function StudentAttendanceModal({
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState("");
   const [classType, setClassType] = useState<"Physical" | "Online">("Physical");
   const [actualDay, setActualDay] = useState("");
+  const [actualDate, setActualDate] = useState("");
   const [actualStartTime, setActualStartTime] = useState("");
-  const [instructorName, setInstructorName] = useState(currentUserName ?? "");
-  const [lastActivity, setLastActivity] = useState("");
-  const [adcoin, setAdcoin] = useState<number>(0);
-  const [projectPhotos, setProjectPhotos] = useState<string[]>([]);
+  // Add-mode slot selection: the scheduled slot windows for the chosen course,
+  // and the start time ("HH:MM") of the slot the user selected.
+  const [slotWindows, setSlotWindows] = useState<SlotWindow[]>([]);
+  const [selectedSlotStart, setSelectedSlotStart] = useState("");
+  // One-off manual slot timing (when the chosen day has no scheduled slot).
+  const [manualSlot, setManualSlot] = useState(false);
+  const [manualSlotStart, setManualSlotStart] = useState("");
+  // True once the user has picked a slot for the current windows — prevents a
+  // late-resolving fetch from overwriting their choice with the default.
+  const slotPickedRef = useRef(false);
   const [reason, setReason] = useState("");
   const [instructorFeedback, setInstructorFeedback] = useState("");
-  const [adcoinPassword, setAdcoinPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  // Track whether the adcoin field was touched by the user
-  const [adcoinTouched, setAdcoinTouched] = useState(false);
-  const originalAdcoinRef = useRef<number>(0);
 
   // Activities done in this session. Flexible array; teacher can `+ / −` rows
   // to record multiple lesson + mission pairs in one attendance. First entry
@@ -221,11 +241,8 @@ export function StudentAttendanceModal({
   const handleStudentSearchChange = useCallback((term: string) => {
     if (studentSearchTimerRef.current) clearTimeout(studentSearchTimerRef.current);
     const trimmed = term.trim();
-    if (!trimmed) {
-      setSearchedStudents([]);
-      setIsSearchingStudents(false);
-      return;
-    }
+    // A blank term fetches the branch's default student list (empty q) instead
+    // of clearing — so opening "Take Attendance" shows students without typing.
     setIsSearchingStudents(true);
     studentSearchTimerRef.current = setTimeout(async () => {
       const seq = ++studentSearchSeqRef.current;
@@ -280,25 +297,27 @@ export function StudentAttendanceModal({
   useEffect(() => {
     if (open) {
       setDuplicateError("");
-      setAdcoinPassword("");
-      setPasswordError("");
-      setAdcoinTouched(false);
       if (mode === "add") {
         // Take Attendance mode - start fresh
         setSelectedStudentId("");
         setSelectedEnrollmentId("");
         setClassType("Physical");
+        // Default to TODAY and NOW (user picks an actual date + time, not a weekday).
+        setActualDate(format(new Date(), "yyyy-MM-dd"));
         setActualDay(getCurrentDayOfWeek());
-        setActualStartTime("");
-        setInstructorName(currentUserName ?? "");
-        setLastActivity("");
-        setAdcoin(0);
-        originalAdcoinRef.current = 0;
-        setProjectPhotos([]);
+        setActualStartTime(getCurrentTime());
         setReason("");
         setInstructorFeedback("");
         setActivities([{ lesson: "", mission: "" }]);
         setCurriculumLessons([]);
+        setSlotWindows([]);
+        setSelectedSlotStart("");
+        slotPickedRef.current = false;
+        setManualSlot(false);
+        setManualSlotStart("");
+        // Load the branch's default student list so the dropdown is populated
+        // immediately (typing then filters via the same handler).
+        handleStudentSearchChange("");
       } else if (selectedRow) {
         // Present or Absent mode - pre-fill with selected row
         setSelectedStudentId(selectedRow.studentId);
@@ -311,11 +330,6 @@ export function StudentAttendanceModal({
           setClassType(existing.classType || "Physical");
           setActualDay(existing.actualDay || selectedRow.slotDay || selectedRow.dayOfWeek || getCurrentDayOfWeek());
           setActualStartTime(formatTimeForInput(existing.actualStartTime || selectedRow.slotTime || selectedRow.startTime));
-          setInstructorName(existing.instructorName || currentUserName || "");
-          setLastActivity(existing.lastActivity || "");
-          setAdcoin(existing.adcoin ?? 0);
-          originalAdcoinRef.current = existing.adcoin ?? 0;
-          setProjectPhotos(existing.projectPhotos || []);
           setReason(existing.notes || "");
           // Pre-fill existing activities, or start with one empty row.
           setActivities(
@@ -328,18 +342,13 @@ export function StudentAttendanceModal({
           setClassType("Physical");
           setActualDay(getCurrentDayOfWeek());
           setActualStartTime(getCurrentTime());
-          setInstructorName(currentUserName ?? "");
-          setLastActivity("");
-          setAdcoin(0);
-          originalAdcoinRef.current = 0;
-          setProjectPhotos([]);
           setReason("");
           setInstructorFeedback("");
           setActivities([{ lesson: "", mission: "" }]);
         }
       }
     }
-  }, [open, mode, selectedRow]);
+  }, [open, mode, selectedRow, handleStudentSearchChange]);
 
   // Fetch curriculum when the course changes
   useEffect(() => {
@@ -390,6 +399,45 @@ export function StudentAttendanceModal({
     }
   }, [open, mode, selectedEnrollment, selectedRow, fetchCurriculumLessons]);
 
+  // Add mode only: fetch the scheduled slot windows for the selected course and
+  // auto-select the default slot by the current time. The user picks a slot
+  // (not an arbitrary time); actualStartTime stays the exact marking moment.
+  useEffect(() => {
+    if (!open || mode !== "add") return;
+    const courseId = selectedEnrollment?.courseId;
+    const branchId = selectedEnrollment?.branchId;
+    const day = dayNameFromDateStr(actualDate).toLowerCase();
+    if (!courseId || !day) {
+      setSlotWindows([]);
+      setSelectedSlotStart("");
+      return;
+    }
+    let cancelled = false;
+    // New windows context (course/branch/day changed): a fresh default applies.
+    slotPickedRef.current = false;
+    // Fetch only the slots scheduled on the chosen date's day-of-week AND the
+    // student's branch, then default to the slot for the current time.
+    const params = new URLSearchParams({ courseId, day });
+    if (branchId) params.set("branchId", branchId);
+    fetch(`/api/attendance/course-slots?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const windows: SlotWindow[] = data?.windows ?? [];
+        setSlotWindows(windows);
+        // Don't clobber a slot the user already picked while this was loading.
+        if (!slotPickedRef.current) {
+          setSelectedSlotStart(pickDefaultSlotStart(windows, getCurrentTime()));
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSlotWindows([]);
+        if (!slotPickedRef.current) setSelectedSlotStart("");
+      });
+    return () => { cancelled = true; };
+  }, [open, mode, selectedEnrollment?.courseId, selectedEnrollment?.branchId, actualDate]);
+
   // Per-row helpers: changing a row's lesson resets that row's mission so
   // stale missions from a different lesson never sneak through. Inlined into
   // each row's onChange handler below — no global effect needed.
@@ -421,28 +469,26 @@ export function StudentAttendanceModal({
       // Auto-select first enrollment's course name (since dropdown uses courseName as value)
       const firstEnrollment = studentEnrollments[0];
       setSelectedEnrollmentId(firstEnrollment.courseName);
-      setActualDay(firstEnrollment.slotDay || firstEnrollment.dayOfWeek || getCurrentDayOfWeek());
-      setActualStartTime(formatTimeForInput(firstEnrollment.slotTime || firstEnrollment.startTime));
+      // Date/time stay at the today/now defaults the user chose — don't overwrite from the slot.
     }
   }, [mode, selectedStudentId, studentEnrollments]);
 
   // Update times when enrollment changes (only in "add" mode — in present/absent mode
   // the main open-effect already sets day/time from existing attendance data)
-  useEffect(() => {
-    if (selectedEnrollment && mode === "add") {
-      setActualDay(selectedEnrollment.slotDay || selectedEnrollment.dayOfWeek || getCurrentDayOfWeek());
-      setActualStartTime(formatTimeForInput(selectedEnrollment.slotTime || selectedEnrollment.startTime));
-    }
-  }, [selectedEnrollmentId, selectedEnrollment, mode]);
+  // (In add mode the date/time stay at the today/now defaults; the slot no longer
+  // overrides them — the user records the actual attendance date + time.)
 
   const handleSubmit = async () => {
     // Use selectedEnrollment to get the actual enrollment ID
     const enrollmentId = selectedEnrollment?.enrollmentId || selectedRow?.enrollmentId;
     if (!enrollmentId) return;
 
-    // Check for duplicate day + time within the same week for the same student
+    // Block only the SAME slot (day + slot start) within the week — a student may
+    // attend multiple different slots on the same day, so we compare the chosen
+    // SLOT, not the exact marking time.
     const studentId = selectedRow?.studentId || (mode === "add" ? selectedStudentId : undefined);
-    if (studentId && actualDay && actualStartTime) {
+    const newSlotTime = mode === "add" ? (manualSlot ? manualSlotStart : selectedSlotStart) : (selectedRow?.slotTime || "");
+    if (studentId && actualDay && newSlotTime) {
       const currentAttendanceId = selectedRow?.existingAttendance?.id;
       const normalizeTime = (t: string) => t.split(':').slice(0, 2).join(':');
 
@@ -451,37 +497,35 @@ export function StudentAttendanceModal({
         if (!row.existingAttendance) return false;
         // Skip the current record being edited
         if (currentAttendanceId && row.existingAttendance.id === currentAttendanceId) return false;
-        // Check if same day AND same time
+        // Same slot = same slot day AND same slot start time
         return (
-          row.existingAttendance.actualDay?.toLowerCase() === actualDay.toLowerCase() &&
-          normalizeTime(row.existingAttendance.actualStartTime || '') === normalizeTime(actualStartTime)
+          (row.slotDay || '').toLowerCase() === actualDay.toLowerCase() &&
+          normalizeTime(row.slotTime || '') === normalizeTime(newSlotTime)
         );
       });
 
       if (duplicate) {
         setDuplicateError(
-          `This student already has attendance on ${actualDay} at ${actualStartTime} (${duplicate.courseName}). Please choose a different day or time.`
+          `This student already has attendance for this slot on ${actualDay} (${duplicate.courseName}). Choose a different slot.`
         );
         return;
       }
     }
 
     setDuplicateError("");
-    setPasswordError("");
 
-    // Require password only when adcoin was changed by the user and the new value differs
-    const adcoinRequiresPassword = mode !== "absent" && !isTrial && adcoinTouched && adcoin !== originalAdcoinRef.current;
-    if (adcoinRequiresPassword && !adcoinPassword.trim()) {
-      setPasswordError("Please enter your password to transfer adcoin.");
-      return;
-    }
+    // actualStartTime is the EXACT marking moment — refresh it to now at submit.
+    const markingTime = getCurrentTime();
+    setActualStartTime(markingTime);
 
     // Use existing attendance date if updating, otherwise calculate from the SLOT's day (not user-changed day).
     // This keeps the date tied to the enrollment slot so it can be matched back after refresh.
     const existingDate = selectedRow?.existingAttendance?.date;
     const attendanceDate = existingDate
       ? (existingDate.includes('T') ? existingDate.split('T')[0] : existingDate)
-      : getDateForDayInCurrentWeek(selectedRow?.slotDay || actualDay);
+      : (mode === "add" && actualDate
+          ? actualDate
+          : getDateForDayInCurrentWeek(selectedRow?.slotDay || actualDay));
 
     setIsSubmitting(true);
     try {
@@ -491,24 +535,27 @@ export function StudentAttendanceModal({
         status: mode === "absent" ? "absent" : "present",
         classType,
         actualDay,
-        actualStartTime,
-        instructorName: mode === "absent" ? "" : instructorName,
-        lastActivity: mode === "absent" ? "" : lastActivity,
-        adcoin: mode === "absent" ? 0 : (isTrial ? 0 : adcoin),
-        projectPhotos: mode === "absent" ? [] : projectPhotos,
+        actualStartTime: markingTime,
         notes: mode === "absent" ? reason : "",
         activities:
           mode === "absent"
             ? []
-            : activities.filter((a) => a.lesson || a.mission),
+            : activities
+                .filter((a) => a.lesson)
+                .map((a) => ({ lesson: a.lesson, mission: "" })),
         instructorFeedback: isTrial ? instructorFeedback : undefined,
         isTrial: isTrial,
         attendanceId: selectedRow?.existingAttendance?.id || undefined,
-        // Original slot info — used for permanent slot matching
-        slotDay: selectedRow?.slotDay || undefined,
-        slotTime: selectedRow?.slotTime || selectedRow?.startTime || undefined,
-        // Password for adcoin transfer verification
-        adcoinPassword: adcoinRequiresPassword ? adcoinPassword : undefined,
+        // Slot info — in add mode the slot is derived from the chosen date's
+        // day-of-week + the selected slot window; otherwise keep the row's slot.
+        slotDay:
+          mode === "add"
+            ? (dayNameFromDateStr(actualDate) || undefined)
+            : (selectedRow?.slotDay || undefined),
+        slotTime:
+          mode === "add"
+            ? ((manualSlot ? manualSlotStart : selectedSlotStart) || undefined)
+            : (selectedRow?.slotTime || selectedRow?.startTime || undefined),
       });
       onOpenChange(false);
     } catch (error) {
@@ -559,11 +606,6 @@ export function StudentAttendanceModal({
     label: p.courseName,
   }));
 
-  const instructorOptions = instructors.map((i) => ({
-    value: i.name,
-    label: i.name,
-  }));
-
   // Activity entries are prefixed so a downstream check can distinguish them
   // from curriculum lessons by value alone (which decides whether Mission is
   // disabled for that row).
@@ -594,30 +636,6 @@ export function StudentAttendanceModal({
     }
     return opts;
   }, [curriculumLessons, selectedRow?.hasExam, activeActivities]);
-
-  // Mission options for a given lesson value. Empty array means "no mission
-  // to pick" — the picker is then disabled (used for activity-event lessons
-  // and unselected lessons).
-  const getMissionOptionsForLesson = (lesson: string): { value: string; label: string }[] => {
-    if (!lesson || lesson.startsWith("__hdr_")) return [];
-    // Activity events don't have missions — the picker stays disabled.
-    if (lesson.startsWith(ACTIVITY_PREFIX)) return [];
-    if (lesson === "Exam" && selectedRow?.examLevel) {
-      return [{ value: `Level ${selectedRow.examLevel}`, label: `Level ${selectedRow.examLevel}` }];
-    }
-    if (lesson === "Competition") return COMPETITION_MISSIONS;
-
-    const selectedLesson = curriculumLessons.find((l) => l.title === lesson);
-    if (!selectedLesson || !selectedLesson.missions || selectedLesson.missions.length === 0) {
-      return [{ value: "Build Only", label: "Build Only" }];
-    }
-    const options = [{ value: "Build Only", label: "Build Only" }];
-    selectedLesson.missions.forEach((m, index) => {
-      const label = m.level !== null ? `Level ${m.level}` : `Mission ${index + 1}`;
-      options.push({ value: label, label });
-    });
-    return options;
-  };
 
   // Determine what's editable based on mode
   const isStudentEditable = mode === "add";
@@ -763,14 +781,33 @@ export function StudentAttendanceModal({
             {/* Day and Time */}
             <div className="grid grid-cols-2 gap-4">
               {isFieldsEditable ? (
-                <FloatingSelect
-                  id="select-day"
-                  label="Day"
-                  placeholder="Select day..."
-                  value={actualDay}
-                  onChange={(val) => { setActualDay(val); setDuplicateError(""); }}
-                  options={DAYS_OF_WEEK}
-                />
+                mode === "add" ? (
+                  <div className="relative">
+                    <input
+                      type="date"
+                      id="select-date"
+                      value={actualDate}
+                      onChange={(e) => {
+                        setActualDate(e.target.value);
+                        setActualDay(dayNameFromDateStr(e.target.value));
+                        setDuplicateError("");
+                      }}
+                      className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] bg-transparent px-4 text-base font-bold text-foreground transition-colors focus:border-[#23D2E2] focus:outline-none"
+                    />
+                    <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                      Date
+                    </label>
+                  </div>
+                ) : (
+                  <FloatingSelect
+                    id="select-day"
+                    label="Day"
+                    placeholder="Select day..."
+                    value={actualDay}
+                    onChange={(val) => { setActualDay(val); setDuplicateError(""); }}
+                    options={DAYS_OF_WEEK}
+                  />
+                )
               ) : (
                 <div className="relative">
                   <input
@@ -789,18 +826,45 @@ export function StudentAttendanceModal({
               )}
 
               {isFieldsEditable ? (
-                <div className="relative">
-                  <input
-                    type="time"
-                    id="start-time"
-                    value={actualStartTime}
-                    onChange={(e) => { setActualStartTime(e.target.value); setDuplicateError(""); }}
-                    className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] bg-transparent px-4 text-base font-bold text-foreground transition-colors focus:border-[#23D2E2] focus:outline-none"
-                  />
-                  <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
-                    Time
-                  </label>
-                </div>
+                mode === "add" ? (
+                  manualSlot ? (
+                    <div className="relative">
+                      <input
+                        type="time"
+                        id="manual-slot"
+                        value={manualSlotStart}
+                        onChange={(e) => { setManualSlotStart(e.target.value); setDuplicateError(""); }}
+                        className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] bg-transparent px-4 text-base font-bold text-foreground transition-colors focus:border-[#23D2E2] focus:outline-none"
+                      />
+                      <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                        Slot (manual)
+                      </label>
+                    </div>
+                  ) : (
+                    <FloatingSelect
+                      id="select-slot"
+                      label="Slot"
+                      placeholder={slotWindows.length ? "Select slot..." : `No slots on ${actualDay || "this day"}`}
+                      value={selectedSlotStart}
+                      onChange={(val) => { slotPickedRef.current = true; setSelectedSlotStart(val); setDuplicateError(""); }}
+                      options={slotWindows.map((w) => ({ value: w.startTime, label: w.label }))}
+                      disabled={slotWindows.length === 0}
+                    />
+                  )
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="time"
+                      id="start-time"
+                      value={actualStartTime}
+                      onChange={(e) => { setActualStartTime(e.target.value); setDuplicateError(""); }}
+                      className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] bg-transparent px-4 text-base font-bold text-foreground transition-colors focus:border-[#23D2E2] focus:outline-none"
+                    />
+                    <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                      Time
+                    </label>
+                  </div>
+                )
               ) : (
                 <div className="relative">
                   <input
@@ -819,6 +883,19 @@ export function StudentAttendanceModal({
               )}
             </div>
 
+            {/* Manual slot toggle — one-off timing when the chosen day has no scheduled slot */}
+            {mode === "add" && (
+              <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={manualSlot}
+                  onChange={(e) => { setManualSlot(e.target.checked); setDuplicateError(""); }}
+                  className="h-4 w-4"
+                />
+                Enter slot timing manually (one-off)
+              </label>
+            )}
+
             {/* Duplicate day+time error */}
             {duplicateError && (
               <p className="text-sm font-medium text-red-500">{duplicateError}</p>
@@ -827,150 +904,68 @@ export function StudentAttendanceModal({
             {/* Activity Fields - Only for add/present modes */}
             {showActivityFields && (
               <>
-                {/* Activities — one row per {lesson, mission}. `+` on the
-                    last row adds a new pair; `−` on any row removes it. */}
-                {activities.map((row, idx) => {
-                  const missionOpts = getMissionOptionsForLesson(row.lesson);
-                  const missionDisabled = !row.lesson || missionOpts.length === 0;
-                  return (
-                    <div key={idx} className="flex items-center gap-2">
-                      <div className="grid grid-cols-2 gap-4 flex-1">
-                        <FloatingSelect
-                          id={`select-lesson-${idx}`}
-                          label="Lesson"
-                          placeholder={isLoadingCurriculum ? "Loading..." : "Select lesson..."}
-                          value={row.lesson}
-                          onChange={(v) =>
-                            setActivities((prev) =>
-                              prev.map((a, i) =>
-                                i === idx ? { lesson: v, mission: "" } : a,
-                              ),
-                            )
-                          }
-                          options={lessonOptions}
-                          disabled={isLoadingCurriculum}
-                          searchable
-                        />
-                        <FloatingSelect
-                          id={`select-mission-${idx}`}
-                          label="Mission"
-                          placeholder={row.lesson ? "Select mission..." : "Select lesson first..."}
-                          value={row.mission}
-                          onChange={(v) =>
-                            setActivities((prev) =>
-                              prev.map((a, i) => (i === idx ? { ...a, mission: v } : a)),
-                            )
-                          }
-                          options={missionOpts}
-                          disabled={missionDisabled}
-                          searchable
-                        />
-                      </div>
-                      {/* Matches the DynamicFieldList pattern (program-modal):
-                          first row carries the + (add another activity); every
-                          subsequent row carries a − (remove this row). */}
-                      {idx === 0 ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActivities((prev) => [...prev, { lesson: "", mission: "" }])
-                          }
-                          className="p-0.5 rounded-full border-2 border-[#23D2E2] hover:shadow-sm transition-all duration-200 flex items-center justify-center"
-                          title="Add another activity"
-                          aria-label="Add another activity"
-                        >
-                          <Plus size={9} className="text-[#23D2E2]" strokeWidth={5} />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActivities((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          className="p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10 transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
-                          title="Remove this activity"
-                          aria-label="Remove this activity"
-                        >
-                          <Minus size={9} className="text-[#fd434f]" strokeWidth={5} />
-                        </button>
-                      )}
+                {/* Activities — one row per lesson. `+` on the first row adds
+                    a new lesson; `−` on any subsequent row removes it. */}
+                {activities.map((row, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <FloatingSelect
+                        id={`select-lesson-${idx}`}
+                        label="Lesson"
+                        placeholder={isLoadingCurriculum ? "Loading..." : "Select lesson..."}
+                        value={row.lesson}
+                        onChange={(v) =>
+                          setActivities((prev) =>
+                            prev.map((a, i) =>
+                              i === idx ? { lesson: v, mission: "" } : a,
+                            ),
+                          )
+                        }
+                        options={lessonOptions}
+                        disabled={isLoadingCurriculum}
+                        searchable
+                      />
                     </div>
-                  );
-                })}
-
-                <FloatingInput
-                  id="activity-completed"
-                  label="Activity Completed"
-                  value={lastActivity}
-                  onChange={(e) => setLastActivity(e.target.value)}
-                />
-
-                <div className="grid grid-cols-2 gap-4">
-                  {isTrial ? (
-                    <FloatingInput
-                      id="instructor-feedback"
-                      label="Instructor Feedback"
-                      value={instructorFeedback}
-                      onChange={(e) => setInstructorFeedback(e.target.value)}
-                    />
-                  ) : (
-                    <FloatingInput
-                      id="adcoin"
-                      label="Adcoin"
-                      type="number"
-                      min={0}
-                      value={adcoin === 0 ? "" : adcoin.toString()}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setAdcoin(val < 0 ? 0 : val || 0);
-                        setAdcoinTouched(true);
-                      }}
-                    />
-                  )}
-
-                  {currentUserName ? (
-                    <FloatingInput
-                      id="instructor-name"
-                      label="Instructor Name"
-                      value={currentUserName}
-                      readOnly
-                      className="bg-muted"
-                    />
-                  ) : (
-                    <FloatingSelect
-                      id="select-instructor"
-                      label="Instructor Name"
-                      placeholder="Select instructor..."
-                      value={instructorName}
-                      onChange={setInstructorName}
-                      options={instructorOptions}
-                      searchable
-                    />
-                  )}
-                </div>
-
-                {/* Password field — shown only when adcoin value was changed */}
-                {!isTrial && adcoinTouched && adcoin !== originalAdcoinRef.current && (
-                  <>
-                    <FloatingInput
-                      id="adcoin-password"
-                      label="Password to Transfer Adcoin"
-                      type="password"
-                      value={adcoinPassword}
-                      onChange={(e) => { setAdcoinPassword(e.target.value); setPasswordError(""); }}
-                    />
-                    {passwordError && (
-                      <p className="text-sm font-medium text-red-500 -mt-3">{passwordError}</p>
+                    {/* Matches the DynamicFieldList pattern (program-modal):
+                        first row carries the + (add another lesson); every
+                        subsequent row carries a − (remove this row). */}
+                    {idx === 0 ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActivities((prev) => [...prev, { lesson: "", mission: "" }])
+                        }
+                        className="p-0.5 rounded-full border-2 border-[#23D2E2] hover:shadow-sm transition-all duration-200 flex items-center justify-center"
+                        title="Add another lesson"
+                        aria-label="Add another lesson"
+                      >
+                        <Plus size={9} className="text-[#23D2E2]" strokeWidth={5} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActivities((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="p-0.5 rounded-full border-2 border-[#fd434f] hover:border-red-500 hover:bg-red-500/10 transition-all duration-200 shadow-sm hover:shadow-md flex items-center justify-center"
+                        title="Remove this lesson"
+                        aria-label="Remove this lesson"
+                      >
+                        <Minus size={9} className="text-[#fd434f]" strokeWidth={5} />
+                      </button>
                     )}
-                  </>
-                )}
+                  </div>
+                ))}
 
-                <PhotoUpload
-                  value={projectPhotos}
-                  onChange={setProjectPhotos}
-                  maxFiles={5}
-                  label="Project Photos (max 5)"
-                />
+                {/* Instructor feedback — trial sessions only */}
+                {isTrial && (
+                  <FloatingInput
+                    id="instructor-feedback"
+                    label="Instructor Feedback"
+                    value={instructorFeedback}
+                    onChange={(e) => setInstructorFeedback(e.target.value)}
+                  />
+                )}
               </>
             )}
 

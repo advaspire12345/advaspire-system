@@ -33,7 +33,7 @@ export const TOUR_STEPS: Record<UserRole, TourStep[]> = {
         "Create accounts: group_admin (if multi-branch), company_admin (per branch), instructor, assistant_admin. Assign instructors to programs from here.",
     },
     {
-      selector: 'a[href="/program"]',
+      selector: 'a[href="/courses"]',
       title: "Step 4 — Create programs and packages",
       body:
         "Each program is a course (e.g. 'Coding 101'). For every program also add at least one pricing package (e.g. 4-session at RM220) — that's what parents are billed.",
@@ -64,7 +64,7 @@ export const TOUR_STEPS: Record<UserRole, TourStep[]> = {
         "Add any branches under your group that don't exist yet. Super_admin created the company; you fill in the branches.",
     },
     {
-      selector: 'a[href="/program"]',
+      selector: 'a[href="/courses"]',
       title: "Programs and packages",
       body:
         "Confirm every course your branches teach has at least one pricing package. Without it company_admin can't add students.",

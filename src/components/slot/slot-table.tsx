@@ -45,9 +45,22 @@ const DAY_ORDER: Record<string, number> = {
   monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
 };
 
-function formatTime(time: string): string {
+// Format a stored "HH:MM[:SS]" (24h) time as a 12-hour AM/PM display string,
+// e.g. "15:00" -> "3:00 PM", "09:00" -> "9:00 AM". Display-only: the stored
+// value submitted via the time <input> stays 24h.
+function to12h(time: string): string {
   const parts = time.split(":");
-  return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : time;
+  if (parts.length < 2) return time;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (Number.isNaN(h) || Number.isNaN(m)) return time;
+  const ap = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m.toString().padStart(2, "0")} ${ap}`;
+}
+
+function formatTime(time: string): string {
+  return to12h(time);
 }
 
 function formatEndTime(startTime: string, durationMinutes: number): string {
@@ -57,7 +70,7 @@ function formatEndTime(startTime: string, durationMinutes: number): string {
   const endMinutes = startMinutes + durationMinutes;
   const endH = Math.floor(endMinutes / 60) % 24;
   const endM = endMinutes % 60;
-  return `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
+  return to12h(`${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`);
 }
 
 function capitalize(s: string): string {
@@ -256,7 +269,7 @@ export function SlotTable({
                                 <div key={slot.id} className="text-sm flex items-center">
                                   <span className="font-medium inline-block w-[80px]">{showDay ? capitalize(slot.day) : ""}</span>
                                   <span className={cn("mr-1.5", showDay ? "text-muted-foreground" : "invisible")}>:</span>
-                                  <span className="inline-block w-[120px]">{formatTime(slot.time)} - {formatEndTime(slot.time, slot.duration)}</span>
+                                  <span className="inline-block w-[170px]">{formatTime(slot.time)} - {formatEndTime(slot.time, slot.duration)}</span>
                                   <span className="text-muted-foreground text-xs">
                                     [{slot.limitStudent} student{slot.limitStudent !== 1 ? "s" : ""}]
                                   </span>

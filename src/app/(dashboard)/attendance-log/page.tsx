@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { AttendanceLogTable } from "@/components/attendance/attendance-log-table";
 import { getAttendanceLogPaginated } from "@/data/attendance";
+import { getScheduleSlotsForFilter } from "@/data/attendance-slots";
 import { getAllInstructors } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
@@ -22,13 +23,18 @@ export default async function AttendanceLogPage({
   if (!perms?.can_view) redirect(permData ? getFirstViewablePath(permData.permissions, permData.role) : "/login");
 
   const params = await searchParams;
-  const startDate = params.startDate || undefined;
-  const endDate = params.endDate || undefined;
+  // Default the date-range filter to today–today (local YYYY-MM-DD) when the
+  // URL doesn't specify a range. Users can still change it via the UI.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const startDate = params.startDate || today;
+  const endDate = params.endDate || today;
 
   // Fetch data in parallel
-  const [attendanceLogResult, instructors] = await Promise.all([
+  const [attendanceLogResult, instructors, slotOptions] = await Promise.all([
     getAttendanceLogPaginated(user.email, { offset: 0, limit: 10, startDate, endDate }),
     getAllInstructors(),
+    getScheduleSlotsForFilter(user.email),
   ]);
 
   return (
@@ -50,6 +56,7 @@ export default async function AttendanceLogPage({
           canDelete={perms?.can_delete}
           initialStartDate={startDate}
           initialEndDate={endDate}
+          slotOptions={slotOptions}
         />
       </div>
     </main>

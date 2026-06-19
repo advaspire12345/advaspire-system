@@ -583,7 +583,7 @@ export function TeamModal({
                   />
                   {programs.length === 0 && (
                     <Link
-                      href="/program"
+                      href="/courses"
                       className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#23D2E2] hover:text-[#18a9b8] hover:underline px-1"
                     >
                       <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />

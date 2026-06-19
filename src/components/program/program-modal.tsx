@@ -21,9 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { DynamicFieldList } from "@/components/program/dynamic-field-list";
 import { DynamicFaqList, type FaqItem } from "@/components/program/dynamic-faq-list";
-import { CurriculumBuilder, type CurriculumSection } from "@/components/program/curriculum-builder";
 import type { ProgramTableRow, PricingPackageType, ProgramFull } from "@/db/schema";
-import type { ProgramFormPayload } from "@/app/(dashboard)/program/actions";
+import type { ProgramFormPayload } from "@/app/(dashboard)/courses/actions";
 import {
   LANGUAGE_OPTIONS,
   PROGRAM_TYPE_OPTIONS,
@@ -104,10 +103,24 @@ interface ProgramModalProps {
 const TABS = [
   { id: "basic" as const, label: "Basic" },
   { id: "info" as const, label: "Info" },
-  { id: "curriculum" as const, label: "Curriculum" },
   { id: "pricing" as const, label: "Pricing" },
   { id: "media" as const, label: "Media" },
 ] as const;
+
+// Hub lesson catalogs (public.lessons.course_code). "" = None (null).
+const LESSON_CATALOG_OPTIONS = [
+  { value: "", label: "None" },
+  { value: "ev3", label: "EV3" },
+  { value: "advasbot", label: "AdvasBot" },
+  { value: "microbit", label: "micro:bit" },
+  { value: "python", label: "Python" },
+  { value: "scratch", label: "Scratch" },
+  { value: "arduino", label: "Arduino" },
+  { value: "webapp", label: "Web App" },
+  { value: "ai", label: "AI" },
+  { value: "igcse-cs", label: "IGCSE CS" },
+  { value: "godot", label: "Godot" },
+];
 
 const DAY_OPTIONS = [
   { value: "monday", label: "Monday" },
@@ -426,6 +439,7 @@ export function ProgramModal({
   const [sessionsToLevelUp, setSessionsToLevelUp] = useState("");
   const [languages, setLanguages] = useState<string[]>([]);
   const [programType, setProgramType] = useState("");
+  const [lessonCatalog, setLessonCatalog] = useState("");
   const [status, setStatus] = useState("active");
   // For bootcamp/workshop only — datetime-local strings (e.g. "2026-05-10T18:30")
   const [startDate, setStartDate] = useState("");
@@ -442,9 +456,6 @@ export function ProgramModal({
   const [requirements, setRequirements] = useState<string[]>([""]);
   const [outcomes, setOutcomes] = useState<string[]>([""]);
   const [faqs, setFaqs] = useState<FaqItem[]>([{ question: "", answer: "" }]);
-
-  // Curriculum tab state
-  const [sections, setSections] = useState<CurriculumSection[]>([]);
 
   // Pricing tab state
   const [pricing, setPricing] = useState<PricingItem[]>(() => [{
@@ -540,6 +551,7 @@ export function ProgramModal({
     setSessionsToLevelUp(data.sessions_to_level_up?.toString() || "");
     setLanguages(data.languages || []);
     setProgramType(data.program_type || "");
+    setLessonCatalog(data.lesson_catalog || "");
     setStartDate(data.start_date ? data.start_date.slice(0, 16) : "");
     setEndDate(data.end_date ? data.end_date.slice(0, 16) : "");
     setStatus(data.status || "active");
@@ -566,27 +578,6 @@ export function ProgramModal({
       data.faqs?.length > 0
         ? data.faqs.map((f) => ({ question: f.question, answer: f.answer }))
         : [{ question: "", answer: "" }]
-    );
-
-    // Curriculum tab
-    setSections(
-      data.sections?.map((s) => ({
-        id: s.id,
-        title: s.title,
-        description: s.description || "",
-        lessons: s.lessons?.map((l) => ({
-          id: l.id,
-          title: l.title,
-          thumbnail_url: l.thumbnail_url || null,
-          url: l.url || null,
-          missions: (l.missions || []).map((m) => ({
-            id: generateTempId(),
-            level: m.level,
-            url_mission: m.url_mission,
-            url_answer: m.url_answer,
-          })),
-        })) || [],
-      })) || []
     );
 
     // Pricing tab
@@ -656,6 +647,7 @@ export function ProgramModal({
     setSessionsToLevelUp("");
     setLanguages([]);
     setProgramType("");
+    setLessonCatalog("");
     setStatus("active");
     setStartDate("");
     setEndDate("");
@@ -666,7 +658,6 @@ export function ProgramModal({
     setRequirements([""]);
     setOutcomes([""]);
     setFaqs([{ question: "", answer: "" }]);
-    setSections([]);
     setPricing([{
       id: generateTempId(),
       package_type: "monthly",
@@ -785,6 +776,7 @@ export function ProgramModal({
       number_of_levels: numberOfLevels ? parseInt(numberOfLevels) : 0,
       sessions_to_level_up: numberOfLevels === "0" ? 0 : (sessionsToLevelUp ? parseInt(sessionsToLevelUp) : null),
       program_type: programType || null,
+      lesson_catalog: lessonCatalog || null,
       status: status || "active",
       branch_id: branchIds[0] || "", // Primary branch
       cover_image_url: coverImageUrl || null,
@@ -803,24 +795,8 @@ export function ProgramModal({
       requirements: requirements.filter((r) => r.trim()),
       outcomes: outcomes.filter((o) => o.trim()),
       faqs: faqs.filter((f) => f.question.trim() && f.answer.trim()),
-      sections: sections
-        .filter((s) => s.title.trim())
-        .map((s) => ({
-          title: s.title,
-          description: s.description,
-          lessons: s.lessons
-            .filter((l) => l.title.trim())
-            .map((l) => ({
-              title: l.title,
-              thumbnail_url: l.thumbnail_url,
-              url: l.url,
-              missions: l.missions.map((m) => ({
-                level: m.level,
-                url_mission: m.url_mission,
-                url_answer: m.url_answer,
-              })),
-            })),
-        })),
+      // Curriculum is now authored in the Hub; the LMS no longer builds it.
+      sections: [],
       pricing: pricing.map((p) => {
         // voucher_id + completion_months serve BOTH completion-earn and
         // good-payer rewards.  Monthly packages have no vouchers at all
@@ -953,10 +929,10 @@ export function ProgramModal({
     : mode === "delete"
       ? "Confirm Delete"
       : isLastTab
-        ? "Save Program"
+        ? "Save Course"
         : "Next";
 
-  const previewName = name || record?.name || "New Program";
+  const previewName = name || record?.name || "New Course";
 
   // Upload handler - store file for later upload
   const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -988,10 +964,10 @@ export function ProgramModal({
       >
         <DialogTitle className="sr-only">
           {mode === "delete"
-            ? "Delete Program"
+            ? "Delete Course"
             : mode === "edit"
-              ? "Edit Program"
-              : "Add New Program"}
+              ? "Edit Course"
+              : "Add New Course"}
         </DialogTitle>
         <div className="flex flex-col lg:grid lg:grid-cols-12 h-[90vh] sm:h-[85vh] lg:h-[80vh] min-h-[500px] overflow-hidden rounded-xl">
           {/* LEFT PANEL - PREVIEW & NAVIGATION (hidden on mobile, shown on lg+) */}
@@ -1062,18 +1038,6 @@ export function ProgramModal({
 
               {/* Quick stats */}
               <div className="mt-4 flex gap-4 text-center">
-                <div>
-                  <p className="text-lg font-bold text-[#615DFA]">
-                    {sections.reduce((sum, s) => sum + s.lessons.length, 0)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Lessons</p>
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-[#23D2E2]">
-                    {sections.length}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Sections</p>
-                </div>
                 <div>
                   <p className="text-lg font-bold text-green-600">
                     {pricing.length}
@@ -1174,10 +1138,10 @@ export function ProgramModal({
                     <AlertTriangle className="h-8 w-8 text-red-500" />
                   </div>
                   <h2 className="mt-4 text-2xl font-bold text-foreground">
-                    Delete Program?
+                    Delete Course?
                   </h2>
                   <p className="mt-2 text-muted-foreground">
-                    This action cannot be undone. All curriculum, pricing, and
+                    This action cannot be undone. All pricing and
                     enrollment data will be affected.
                   </p>
                 </div>
@@ -1215,7 +1179,7 @@ export function ProgramModal({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="md:col-span-1">
                         <FloatingInput
-                          label="Program Name"
+                          label="Course Name"
                           value={name}
                           onChange={(e) => setName(e.target.value)}
                           required
@@ -1224,7 +1188,7 @@ export function ProgramModal({
 
                       <div className="md:col-span-1">
                         <FloatingInput
-                          label="Program Code (e.g., SCR)"
+                          label="Course Code (e.g., SCR)"
                           value={code}
                           onChange={(e) => setCode(e.target.value.toUpperCase())}
                         />
@@ -1326,13 +1290,20 @@ export function ProgramModal({
                       </div>
 
                       <FloatingSelect
-                        label="Program Type"
+                        label="Course Type"
                         value={programType}
                         onChange={setProgramType}
                         options={PROGRAM_TYPE_OPTIONS.map((p) => ({
                           value: p.value,
                           label: p.label,
                         }))}
+                      />
+
+                      <FloatingSelect
+                        label="Lesson Catalog"
+                        value={lessonCatalog}
+                        onChange={setLessonCatalog}
+                        options={LESSON_CATALOG_OPTIONS}
                       />
 
                       <FloatingSelect
@@ -1381,7 +1352,7 @@ export function ProgramModal({
                 {/* INFO TAB */}
                 {activeTab === "info" && (
                   <>
-                    <h6 className="text-base font-bold">Program Information</h6>
+                    <h6 className="text-base font-bold">Course Information</h6>
 
                     <DynamicFieldList
                       label="Requirements"
@@ -1398,22 +1369,6 @@ export function ProgramModal({
                     />
 
                     <DynamicFaqList items={faqs} onChange={setFaqs} />
-                  </>
-                )}
-
-                {/* CURRICULUM TAB */}
-                {activeTab === "curriculum" && (
-                  <>
-                    <h6 className="text-base font-bold">Curriculum Builder</h6>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Create sections and add lessons. Drag to reorder.
-                    </p>
-
-                    <CurriculumBuilder
-                      sections={sections}
-                      onChange={setSections}
-                      numberOfLevels={Math.max(1, parseInt(numberOfLevels) || 4)}
-                    />
                   </>
                 )}
 

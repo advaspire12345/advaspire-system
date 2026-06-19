@@ -22,7 +22,7 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   trials: "Trial",
   students: "Student",
   examinations: "Examination",
-  programs: "Program",
+  programs: "Courses",
   slots: "Slot",
   vouchers: "Voucher",
   team: "Team",
@@ -35,6 +35,7 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   marketplace: "Marketplace",
   import: "Import",
   events: "Events",
+  student_progress: "Student Progress",
 };
 
 interface RoleTab {

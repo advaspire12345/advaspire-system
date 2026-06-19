@@ -398,10 +398,11 @@ export async function markAttendance(
         actual_start_time: data?.actualStartTime ?? null,
         actual_end_time: data?.actualEndTime ?? null,
         class_type: data?.classType ?? null,
-        instructor_name: data?.instructorName ?? null,
-        last_activity: data?.lastActivity ?? null,
-        project_photos: data?.projectPhotos ?? null,
-        adcoin: data?.adcoin ?? 0,
+        // No longer collected by the mark-attendance dialog (columns retained).
+        instructor_name: null,
+        last_activity: null,
+        project_photos: null,
+        adcoin: 0,
         activities: data?.activities ?? null,
       });
       return { attendance, isNew: false, previousStatus: directRecord.status as AttendanceStatus };
@@ -486,10 +487,11 @@ export async function markAttendance(
       actual_start_time: data?.actualStartTime ?? null,
       actual_end_time: data?.actualEndTime ?? null,
       class_type: data?.classType ?? null,
-      instructor_name: data?.instructorName ?? null,
-      last_activity: data?.lastActivity ?? null,
-      project_photos: data?.projectPhotos ?? null,
-      adcoin: data?.adcoin ?? 0,
+      // No longer collected by the mark-attendance dialog (columns retained).
+      instructor_name: null,
+      last_activity: null,
+      project_photos: null,
+      adcoin: 0,
       activities: data?.activities ?? null,
       // Set slot_day/slot_time if not already set on the record
       ...(!existing.slot_day && slotDay ? { slot_day: slotDay } : {}),
@@ -510,10 +512,11 @@ export async function markAttendance(
     actual_start_time: data?.actualStartTime ?? null,
     actual_end_time: data?.actualEndTime ?? null,
     class_type: data?.classType ?? null,
-    instructor_name: data?.instructorName ?? null,
-    last_activity: data?.lastActivity ?? null,
-    project_photos: data?.projectPhotos ?? null,
-    adcoin: data?.adcoin ?? 0,
+    // No longer collected by the mark-attendance dialog (columns retained).
+    instructor_name: null,
+    last_activity: null,
+    project_photos: null,
+    adcoin: 0,
     activities: data?.activities ?? null,
     slot_day: slotDay,
     slot_time: slotTime,
@@ -521,6 +524,61 @@ export async function markAttendance(
 
   const attendance = await createAttendance(attendanceData);
   return { attendance, isNew: true, previousStatus: null };
+}
+
+/**
+ * Extract a lesson coordinate (e.g. "EV3-L1-03") from a stored attendance lesson
+ * string like "EV3-L1-03 EV3 Robot drop tower". Returns null for special lessons
+ * (Competition, Exam, Activity: …) that carry no coordinate.
+ */
+export function lessonCoordinateFromActivity(lesson: string): string | null {
+  const token = (lesson ?? "").trim().split(/\s+/)[0] ?? "";
+  if (!token || !token.includes("-")) return null; // specials have no dash
+  return token;
+}
+
+/**
+ * When a student is marked present/late with a curriculum lesson, auto-tick
+ * "Learnt" for that lesson in lesson_progress (the per-lesson progress grid).
+ * Missions / challenge / homework are left untouched so staff tick them later.
+ */
+export async function syncLearntProgress(
+  enrollmentId: string,
+  activities: { lesson: string; mission: string }[] | null | undefined,
+  status: AttendanceStatus,
+): Promise<void> {
+  if (status !== "present" && status !== "late") return;
+  const coords = [
+    ...new Set(
+      (activities ?? [])
+        .map((a) => lessonCoordinateFromActivity(a.lesson))
+        .filter((c): c is string => !!c),
+    ),
+  ];
+  if (coords.length === 0) return;
+
+  const { data: enrollment } = await supabaseAdmin
+    .from("enrollments")
+    .select("student_id, student:students!inner(branch_id)")
+    .eq("id", enrollmentId)
+    .single();
+  const studentId = enrollment?.student_id as string | undefined;
+  const branchId =
+    (enrollment?.student as { branch_id?: string } | null)?.branch_id ?? null;
+  if (!studentId) return;
+
+  const now = new Date().toISOString();
+  const { error } = await supabaseAdmin.from("lesson_progress").upsert(
+    coords.map((coordinate) => ({
+      student_id: studentId,
+      branch_id: branchId,
+      lesson_coordinate: coordinate,
+      learnt_status: "approved",
+      learnt_ticked_at: now,
+    })),
+    { onConflict: "student_id,lesson_coordinate" },
+  );
+  if (error) console.error("syncLearntProgress upsert error:", error);
 }
 
 export async function deleteAttendance(attendanceId: string): Promise<boolean> {
@@ -1205,8 +1263,11 @@ export async function getEnrollmentsForAttendance(
         continue;
       }
 
-      const orphanDay = orphan.actual_day || orphan.slot_day || 'Manual';
-      const orphanTime = orphan.actual_start_time || orphan.slot_time || null;
+      // Prefer the SAVED slot (slot_day/slot_time) over the exact marking time —
+      // the slot is what the user chose; actual_* is only a fallback for legacy
+      // records that have no slot info.
+      const orphanDay = orphan.slot_day || orphan.actual_day || 'Manual';
+      const orphanTime = orphan.slot_time || orphan.actual_start_time || null;
       const orphanDateStr = orphan.date.includes('T') ? orphan.date.split('T')[0] : orphan.date;
 
       result.push({
@@ -1813,8 +1874,11 @@ export async function getEnrollmentsForAttendancePaginated(
         continue;
       }
 
-      const orphanDay = orphan.actual_day || orphan.slot_day || 'Manual';
-      const orphanTime = orphan.actual_start_time || orphan.slot_time || null;
+      // Prefer the SAVED slot (slot_day/slot_time) over the exact marking time —
+      // the slot is what the user chose; actual_* is only a fallback for legacy
+      // records that have no slot info.
+      const orphanDay = orphan.slot_day || orphan.actual_day || 'Manual';
+      const orphanTime = orphan.slot_time || orphan.actual_start_time || null;
       const orphanDateStr = orphan.date.includes('T') ? orphan.date.split('T')[0] : orphan.date;
 
       result.push({
@@ -3159,6 +3223,11 @@ export interface AttendanceLogRow {
   enrollmentId: string;
   sessionsRemaining: number;
   dayOfWeek: string | null;
+  // Permanent slot identifiers persisted on the attendance row. Used (with
+  // courseName) to match the LMS scheduled-slot window so the history table
+  // can show the same "EV3 · Friday 3:00 PM - 4:30 PM" label as the Mark page.
+  slotDay: string | null;
+  slotTime: string | null;
   projectPhotos: string[] | null;
   adcoin: number;
   activities: { lesson: string; mission: string }[] | null;
@@ -3220,6 +3289,8 @@ export async function getAttendanceLog(
       activities,
       created_at,
       trial_id,
+      slot_day,
+      slot_time,
       enrollment:enrollments!inner(
         id,
         sessions_remaining,
@@ -3260,6 +3331,8 @@ export async function getAttendanceLog(
       activities,
       created_at,
       trial_id,
+      slot_day,
+      slot_time,
       trial:trials!inner(
         id,
         child_name,
@@ -3382,6 +3455,8 @@ export async function getAttendanceLog(
       // dates may not align with the slot (e.g. make-up sessions, holiday
       // make-ups, historical data from a different schedule).
       dayOfWeek: record.actual_day,
+      slotDay: record.slot_day ?? null,
+      slotTime: record.slot_time ?? null,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
       activities: record.activities,
@@ -3431,6 +3506,8 @@ export async function getAttendanceLog(
       enrollmentId: `trial-${trial.id}`,
       sessionsRemaining: 0,
       dayOfWeek: record.actual_day ?? null,
+      slotDay: record.slot_day ?? null,
+      slotTime: record.slot_time ?? trial.scheduled_time ?? null,
       projectPhotos: record.project_photos,
       adcoin: 0,
       activities: record.activities,
@@ -3556,6 +3633,8 @@ export async function getAttendanceLogPaginated(
       activities,
       created_at,
       trial_id,
+      slot_day,
+      slot_time,
       enrollment:enrollments!inner(
         id,
         sessions_remaining,
@@ -3610,6 +3689,8 @@ export async function getAttendanceLogPaginated(
       activities,
       created_at,
       trial_id,
+      slot_day,
+      slot_time,
       trial:trials!inner(
         id,
         child_name,
@@ -3741,6 +3822,8 @@ export async function getAttendanceLogPaginated(
       // dates may not align with the slot (e.g. make-up sessions, holiday
       // make-ups, historical data from a different schedule).
       dayOfWeek: record.actual_day,
+      slotDay: record.slot_day ?? null,
+      slotTime: record.slot_time ?? null,
       projectPhotos: record.project_photos,
       adcoin: record.adcoin ?? 0,
       activities: record.activities,
@@ -3790,6 +3873,8 @@ export async function getAttendanceLogPaginated(
       enrollmentId: `trial-${trial.id}`,
       sessionsRemaining: 0,
       dayOfWeek: record.actual_day ?? null,
+      slotDay: record.slot_day ?? null,
+      slotTime: record.slot_time ?? trial.scheduled_time ?? null,
       projectPhotos: record.project_photos,
       adcoin: 0,
       activities: record.activities,

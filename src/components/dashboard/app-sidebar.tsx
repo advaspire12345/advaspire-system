@@ -4,25 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  CalendarCheck,
-  ClipboardList,
-  CreditCard,
-  Clock,
-  Coins,
-  Building2,
-  Trophy,
-  ArrowLeftRight,
-  FlaskConical,
-  FileUser,
-  GraduationCap,
-  Users,
-  Award,
-  Ticket,
-  Upload,
-  CalendarDays,
-} from "lucide-react";
+import { ChevronDown, MoreHorizontal } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -32,129 +14,18 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
 import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import { createClient } from "@/lib/supabase/client";
+import { navigationItems, getFeaturedResources } from "@/lib/navigation";
+import type { NavItem } from "@/lib/navigation";
 
-import type { PermissionsMap, PermissionResource, UserRole } from "@/db/schema";
-
-const navigationItems: {
-  title: string;
-  icon: typeof LayoutDashboard;
-  href: string;
-  resource: PermissionResource;
-}[] = [
-  {
-    title: "Dashboard",
-    icon: LayoutDashboard,
-    href: "/dashboard",
-    resource: "dashboard",
-  },
-  {
-    title: "Branches",
-    icon: Building2,
-    href: "/branches",
-    resource: "branches",
-  },
-  {
-    title: "Trial",
-    icon: FlaskConical,
-    href: "/trial",
-    resource: "trials",
-  },
-  {
-    title: "Student",
-    icon: FileUser,
-    href: "/student",
-    resource: "students",
-  },
-  {
-    title: "Examination",
-    icon: Award,
-    href: "/examination",
-    resource: "examinations",
-  },
-  {
-    title: "Program",
-    icon: GraduationCap,
-    href: "/program",
-    resource: "programs",
-  },
-  {
-    title: "Slot",
-    icon: Clock,
-    href: "/slot",
-    resource: "slots",
-  },
-  {
-    title: "Voucher",
-    icon: Ticket,
-    href: "/voucher",
-    resource: "vouchers",
-  },
-  {
-    title: "Team",
-    icon: Users,
-    href: "/team",
-    resource: "team",
-  },
-  {
-    title: "Mark Attendance",
-    icon: CalendarCheck,
-    href: "/attendance",
-    resource: "attendance",
-  },
-  {
-    title: "Attendance History",
-    icon: ClipboardList,
-    href: "/attendance-log",
-    resource: "attendance_log",
-  },
-  {
-    title: "Payment Record",
-    icon: CreditCard,
-    href: "/payment-record",
-    resource: "payment_record",
-  },
-  {
-    title: "Pending Payments",
-    icon: Clock,
-    href: "/pending-payments",
-    resource: "pending_payments",
-  },
-  {
-    title: "Leaderboard",
-    icon: Trophy,
-    href: "/leaderboard",
-    resource: "leaderboard",
-  },
-  {
-    title: "Transactions",
-    icon: ArrowLeftRight,
-    href: "/transactions",
-    resource: "transactions",
-  },
-  {
-    title: "Marketplace",
-    icon: Coins,
-    href: "/marketplace",
-    resource: "marketplace",
-  },
-  {
-    title: "Import",
-    icon: Upload,
-    href: "/import",
-    resource: "import",
-  },
-  {
-    title: "Events",
-    icon: CalendarDays,
-    href: "/events",
-    resource: "events",
-  },
-];
+import type { PermissionsMap, UserRole } from "@/db/schema";
 
 
 // Placeholder badges - replace with actual badge images
@@ -181,7 +52,46 @@ interface AppSidebarProps {
 export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
   const pathname = usePathname();
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [othersOpen, setOthersOpen] = useState(false);
   const supabase = createClient();
+
+  const canView = (item: NavItem) => {
+    if (!permissions) return true;
+    return permissions[item.resource]?.can_view;
+  };
+
+  // Dashboard + Summary always lead the list (permission-filtered).
+  const dashboardItem = navigationItems.find((i) => i.href === "/dashboard");
+  const summaryItem = navigationItems.find((i) => i.href === "/summary");
+  const leadItems = [dashboardItem, summaryItem].filter(
+    (item): item is NavItem => Boolean(item) && canView(item!)
+  );
+
+  // Featured actions for the role, in defined order, permission-filtered,
+  // excluding anything already shown as a lead item.
+  const featuredResources = getFeaturedResources(userRole);
+  const featuredItems = featuredResources
+    .map((resource) =>
+      navigationItems.find(
+        (item) =>
+          item.resource === resource &&
+          item.href !== "/dashboard" &&
+          item.href !== "/summary"
+      )
+    )
+    .filter((item): item is NavItem => Boolean(item) && canView(item!));
+
+  const shownHrefs = new Set(
+    [...leadItems, ...featuredItems].map((item) => item.href)
+  );
+
+  // Others: every remaining permitted nav item.
+  const otherItems = navigationItems.filter(
+    (item) => !shownHrefs.has(item.href) && canView(item)
+  );
+
+  const isItemActive = (href: string) =>
+    pathname === href || pathname.startsWith(href + "/");
 
   useEffect(() => {
     async function getUser() {
@@ -267,8 +177,8 @@ export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
             ))}
           </div>
 
-          {/* Stats Row */}
-          <div className="mt-7 flex w-full items-center justify-center text-center">
+          {/* Stats Row — Level / Adcoin / Mission temporarily hidden (not needed yet) */}
+          <div className="mt-7 hidden w-full items-center justify-center text-center">
             <div className="flex flex-col px-6">
               <span className="text-xs font-bold">{Math.floor((user?.adcoinBalance ?? 0) / 500) + 1}</span>
               <span className="text-xs text-muted-foreground">Level</span>
@@ -293,25 +203,52 @@ export function AppSidebar({ permissions, userRole }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigationItems.filter((item) => {
-                // If no permissions loaded yet, show all (will be guarded by page)
-                if (!permissions) return true;
-                return permissions[item.resource]?.can_view;
-              }).map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  pathname.startsWith(item.href + "/");
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive}>
-                      <Link href={item.href}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+              {/* Dashboard, Summary, then the role's featured actions */}
+              {[...leadItems, ...featuredItems].map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton asChild isActive={isItemActive(item.href)}>
+                    <Link href={item.href}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+
+              {/* Collapsible "Others" group for the remaining permitted items */}
+              {otherItems.length > 0 && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    onClick={() => setOthersOpen((open) => !open)}
+                    aria-expanded={othersOpen}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                    <span>Others</span>
+                    <ChevronDown
+                      className={`ml-auto h-4 w-4 transition-transform ${
+                        othersOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </SidebarMenuButton>
+                  {othersOpen && (
+                    <SidebarMenuSub>
+                      {otherItems.map((item) => (
+                        <SidebarMenuSubItem key={item.href}>
+                          <SidebarMenuSubButton
+                            asChild
+                            isActive={isItemActive(item.href)}
+                          >
+                            <Link href={item.href}>
+                              <item.icon className="h-4 w-4" />
+                              <span>{item.title}</span>
+                            </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
+                  )}
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

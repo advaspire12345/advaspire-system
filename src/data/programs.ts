@@ -242,6 +242,7 @@ export async function getProgramsForTablePaginated(
       number_of_levels,
       sessions_to_level_up,
       program_type,
+      lesson_catalog,
       status,
       cover_image_url,
       assessment_enabled,
@@ -338,6 +339,7 @@ async function assembleProgramRows(
       number_of_levels: program.number_of_levels,
       sessions_to_level_up: program.sessions_to_level_up,
       program_type: program.program_type,
+      lesson_catalog: program.lesson_catalog ?? null,
       status: program.status || "active",
       cover_image_url: program.cover_image_url,
       assessment_enabled: program.assessment_enabled || false,
@@ -395,6 +397,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
       number_of_levels,
       sessions_to_level_up,
       program_type,
+      lesson_catalog,
       status,
       cover_image_url,
       assessment_enabled,
@@ -480,6 +483,7 @@ export async function getProgramsForTable(userEmail: string): Promise<ProgramTab
       number_of_levels: program.number_of_levels,
       sessions_to_level_up: program.sessions_to_level_up,
       program_type: program.program_type,
+      lesson_catalog: program.lesson_catalog ?? null,
       status: program.status || "active",
       cover_image_url: program.cover_image_url,
       assessment_enabled: program.assessment_enabled || false,
@@ -580,6 +584,8 @@ export interface CreateProgramPayload {
   number_of_levels: number | null;
   sessions_to_level_up: number | null;
   program_type: string | null;
+  // Links the course to a Hub lesson catalog (public.lessons.course_code).
+  lesson_catalog?: string | null;
   status: string;
   branch_id: string; // Primary branch for legacy compatibility
   cover_image_url: string | null;
@@ -600,8 +606,8 @@ export interface CreateProgramPayload {
   outcomes: string[];
   faqs: { question: string; answer: string }[];
 
-  // Curriculum
-  sections: {
+  // Curriculum — optional; lessons are now authored in the Hub. Defaults to [].
+  sections?: {
     title: string;
     description: string;
     lessons: {
@@ -653,6 +659,7 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
       number_of_levels: payload.number_of_levels,
       sessions_to_level_up: payload.sessions_to_level_up,
       program_type: payload.program_type,
+      lesson_catalog: payload.lesson_catalog ?? null,
       status: payload.status || "active",
       branch_id: payload.branch_id,
       cover_image_url: payload.cover_image_url,
@@ -742,9 +749,10 @@ export async function createProgram(payload: CreateProgramPayload): Promise<stri
     }
   }
 
-  // 8. Insert sections and lessons
-  for (let sectionIndex = 0; sectionIndex < payload.sections.length; sectionIndex++) {
-    const section = payload.sections[sectionIndex];
+  // 8. Insert sections and lessons (empty when curriculum is authored in the Hub)
+  const sections = payload.sections ?? [];
+  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+    const section = sections[sectionIndex];
     if (!section.title.trim()) continue;
 
     const { data: sectionData, error: sectionError } = await supabaseAdmin
@@ -847,6 +855,7 @@ export async function updateProgram(
       number_of_levels: payload.number_of_levels,
       sessions_to_level_up: payload.sessions_to_level_up,
       program_type: payload.program_type,
+      lesson_catalog: payload.lesson_catalog ?? null,
       status: payload.status,
       branch_id: payload.branch_id,
       cover_image_url: payload.cover_image_url,
@@ -942,9 +951,10 @@ export async function updateProgram(
   }
   await supabaseAdmin.from("course_sections").delete().eq("course_id", programId);
 
-  // Insert new sections and lessons
-  for (let sectionIndex = 0; sectionIndex < payload.sections.length; sectionIndex++) {
-    const section = payload.sections[sectionIndex];
+  // Insert new sections and lessons (empty when curriculum is authored in the Hub)
+  const sections = payload.sections ?? [];
+  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+    const section = sections[sectionIndex];
     if (!section.title.trim()) continue;
 
     const { data: sectionData } = await supabaseAdmin
@@ -1089,6 +1099,37 @@ export interface CurriculumLesson {
  * Used in attendance modal for lesson/mission selection
  */
 export async function getCurriculumLessonsForCourse(courseId: string): Promise<CurriculumLesson[]> {
+  // Unified model: if the course is linked to a Hub lesson catalog, read its lessons
+  // from the shared `lessons` table (ev3/advasbot/microbit + python/scratch/... ).
+  const { data: course } = await supabaseAdmin
+    .from("courses")
+    .select("lesson_catalog")
+    .eq("id", courseId)
+    .maybeSingle();
+
+  if (course?.lesson_catalog) {
+    const { data: rows, error: lerr } = await supabaseAdmin
+      .from("lessons")
+      .select("coordinate, title, level, position")
+      .eq("course_code", course.lesson_catalog)
+      .order("level", { ascending: true, nullsFirst: false })
+      .order("position", { ascending: true, nullsFirst: false })
+      .order("coordinate", { ascending: true });
+    if (lerr) {
+      console.error("Error fetching Hub lessons:", lerr);
+      return [];
+    }
+    // Prefix the coordinate (e.g. "EV3-L1-03 EV3 Robot drop tower") so the stored
+    // attendance lesson carries the code — this is what links attendance to the
+    // per-lesson student progress (lesson_progress.lesson_coordinate).
+    return (rows ?? []).map((l) => ({
+      id: l.coordinate,
+      title: l.coordinate ? `${l.coordinate} ${l.title}` : l.title,
+      missions: [],
+    }));
+  }
+
+  // Fallback: legacy in-LMS curriculum (course_sections + course_lessons).
   const { data: sections, error } = await supabaseAdmin
     .from("course_sections")
     .select(`

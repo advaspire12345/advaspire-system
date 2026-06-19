@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Banner } from "@/components/ui/banner";
 import { AttendanceTable } from "@/components/attendance/attendance-table";
 import { getEnrollmentsForAttendancePaginated } from "@/data/attendance";
+import { getScheduleSlotsForFilter } from "@/data/attendance-slots";
 import { getAllInstructorsForAttendance, getInstructorsByBranchForAttendance, getUserByEmail } from "@/data/users";
 import { getCurrentUserPermissions, getFirstViewablePath } from "@/data/permissions";
 
@@ -43,9 +44,10 @@ export default async function AttendancePage() {
   // Fetch data in parallel — manual-attendance search is now lazy (see
   // /api/attendance/student-search), so we no longer pre-load every active
   // enrollment on page open.
-  const [enrollmentsResult, instructors] = await Promise.all([
+  const [enrollmentsResult, instructors, slotOptions] = await Promise.all([
     getEnrollmentsForAttendancePaginated(user.email, { offset: 0, limit: 10 }),
     getInstructors(),
+    getScheduleSlotsForFilter(user.email),
   ]);
 
   return (
@@ -65,6 +67,7 @@ export default async function AttendancePage() {
           hideBranch={role === "company_admin" || role === "instructor"}
           canCreate={perms?.can_create}
           currentUserName={role === "instructor" ? dbUser?.name : undefined}
+          slotOptions={slotOptions}
         />
       </div>
     </main>

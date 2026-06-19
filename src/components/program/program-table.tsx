@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import type { ProgramTableRow, ProgramFull } from "@/db/schema";
 import type { BranchOption } from "@/components/trial/trial-modal";
 import { ProgramModal } from "@/components/program/program-modal";
-import type { ProgramFormPayload } from "@/app/(dashboard)/program/actions";
+import type { ProgramFormPayload } from "@/app/(dashboard)/courses/actions";
 
 interface InstructorOption {
   id: string;
@@ -59,7 +59,7 @@ const columns: {
   width: string;
   align?: "center" | "right";
 }[] = [
-  { key: "name", label: "Program Name", width: "200px" },
+  { key: "name", label: "Course Name", width: "200px" },
   { key: "category", label: "Category", width: "120px" },
   { key: "enrolled", label: "Enrolled", width: "90px", align: "center" },
   { key: "monthly", label: "Monthly Pack", width: "110px", align: "center" },
@@ -258,7 +258,7 @@ export function ProgramTable({
                 className="bg-black hover:bg-black/90 text-white font-bold h-[50px] px-6"
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Add Program
+                Add Course
               </Button>
             )}
           </div>
@@ -303,7 +303,7 @@ export function ProgramTable({
                       colSpan={hideBranch ? columns.length - 1 : columns.length}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
-                      No programs found.
+                      No courses found.
                     </td>
                   </tr>
                 ) : (
@@ -489,7 +489,7 @@ export function ProgramTable({
                                 type="button"
                                 onClick={() => openEditModal(row)}
                                 className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#615DFA] hover:text-white"
-                                aria-label={`Edit program ${row.name}`}
+                                aria-label={`Edit course ${row.name}`}
                                 title="Edit"
                               >
                                 <Pencil className="h-4 w-4" />
@@ -500,7 +500,7 @@ export function ProgramTable({
                                 type="button"
                                 onClick={() => openDeleteModal(row)}
                                 className="rounded-lg border border-muted-foreground/30 p-2 text-muted-foreground transition hover:border-transparent hover:bg-[#fd434f] hover:text-white"
-                                aria-label={`Delete program ${row.name}`}
+                                aria-label={`Delete course ${row.name}`}
                                 title="Delete"
                               >
                                 <Trash2 className="h-4 w-4" />

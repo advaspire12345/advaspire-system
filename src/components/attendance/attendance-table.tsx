@@ -14,8 +14,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
-import { HexagonAvatar } from "@/components/ui/hexagon-avatar";
-import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import {
   StudentAttendanceModal,
   type ModalMode,
@@ -102,22 +100,21 @@ interface AttendanceTableProps {
   hideBranch?: boolean;
   /** If set, the instructor name is fixed (for instructor role — auto-fill, no dropdown) */
   currentUserName?: string;
+  /** Slot options for the slot filter, built from the LMS scheduled slots (course_slots). */
+  slotOptions?: { value: string; label: string; course: string; day: string; startTime: string; endTime: string }[];
 }
 
 const ITEMS_PER_PAGE = 10;
 
+// Visible columns, in display order: Username, Slot, Date, Lesson,
+// Exact Timing, Attendance. The body `<td>` blocks below are written
+// positionally to match this exact order — keep them in sync.
 const columns = [
-  { key: "photo", label: "Photo", width: "80px", align: "center" as const },
   { key: "username", label: "Username", width: "160px" },
-  { key: "branch", label: "Branch", width: "120px" },
-  { key: "program", label: "Program", width: "140px" },
-  { key: "day", label: "Day", width: "80px" },
-  { key: "time", label: "Time", width: "100px" },
-  { key: "lesson", label: "Lesson", width: "120px" },
-  { key: "mission", label: "Mission", width: "100px" },
-  { key: "lastActivity", label: "Last Activity", width: "140px" },
-  { key: "lastAttendance", label: "Last Attendance", width: "130px" },
-  { key: "status", label: "Status", width: "90px", align: "center" as const },
+  { key: "slot", label: "Slot", width: "160px" },
+  { key: "date", label: "Date", width: "130px", hideOnMobile: true },
+  { key: "lesson", label: "Lesson", width: "120px", hideOnMobile: true },
+  { key: "exactTiming", label: "Exact Timing", width: "110px", hideOnMobile: true },
   {
     key: "attendance",
     label: "Attendance",
@@ -132,12 +129,21 @@ export function AttendanceTable({
   instructors = [],
   fetchCurriculumLessons,
   canCreate = true,
-  hideBranch,
   currentUserName,
+  slotOptions = [],
 }: AttendanceTableProps) {
   const router = useRouter();
   const [data, setData] = useState<AttendanceRow[]>(initialData);
   const [searchQuery, setSearchQuery] = useState("");
+  // Bulk multi-select state: set of selected row ids, and in-flight flag.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  // Date filter defaults to today.
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [selectedSlot, setSelectedSlot] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
   // Bounded progressive loading via the shared hook.
@@ -195,21 +201,60 @@ export function AttendanceTable({
   // Store attendanceId per row so it survives server refresh even if slot matching fails
   const attendanceIdMapRef = useRef<Map<string, string>>(new Map());
 
-  // Filter data based on search
-  const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+  // Whether any client-side filter is active. When true, pagination operates
+  // over the locally filtered set rather than the server-reported totalCount.
+  const isFiltering = !!(searchQuery.trim() || selectedDate || selectedSlot);
 
-    const query = searchQuery.toLowerCase();
-    return data.filter(
-      (row) =>
-        row.studentName.toLowerCase().includes(query) ||
-        row.courseName.toLowerCase().includes(query) ||
-        row.branchName.toLowerCase().includes(query),
-    );
-  }, [data, searchQuery]);
+  // Slot options come from the LMS scheduled slots (passed as a prop). Match an
+  // attendance row to its slot by which window its slot_time falls into (so an
+  // exact mark time like 15:32 still maps to the 3:00-4:30 PM slot).
+  const findSlotOption = useCallback(
+    (row: AttendanceRow) => {
+      if (!row.slotDay || !row.slotTime) return undefined;
+      const t = row.slotTime.split(":").slice(0, 2).join(":");
+      const day = row.slotDay.toLowerCase();
+      // Prefer an EXACT slot-start match (slot_time is saved as the slot's start);
+      // fall back to window-containment only for legacy exact-time records. This
+      // stops overlapping windows (e.g. 3:00-4:30 and 4:00-5:30) from mismatching.
+      return (
+        slotOptions.find((o) => o.course === row.courseName && o.day === day && o.startTime === t) ||
+        slotOptions.find((o) => o.course === row.courseName && o.day === day && t >= o.startTime && t < o.endTime)
+      );
+    },
+    [slotOptions],
+  );
+
+  // Filter data based on search, slot, and date filters (AND-applied)
+  const filteredData = useMemo(() => {
+    if (!isFiltering) return data;
+
+    const query = searchQuery.trim().toLowerCase();
+    return data.filter((row) => {
+      if (
+        query &&
+        !(
+          row.studentName.toLowerCase().includes(query) ||
+          row.courseName.toLowerCase().includes(query) ||
+          row.branchName.toLowerCase().includes(query)
+        )
+      ) {
+        return false;
+      }
+      if (selectedSlot) {
+        const opt = findSlotOption(row);
+        if (!opt || opt.value !== selectedSlot) return false;
+      }
+      if (selectedDate) {
+        const rowDate = row.existingAttendance?.date ?? row.lastAttendanceDate;
+        const normalized = rowDate ? rowDate.split("T")[0] : "";
+        if (normalized !== selectedDate) return false;
+      }
+      return true;
+    });
+  }, [data, searchQuery, selectedSlot, selectedDate, isFiltering, findSlotOption]);
 
   // Pagination
-  const totalPages = searchQuery.trim()
+  const totalPages = isFiltering
     ? Math.max(1, Math.ceil(filteredData.length / ITEMS_PER_PAGE))
     : Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
   const paginatedData = useMemo(() => {
@@ -220,6 +265,16 @@ export function AttendanceTable({
   // Reset to page 1 when filters change
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
+    setCurrentPage(1);
+  };
+
+  const handleDateChange = (value: string) => {
+    setSelectedDate(value);
+    setCurrentPage(1);
+  };
+
+  const handleSlotChange = (value: string) => {
+    setSelectedSlot(value);
     setCurrentPage(1);
   };
 
@@ -271,13 +326,6 @@ export function AttendanceTable({
         actualDay: formData.actualDay,
         actualStartTime: formData.actualStartTime,
         classType: formData.classType,
-        instructorName: formData.instructorName || undefined,
-        lastActivity: formData.lastActivity || undefined,
-        projectPhotos:
-          formData.projectPhotos.length > 0
-            ? formData.projectPhotos
-            : undefined,
-        adcoin: formData.adcoin || 0,
         // Activities — flexible array of {lesson, mission} pairs
         activities: (formData.activities ?? [])
           .filter((a) => a.lesson || a.mission)
@@ -290,8 +338,6 @@ export function AttendanceTable({
         // Original slot info for permanent matching
         slotDay: formData.slotDay || undefined,
         slotTime: formData.slotTime || undefined,
-        // Password for adcoin transfer verification
-        adcoinPassword: formData.adcoinPassword || undefined,
       };
       console.log('Request body:', requestBody);
 
@@ -326,11 +372,13 @@ export function AttendanceTable({
                 classType: (att?.class_type ?? formData.classType ?? null) as 'Physical' | 'Online' | null,
                 actualDay: att?.actual_day ?? formData.actualDay ?? null,
                 actualStartTime: att?.actual_start_time ?? formData.actualStartTime ?? null,
-                instructorName: att?.instructor_name ?? formData.instructorName ?? null,
-                lastActivity: att?.last_activity ?? formData.lastActivity ?? null,
-                projectPhotos: att?.project_photos ?? (formData.projectPhotos.length > 0 ? formData.projectPhotos : null),
+                // These fields are no longer collected by the dialog; the server
+                // persists them as null/0, so mirror that in the optimistic state.
+                instructorName: att?.instructor_name ?? null,
+                lastActivity: att?.last_activity ?? null,
+                projectPhotos: att?.project_photos ?? null,
                 notes: att?.notes ?? formData.notes ?? null,
-                adcoin: att?.adcoin ?? formData.adcoin ?? 0,
+                adcoin: att?.adcoin ?? 0,
                 activities: att?.activities ?? (formData.activities && formData.activities.length > 0 ? formData.activities : null),
               },
             };
@@ -349,24 +397,96 @@ export function AttendanceTable({
     }
   };
 
-  // Compute the actual calendar date from actual_day relative to the slot date's week
-  const getActualDate = (slotDate: string, actualDay: string | null): Date => {
-    const base = new Date(slotDate + 'T00:00:00');
-    if (!actualDay) return base;
-    const dayMap: Record<string, number> = {
-      sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
-      thursday: 4, friday: 5, saturday: 6,
-    };
-    const targetIdx = dayMap[actualDay.toLowerCase()];
-    if (targetIdx === undefined) return base;
-    const baseDay = base.getDay();
-    const mondayOff = baseDay === 0 ? -6 : 1 - baseDay;
-    const monday = new Date(base);
-    monday.setDate(base.getDate() + mondayOff);
-    const daysFromMon = targetIdx === 0 ? 6 : targetIdx - 1;
-    const target = new Date(monday);
-    target.setDate(monday.getDate() + daysFromMon);
-    return target;
+  // ── Bulk multi-select ──
+  // Only rows on the current page are selectable via the header checkbox.
+  const allPageSelected =
+    paginatedData.length > 0 &&
+    paginatedData.every((row) => selectedIds.has(row.id));
+
+  const toggleRow = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        paginatedData.forEach((row) => next.delete(row.id));
+      } else {
+        paginatedData.forEach((row) => next.add(row.id));
+      }
+      return next;
+    });
+  };
+
+  // Today's date as local YYYY-MM-DD.
+  const todayLocal = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  // Bulk mark: persist an attendance for each selected row reusing the SAME
+  // single-row endpoint (/api/attendance/mark). Today's date, the row's own
+  // slot, Physical class type, no activities.
+  const handleBulkMark = async (status: "present" | "absent") => {
+    const rows = data.filter((r) => selectedIds.has(r.id));
+    if (rows.length === 0) return;
+
+    const verb = status === "present" ? "present" : "absent";
+    if (
+      !window.confirm(
+        `Mark ${rows.length} selected student${rows.length === 1 ? "" : "s"} as ${verb} for today?`,
+      )
+    ) {
+      return;
+    }
+
+    setBulkSubmitting(true);
+    try {
+      const date = todayLocal();
+      let failures = 0;
+      for (const row of rows) {
+        try {
+          const response = await fetch("/api/attendance/mark", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enrollmentId: row.enrollmentId,
+              date,
+              status,
+              classType: "Physical",
+              activities: [],
+              slotDay: row.slotDay || undefined,
+              slotTime: row.slotTime || undefined,
+            }),
+          });
+          if (!response.ok) {
+            failures += 1;
+            const err = await response.json().catch(() => ({}));
+            console.error("Bulk mark failed for", row.studentName, err);
+          }
+        } catch (err) {
+          failures += 1;
+          console.error("Bulk mark error for", row.studentName, err);
+        }
+      }
+
+      if (failures > 0) {
+        window.alert(
+          `${rows.length - failures} marked ${verb}. ${failures} could not be marked (they may already have attendance for this slot this week).`,
+        );
+      }
+
+      setSelectedIds(new Set());
+      router.refresh();
+    } finally {
+      setBulkSubmitting(false);
+    }
   };
 
   // Format time display
@@ -407,6 +527,36 @@ export function AttendanceTable({
               </button>
             </div>
 
+            {/* Date Filter */}
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => handleDateChange(e.target.value)}
+              className={cn(
+                "h-[50px] rounded-lg border border-muted-foreground/30 bg-white px-4 text-sm",
+                selectedDate && "font-semibold",
+              )}
+              aria-label="Filter by date"
+            />
+
+            {/* Slot Filter */}
+            <select
+              value={selectedSlot}
+              onChange={(e) => handleSlotChange(e.target.value)}
+              className={cn(
+                "h-[50px] rounded-lg border border-muted-foreground/30 bg-white px-4 text-sm",
+                selectedSlot && "font-semibold",
+              )}
+              aria-label="Filter by slot"
+            >
+              <option value="">All slots</option>
+              {slotOptions.map((slot) => (
+                <option key={slot.value} value={slot.value}>
+                  {slot.label}
+                </option>
+              ))}
+            </select>
+
             {/* Take Attendance Button */}
             {canCreate && (
               <Button
@@ -419,21 +569,63 @@ export function AttendanceTable({
             )}
           </div>
 
+          {/* Bulk Action Bar — shown when at least one row is selected */}
+          {canCreate && selectedIds.size > 0 && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg bg-white px-6 py-4">
+              <span className="text-sm font-bold text-foreground">
+                {selectedIds.size} selected
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => handleBulkMark("absent")}
+                  disabled={bulkSubmitting}
+                  className="bg-[#fd434f] hover:bg-[#fd434f]/90 text-white font-bold h-[44px] px-5 disabled:opacity-60"
+                >
+                  <UserX className="h-4 w-4" />
+                  {bulkSubmitting ? "Marking..." : `Mark Absent (${selectedIds.size})`}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set())}
+                  disabled={bulkSubmitting}
+                  className="text-sm font-medium text-muted-foreground underline disabled:opacity-60"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           <div className="overflow-x-auto">
             {/* Header Table */}
-            <table className="min-w-[1120px] w-full table-fixed border-separate border-spacing-0">
+            <table className="md:min-w-[1120px] w-full table-fixed border-separate border-spacing-0">
               <thead>
                 <tr>
-                  {columns.map((col, idx) => (
+                  {canCreate && (
+                    <th
+                      className="hidden md:table-cell bg-transparent px-4 py-3 text-center rounded-tl-lg"
+                      style={{ width: "48px", minWidth: "48px", maxWidth: "48px" }}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 cursor-pointer accent-[#615DFA]"
+                        checked={allPageSelected}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all on this page"
+                      />
+                    </th>
+                  )}
+                  {columns.map((col, idx) => {
+                    return (
                     <th
                       key={col.key}
                       className={cn(
                         "bg-transparent px-4 py-3 text-left text-base font-bold text-foreground",
-                        idx === 0 && "rounded-tl-lg",
+                        idx === 0 && !canCreate && "rounded-tl-lg",
                         idx === columns.length - 1 && "rounded-tr-lg",
                         col.align === "center" && "text-center",
-                        col.key === "branch" && hideBranch && "hidden",
+                        col.hideOnMobile && "hidden md:table-cell",
                       )}
                       style={{
                         width: col.width,
@@ -443,18 +635,19 @@ export function AttendanceTable({
                     >
                       {col.label}
                     </th>
-                  ))}
+                    );
+                  })}
                 </tr>
               </thead>
             </table>
 
             {/* Body Table */}
-            <table className="min-w-[1120px] w-full table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
+            <table className="md:min-w-[1120px] w-full table-fixed border-separate border-spacing-0 bg-white rounded-lg text-sm">
               <tbody>
                 {paginatedData.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={hideBranch ? columns.length - 1 : columns.length}
+                      colSpan={columns.length + (canCreate ? 1 : 0)}
                       className="h-24 text-center text-muted-foreground rounded-lg"
                     >
                       {isLoadingMore ? (
@@ -484,35 +677,26 @@ export function AttendanceTable({
                         hasIncompleteAttendance && "bg-amber-50/50",
                       )}
                     >
-                      {/* Photo */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[0].width }}
-                      >
-                        <div className="relative flex justify-center">
-                          <div className="relative">
-                            <HexagonAvatar
-                              size={50}
-                              imageUrl={row.studentPhoto ?? undefined}
-                              percentage={0.5}
-                              animated={false}
-                              fallbackInitials={row.studentName.charAt(0)}
-                              cornerRadius={8}
-                            />
-                            <div className="absolute -bottom-1 -right-1 z-10">
-                              <HexagonNumberBadge
-                                value={row.sessionsRemaining}
-                                size={22}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </td>
+                      {/* Selection checkbox */}
+                      {canCreate && (
+                        <td
+                          className="hidden md:table-cell px-4 py-3 text-center"
+                          style={{ width: "48px" }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 cursor-pointer accent-[#615DFA]"
+                            checked={selectedIds.has(row.id)}
+                            onChange={() => toggleRow(row.id)}
+                            aria-label={`Select ${row.studentName}`}
+                          />
+                        </td>
+                      )}
 
                       {/* Username */}
                       <td
                         className="px-4 py-3 font-bold text-[#23d2e2]"
-                        style={{ width: columns[1].width }}
+                        style={{ width: columns[0].width }}
                       >
                         <div className="flex items-center gap-2">
                           {row.studentName}
@@ -529,42 +713,39 @@ export function AttendanceTable({
                         </div>
                       </td>
 
-                      {/* Branch */}
+                      {/* Slot — shown with the SAME label as the slot filter so the
+                          column values line up with the filter options. */}
                       <td
-                        className={cn("px-4 py-3", hideBranch && "hidden")}
+                        className="px-4 py-3 font-bold"
+                        style={{ width: columns[1].width }}
+                      >
+                        {(() => {
+                          const opt = findSlotOption(row);
+                          if (opt) return opt.label;
+                          return row.slotDay ? `${row.courseName} · ${row.slotDay} ${formatTime(row.slotTime, null)}` : "-";
+                        })()}
+                      </td>
+
+                      {/* Date — the attendance date */}
+                      <td
+                        className="hidden md:table-cell px-4 py-3 font-bold text-sm"
                         style={{ width: columns[2].width }}
                       >
-                        {row.branchName}
-                      </td>
-
-                      {/* Program */}
-                      <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[3].width }}
-                      >
-                        {row.courseName}
-                      </td>
-
-                      {/* Day — always show enrollment slot day */}
-                      <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[4].width }}
-                      >
-                        {row.slotDay ?? "-"}
-                      </td>
-
-                      {/* Time — always show enrollment slot time */}
-                      <td
-                        className="px-4 py-3 font-bold"
-                        style={{ width: columns[5].width }}
-                      >
-                        {formatTime(row.slotTime, null)}
+                        {(() => {
+                          const rawDate = row.existingAttendance?.date ?? row.lastAttendanceDate;
+                          if (!rawDate) return "-";
+                          const normalized = rawDate.includes("T") ? rawDate.split("T")[0] : rawDate;
+                          const parsed = new Date(`${normalized}T00:00:00`);
+                          return isNaN(parsed.getTime())
+                            ? normalized
+                            : format(parsed, "do MMM yyyy");
+                        })()}
                       </td>
 
                       {/* Lesson — show all activities stacked. */}
                       <td
-                        className="px-4 py-3"
-                        style={{ width: columns[6].width }}
+                        className="hidden md:table-cell px-4 py-3"
+                        style={{ width: columns[3].width }}
                       >
                         <AttendanceActivityCell
                           activities={row.existingAttendance?.activities ?? row.lastActivities}
@@ -572,82 +753,22 @@ export function AttendanceTable({
                         />
                       </td>
 
-                      {/* Mission — show all activities stacked. */}
+                      {/* Exact Timing — the exact marking time */}
                       <td
-                        className="px-4 py-3"
-                        style={{ width: columns[7].width }}
-                      >
-                        <AttendanceActivityCell
-                          activities={row.existingAttendance?.activities ?? row.lastActivities}
-                          field="mission"
-                        />
-                      </td>
-
-                      {/* Last Activity */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[8].width }}
-                      >
-                        <span className="text-sm">
-                          {row.existingAttendance
-                            ? (row.existingAttendance.lastActivity || "-")
-                            : (row.lastActivityText || "-")}
-                        </span>
-                      </td>
-
-                      {/* Last Attendance — show actual day's date + time */}
-                      <td
-                        className="px-4 py-3"
-                        style={{ width: columns[9].width }}
-                      >
-                        <span className="font-bold text-sm">
-                          {row.existingAttendance
-                            ? (() => {
-                                const actualDate = getActualDate(row.existingAttendance.date, row.existingAttendance.actualDay);
-                                const timeStr = row.existingAttendance.actualStartTime
-                                  ? `, ${row.existingAttendance.actualStartTime.split(':').slice(0, 2).join(':')}`
-                                  : '';
-                                return `${format(actualDate, "do MMM yyyy")}${timeStr}`;
-                              })()
-                            : row.lastAttendanceDate
-                              ? format(new Date(row.lastAttendanceDate), "do MMM yyyy")
-                              : "-"}
-                        </span>
-                      </td>
-
-                      {/* Status */}
-                      <td
-                        className="px-4 py-3 text-center"
-                        style={{ width: columns[10].width }}
+                        className="hidden md:table-cell px-4 py-3 text-sm"
+                        style={{ width: columns[4].width }}
                       >
                         {(() => {
-                          const status = row.existingAttendance?.status ?? row.lastAttendanceStatus;
-                          if (!status) return <span className="text-muted-foreground">-</span>;
-                          return (
-                            <span
-                              className={cn(
-                                "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
-                                status === "present" || status === "late"
-                                  ? "bg-green-100 text-green-700"
-                                  : status === "absent"
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-gray-100 text-gray-700",
-                              )}
-                            >
-                              {status === "present" || status === "late"
-                                ? "Present"
-                                : status === "absent"
-                                  ? "Absent"
-                                  : status}
-                            </span>
-                          );
+                          const exact = row.existingAttendance?.actualStartTime;
+                          if (!exact) return "-";
+                          return formatTime(exact, null);
                         })()}
                       </td>
 
                       {/* Attendance Actions */}
                       <td
                         className="px-4 py-3"
-                        style={{ width: columns[11].width }}
+                        style={{ width: columns[5].width }}
                       >
                         <div className="flex items-center justify-center gap-2">
                           {/* Mark Present Button */}
@@ -692,7 +813,7 @@ export function AttendanceTable({
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalResults={searchQuery.trim() ? filteredData.length : totalCount}
+            totalResults={isFiltering ? filteredData.length : totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageChange={setCurrentPage}
           />

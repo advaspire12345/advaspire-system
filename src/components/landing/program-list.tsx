@@ -31,7 +31,7 @@ export function ProgramList({ programs }: ProgramListProps) {
 
         {/* View All Button */}
         <Link
-          href="/program"
+          href="/courses"
           className="mt-6 flex h-12 w-full items-center justify-center rounded-xl bg-[#615dfa] text-sm font-bold text-white transition-colors hover:bg-[#5652e0]"
         >
           View All Programs

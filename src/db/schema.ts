@@ -1351,6 +1351,9 @@ export interface CourseExtended extends Course {
   // Bootcamp / workshop fixed-window programs only.
   start_date: string | null;
   end_date: string | null;
+  // Links the course to a Hub lesson catalog (public.lessons.course_code), e.g.
+  // 'ev3' | 'advasbot' | 'microbit' | 'python' | 'scratch' | 'arduino' | ...
+  lesson_catalog: string | null;
 }
 
 /**
@@ -1882,7 +1885,8 @@ export type PermissionResource =
   | 'transactions'
   | 'marketplace'
   | 'import'
-  | 'events';
+  | 'events'
+  | 'student_progress';
 
 export const ALL_RESOURCES: PermissionResource[] = [
   'dashboard',
@@ -1904,6 +1908,7 @@ export const ALL_RESOURCES: PermissionResource[] = [
   'marketplace',
   'import',
   'events',
+  'student_progress',
 ];
 
 export interface ResourcePermission {

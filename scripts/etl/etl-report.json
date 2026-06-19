@@ -1,0 +1,85 @@
+{
+  "mode": "COMMIT",
+  "phases": {
+    "school_map": [
+      {
+        "school": "Advaspire Kepong",
+        "mapped_branch": "Advaspire Kepong",
+        "branch_code": "002"
+      },
+      {
+        "school": "Advaspire Semenyih",
+        "mapped_branch": "Advaspire Semenyih",
+        "branch_code": "001"
+      },
+      {
+        "school": "Global Ark International School",
+        "mapped_branch": "Global Ark International School",
+        "branch_code": "GAIS"
+      }
+    ],
+    "users": {
+      "hub_total": 137,
+      "students_linked": 102,
+      "students_created": 0,
+      "students_reused": 27,
+      "staff_linked": 1,
+      "staff_created": 0,
+      "staff_reused": 7,
+      "created_students_sample": [],
+      "created_staff": []
+    },
+    "student_auth": {
+      "active": 397,
+      "already_linked": 397,
+      "to_onboard": 0,
+      "plus_created": 0
+    },
+    "migrate": {
+      "ev3_lessons": {
+        "rows": 153
+      },
+      "advasbot_lessons": {
+        "rows": 27
+      },
+      "microbit_lessons": {
+        "rows": 26
+      },
+      "assessments": {
+        "rows": 15
+      },
+      "lesson_resources": {
+        "rows": 5
+      },
+      "advasbot_planning": {
+        "rows": 4
+      },
+      "lesson_progress": {
+        "rows": 21
+      },
+      "assessment_attempts": {
+        "rows": 19
+      },
+      "certificates": {
+        "rows": 182
+      },
+      "lesson_quiz_attempts": {
+        "rows": 1
+      },
+      "lesson_ratings": {
+        "rows": 1
+      },
+      "lesson_remarks": {
+        "rows": 1
+      },
+      "lesson_uploads": {
+        "rows": 2
+      }
+    },
+    "classes": {
+      "classes": 12,
+      "members": 31
+    }
+  },
+  "anomalies": []
+}
