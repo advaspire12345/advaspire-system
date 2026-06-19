@@ -14,6 +14,12 @@ interface HelpButtonProps {
   userId: string | null;
   /** Extra classes for the button wrapper (color overrides, etc.). */
   className?: string;
+  /**
+   * Optional visible text rendered next to the icon. Used when the button is
+   * placed inside a menu (e.g. the mobile settings dropdown) where an
+   * icon-only control would be unclear.
+   */
+  label?: string;
 }
 
 /**
@@ -25,7 +31,7 @@ interface HelpButtonProps {
  *  - The dialog has a "Re-take tour" button so users who want the spotlight
  *    walkthrough again can opt in.
  */
-export function HelpButton({ role, userId, className }: HelpButtonProps) {
+export function HelpButton({ role, userId, className, label }: HelpButtonProps) {
   const [tourActive, setTourActive] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const { shouldPulse, shouldAutoOpen, markSeen, resetAutoOpen } =
@@ -62,6 +68,7 @@ export function HelpButton({ role, userId, className }: HelpButtonProps) {
         )}
       >
         <HelpCircle className="h-5 w-5" />
+        {label && <span>{label}</span>}
       </button>
       <TourOverlay
         steps={TOUR_STEPS[role]}

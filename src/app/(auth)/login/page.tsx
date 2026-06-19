@@ -312,12 +312,12 @@ function LoginContent() {
                     <>
                       <div className="space-y-2">
                         <Label htmlFor="email" className="text-gray-700">
-                          Email Address
+                          Email or Username
                         </Label>
                         <Input
                           id="email"
-                          type="email"
-                          placeholder="Enter your email"
+                          type="text"
+                          placeholder="Enter your email or username"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required

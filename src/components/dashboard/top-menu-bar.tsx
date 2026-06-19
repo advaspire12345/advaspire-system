@@ -185,8 +185,8 @@ export function TopMenuBar({ role, userId }: TopMenuBarProps) {
 
       {/* End: Progress bar, notifications, settings, user */}
       <div className="flex items-center gap-2">
-        {/* Adcoins */}
-        <div className="flex items-center gap-2 px-3 md:px-5">
+        {/* Adcoins — desktop only (mobile shows it inside the settings menu) */}
+        <div className="hidden md:flex items-center gap-2 px-3 md:px-5">
           <Coins className="h-5 w-5 text-yellow-300 shrink-0" />
           <span className="text-white text-sm font-bold whitespace-nowrap">
             {adcoinStats?.totalAdcoinBalance?.toLocaleString() ?? "—"}
@@ -194,8 +194,10 @@ export function TopMenuBar({ role, userId }: TopMenuBarProps) {
         </div>
         <Separator
           orientation="vertical"
-          className="mx-2 data-[orientation=vertical]:h-8 bg-white/30"
+          className="hidden md:block mx-2 data-[orientation=vertical]:h-8 bg-white/30"
         />
+        {/* Notifications bell — kept visible on mobile because there is no
+            /notifications page to link to from the settings menu. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -273,12 +275,17 @@ export function TopMenuBar({ role, userId }: TopMenuBarProps) {
         </DropdownMenu>
 
         {/* Help button — opens role-aware onboarding dialog. Pulses on
-            first/second login (see useOnboardingTrigger). */}
-        <HelpButton role={role} userId={userId} className="text-white hover:bg-white/20 hover:text-white" />
+            first/second login (see useOnboardingTrigger). Desktop only; on
+            mobile it lives inside the settings menu. */}
+        <HelpButton
+          role={role}
+          userId={userId}
+          className="hidden md:flex text-white hover:bg-white/20 hover:text-white"
+        />
 
         <Separator
           orientation="vertical"
-          className="mx-2 data-[orientation=vertical]:h-8 bg-white/30"
+          className="hidden md:block mx-2 data-[orientation=vertical]:h-8 bg-white/30"
         />
 
         {/* User Menu - Only render after mount to avoid hydration mismatch */}
@@ -321,6 +328,28 @@ export function TopMenuBar({ role, userId }: TopMenuBarProps) {
                   </div>
                 </div>
               </DropdownMenuLabel>
+
+              {/* Mobile-only consolidated actions (desktop shows these in the
+                  top bar). Notifications is intentionally omitted — there is no
+                  /notifications page to link to, so the bell stays in the bar. */}
+              <div className="md:hidden">
+                <DropdownMenuItem
+                  disabled
+                  className="font-bold opacity-100"
+                >
+                  <Coins className="mr-2 h-4 w-4 text-yellow-500" />
+                  <span>
+                    Adcoin: {adcoinStats?.totalAdcoinBalance?.toLocaleString() ?? "—"}
+                  </span>
+                </DropdownMenuItem>
+                <HelpButton
+                  role={role}
+                  userId={userId}
+                  label="Help"
+                  className="flex w-full justify-start gap-2 rounded-sm px-2 py-1.5 h-auto text-sm font-bold text-foreground hover:bg-accent hover:text-accent-foreground"
+                />
+                <DropdownMenuSeparator />
+              </div>
 
               <DropdownMenuItem
                 onClick={() => router.push("/")}

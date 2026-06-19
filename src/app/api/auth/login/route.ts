@@ -21,8 +21,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Allow staff to log in with their username OR email. A non-email identifier
+    // is resolved to the account email via users.username.
+    let loginEmail = String(email).trim();
+    if (!loginEmail.includes("@")) {
+      const { data: byUsername } = await supabaseAdmin
+        .from("users")
+        .select("email")
+        .ilike("username", loginEmail)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (byUsername?.email) loginEmail = byUsername.email;
+    }
+
     // Brute-force lockout check before touching auth.
-    if (await isLoginLocked(email)) {
+    if (await isLoginLocked(loginEmail)) {
       return NextResponse.json(
         {
           error: `Too many failed attempts. Please try again in ${LOGIN_WINDOW_MINUTES} minutes or reset your password.`,
@@ -33,15 +46,15 @@ export async function POST(request: NextRequest) {
 
     const supabase = await createClient();
     const { data: signInData, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: loginEmail,
       password,
     });
 
     if (error) {
-      await recordLoginFailure(email, getClientIp(request));
+      await recordLoginFailure(loginEmail, getClientIp(request));
 
       // Re-check so the message reflects this just-recorded failure.
-      const locked = await isLoginLocked(email);
+      const locked = await isLoginLocked(loginEmail);
       if (locked) {
         return NextResponse.json(
           {
@@ -58,7 +71,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Success — clear the failure counter.
-    await clearLoginFailures(email);
+    await clearLoginFailures(loginEmail);
 
     // Resolve role for the redirect target (mirrors /api/auth/role).
     const authId = signInData.user?.id;

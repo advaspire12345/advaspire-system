@@ -11,6 +11,7 @@ import {
   createTeamMemberAction,
   updateTeamMemberAction,
   deleteTeamMemberAction,
+  resetTeamMemberPasswordAction,
   saveUserPermissionsAction,
   loadUserPermissionsAction,
   loadRolePermissionsAction,
@@ -132,6 +133,7 @@ export default async function TeamPage() {
           onAdd={perms?.can_create ? createTeamMemberAction : undefined}
           onEdit={perms?.can_edit ? updateTeamMemberAction : undefined}
           onDelete={perms?.can_delete ? deleteTeamMemberAction : undefined}
+          onResetPassword={perms?.can_edit ? resetTeamMemberPasswordAction : undefined}
           onSavePermissions={perms?.can_edit ? saveUserPermissionsAction : undefined}
           onLoadPermissions={perms?.can_edit ? loadUserPermissionsAction : undefined}
           canEditRolePermissions={canEditRolePermissions}

@@ -101,6 +101,7 @@ export interface User {
   id: string;
   auth_id: string | null;
   email: string;
+  username: string | null;
   name: string;
   role: UserRole;
   branch_id: string | null;
@@ -175,6 +176,7 @@ export interface Student {
   adcoin_balance: number;
   username: string | null;
   password_hash: string | null;
+  auth_id: string | null;
   // Branch-transfer breadcrumb. previous_branch_id is set on the NEW row so the
   // user can revert. transferred_to_student_id is set on the OLD row so the old
   // branch's table can render a "Transferred to {branch}" ghost row.
@@ -569,6 +571,7 @@ export interface CourseWithBranch extends Course {
 
 export interface UserInsert {
   email: string;
+  username?: string | null;
   name: string;
   role?: UserRole;
   branch_id?: string | null;
@@ -801,6 +804,7 @@ export interface PoolStudentInsert {
 
 export interface UserUpdate {
   email?: string;
+  username?: string | null;
   name?: string;
   role?: UserRole;
   branch_id?: string | null;

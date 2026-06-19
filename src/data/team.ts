@@ -21,6 +21,7 @@ export interface TeamTableRow {
   branchId: string | null;
   branchName: string;
   email: string;
+  username: string | null;
   cvUrl: string | null;
   role: UserRole;
   employedDate: string | null;
@@ -87,6 +88,7 @@ export async function getTeamMembersForTable(
       city,
       branch_id,
       email,
+      username,
       cv_url,
       role,
       employed_date,
@@ -122,6 +124,7 @@ export async function getTeamMembersForTable(
     branchId: user.branch_id,
     branchName: useCityName ? (user.branch?.city || user.branch?.name || 'No Branch') : (user.branch?.name || 'No Branch'),
     email: user.email,
+    username: user.username || null,
     cvUrl: user.cv_url || null,
     role: user.role as UserRole,
     employedDate: user.employed_date || null,

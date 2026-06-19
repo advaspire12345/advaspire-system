@@ -21,6 +21,7 @@ import { HexagonNumberBadge } from "@/components/ui/hexagon-number-badge";
 import Image from "next/image";
 import type { TeamTableRow } from "@/data/team";
 import type { UserRole, TeamMemberStatus } from "@/db/schema";
+import { notify } from "@/lib/notify";
 
 interface BranchOption {
   id: string;
@@ -31,6 +32,7 @@ interface BranchOption {
 export interface TeamMemberFormData {
   name: string;
   email: string;
+  username: string;
   password: string;
   phone: string | null;
   address: string | null;
@@ -57,6 +59,9 @@ interface TeamModalProps {
   onAdd: (data: TeamMemberFormData) => Promise<void>;
   onEdit: (data: TeamMemberFormData) => Promise<void>;
   onDelete: () => Promise<void>;
+  onResetPassword?: (
+    userId: string
+  ) => Promise<{ success: boolean; error?: string; newPassword?: string }>;
 }
 
 const ALL_ROLE_OPTIONS: { value: UserRole; label: string }[] = [
@@ -75,6 +80,7 @@ const STATUS_OPTIONS: { value: TeamMemberStatus; label: string }[] = [
 const initialFormData: TeamMemberFormData = {
   name: "",
   email: "",
+  username: "",
   password: "",
   phone: null,
   address: null,
@@ -101,6 +107,7 @@ export function TeamModal({
   onAdd,
   onEdit,
   onDelete,
+  onResetPassword,
 }: TeamModalProps) {
   // Filter role options based on current user's role
   const roleOptions = useMemo(() => {
@@ -134,7 +141,9 @@ export function TeamModal({
   }, [branches, currentUserRole, currentUserBranchId]);
   const [formData, setFormData] = useState<TeamMemberFormData>(initialFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
 
@@ -169,6 +178,7 @@ export function TeamModal({
         setFormData({
           name: record.name,
           email: record.email,
+          username: record.username ?? "",
           password: "",
           phone: record.phone,
           address: record.address,
@@ -191,8 +201,35 @@ export function TeamModal({
         });
       }
       setError(null);
+      setResetMessage(null);
     }
   }, [open, mode, record]);
+
+  const handleResetPassword = async () => {
+    if (!record || !onResetPassword) return;
+    if (!window.confirm("Reset this member's password to their username?")) return;
+
+    setIsResettingPassword(true);
+    setError(null);
+    setResetMessage(null);
+    try {
+      const result = await onResetPassword(record.id);
+      if (result.success && result.newPassword) {
+        notify.success(`Password reset to: ${result.newPassword}`);
+        setResetMessage(`Password reset to: ${result.newPassword}`);
+      } else {
+        const message = result.error || "Failed to reset password";
+        notify.error(message);
+        setError(message);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to reset password";
+      notify.error(message);
+      setError(message);
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -428,6 +465,32 @@ export function TeamModal({
               />
             )}
 
+            {/* Username (optional login alias) */}
+            {isReadonly ? (
+              <div className="relative">
+                <input
+                  type="text"
+                  readOnly
+                  value={record?.username ?? "-"}
+                  className="peer w-full h-[58px] rounded-[10px] border border-[#ADAFCA] px-4 text-base font-bold text-foreground bg-muted/50 cursor-not-allowed opacity-70"
+                />
+                <label className="pointer-events-none absolute -top-2.5 left-3 bg-white px-1 text-xs font-bold text-[#ADAFCA]">
+                  Username
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <FloatingInput
+                  label="Username"
+                  value={formData.username}
+                  onChange={(e) => updateField("username", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground px-1">
+                  Staff can log in with username or email.
+                </p>
+              </div>
+            )}
+
             {/* Password - Only shown in add mode */}
             {mode === "add" && (
               <FloatingInput
@@ -628,6 +691,26 @@ export function TeamModal({
               />
             )}
           </div>
+
+          {/* Reset password (edit mode only) */}
+          {mode === "edit" && onResetPassword && record && (
+            <div className="mt-8">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleResetPassword}
+                disabled={isResettingPassword}
+                className="w-full h-[50px] font-bold rounded-[10px]"
+              >
+                {isResettingPassword ? "Resetting..." : "Reset password"}
+              </Button>
+              {resetMessage && (
+                <div className="mt-3 rounded-lg bg-[#23D2E2]/10 p-3 text-sm font-semibold text-[#18a9b8]">
+                  {resetMessage}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">

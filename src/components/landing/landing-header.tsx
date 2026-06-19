@@ -123,21 +123,9 @@ export function LandingHeader() {
           </div>
         </div>
 
-        {/* Mobile/Tablet Actions */}
+        {/* Mobile/Tablet Actions — only the burger; everything else lives in
+            the sheet so the bar stays clean (logo + burger). */}
         <div className="flex items-center gap-2 lg:hidden">
-          {/* Mobile Search */}
-          <button className="flex size-10 items-center justify-center text-white/60">
-            <Search className="size-5" />
-          </button>
-
-          {/* Mobile Notifications */}
-          <button className="relative flex size-10 items-center justify-center text-white/60">
-            <Bell className="size-5" />
-            <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-[#23d2e2] text-[10px] font-bold text-white">
-              5
-            </span>
-          </button>
-
           {/* Mobile Menu */}
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <SheetTrigger asChild>
@@ -175,7 +163,18 @@ export function LandingHeader() {
 
                 {/* Mobile Actions */}
                 <div className="flex flex-col gap-4 p-6">
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-wrap items-center gap-4">
+                    {/* Search (moved from the bar) */}
+                    <button className="flex size-12 items-center justify-center rounded-lg bg-[#4e4f6e] text-white/60">
+                      <Search className="size-5" />
+                    </button>
+                    {/* Notifications (moved from the bar) */}
+                    <button className="relative flex size-12 items-center justify-center rounded-lg bg-[#4e4f6e] text-white/60">
+                      <Bell className="size-5" />
+                      <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-[#23d2e2] text-[10px] font-bold text-white">
+                        5
+                      </span>
+                    </button>
                     <button className="relative flex size-12 items-center justify-center rounded-lg bg-[#4e4f6e] text-white/60">
                       <MessageCircle className="size-5" />
                       <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-[#23d2e2] text-[10px] font-bold text-white">

@@ -27,6 +27,8 @@ import type { CustomRole, PermissionsMap } from "@/db/schema";
 export interface TeamMemberFormPayload {
   name: string;
   email: string;
+  /** Optional login alias — staff may log in with username OR email. */
+  username?: string | null;
   password?: string;
   phone: string | null;
   address: string | null;
@@ -86,6 +88,7 @@ export async function createTeamMemberAction(
     const userData: UserInsert = {
       name: payload.name,
       email: payload.email,
+      username: payload.username?.trim() || null,
       auth_id: authData.user.id,
       phone: payload.phone || null,
       address: payload.address || null,
@@ -136,6 +139,7 @@ export async function updateTeamMemberAction(
     const updateData: UserUpdate = {
       name: payload.name,
       email: payload.email,
+      username: payload.username?.trim() || null,
       phone: payload.phone || null,
       address: payload.address || null,
       branch_id: payload.branchId || null,
@@ -168,6 +172,41 @@ export async function updateTeamMemberAction(
     return { success: true };
   } catch (error) {
     console.error("Error in updateTeamMemberAction:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
+/**
+ * Reset a team member's password to their username (fallback: their email if no
+ * username). Sets the Supabase Auth password directly. Returns the new password
+ * so the admin can relay it.
+ */
+export async function resetTeamMemberPasswordAction(
+  userId: string
+): Promise<{ success: boolean; error?: string; newPassword?: string }> {
+  try {
+    await authorizeAction("team", "can_edit");
+    const { data: u } = await supabaseAdmin
+      .from("users")
+      .select("auth_id, username, email")
+      .eq("id", userId)
+      .single();
+    if (!u?.auth_id) {
+      return { success: false, error: "This member has no login account to reset." };
+    }
+    const newPassword = (u.username?.trim() || u.email) as string;
+    if (!newPassword) {
+      return { success: false, error: "No username or email available to reset to." };
+    }
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(u.auth_id, {
+      password: newPassword,
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true, newPassword };
+  } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "An unexpected error occurred",

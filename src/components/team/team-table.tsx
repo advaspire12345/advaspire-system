@@ -38,6 +38,7 @@ interface TeamTableProps {
   onAdd?: (payload: TeamMemberFormPayload) => Promise<{ success: boolean; error?: string }>;
   onEdit?: (userId: string, payload: TeamMemberFormPayload) => Promise<{ success: boolean; error?: string }>;
   onDelete?: (userId: string) => Promise<{ success: boolean; error?: string }>;
+  onResetPassword?: (userId: string) => Promise<{ success: boolean; error?: string; newPassword?: string }>;
   onSavePermissions?: (
     userId: string,
     permissions: { resource: PermissionResource; can_view: boolean; can_create: boolean; can_edit: boolean; can_delete: boolean }[]
@@ -105,6 +106,7 @@ export function TeamTable({
   onAdd,
   onEdit,
   onDelete,
+  onResetPassword,
   onSavePermissions,
   onLoadPermissions,
   canEditRolePermissions,
@@ -142,6 +144,7 @@ export function TeamTable({
   const convertToPayload = (formData: TeamMemberFormData, includePassword = false): TeamMemberFormPayload => ({
     name: formData.name,
     email: formData.email,
+    username: formData.username?.trim() || null,
     ...(includePassword && formData.password ? { password: formData.password } : {}),
     phone: formData.phone,
     address: formData.address,
@@ -541,6 +544,7 @@ export function TeamTable({
         onAdd={handleAdd}
         onEdit={handleEdit}
         onDelete={handleDelete}
+        onResetPassword={onResetPassword}
       />
 
       {/* CV Preview Modal */}
