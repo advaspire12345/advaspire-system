@@ -376,8 +376,11 @@ export function StudentAttendanceModal({
           const lessons = await fetchCurriculumLessons(courseId);
           setCurriculumLessons(lessons);
         } else {
-          // Fetch from API
-          const response = await fetch(`/api/curriculum?courseId=${courseId}`);
+          // Fetch from API (no-store: always reflect the live lesson catalog,
+          // which syncs from the Hub — codes/titles can change there).
+          const response = await fetch(`/api/curriculum?courseId=${courseId}`, {
+            cache: "no-store",
+          });
           if (response.ok) {
             const data = await response.json();
             setCurriculumLessons(data.lessons || []);

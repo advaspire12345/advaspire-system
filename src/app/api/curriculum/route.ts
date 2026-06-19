@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurriculumLessonsForCourse } from "@/data/programs";
 
+// Always read the live lesson catalog (it syncs from the Hub — codes/titles change).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();

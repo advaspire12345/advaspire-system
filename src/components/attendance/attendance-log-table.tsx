@@ -550,7 +550,7 @@ export function AttendanceLogTable({
                     type="button"
                     onClick={() => handleStatusFilter(filter)}
                     className={cn(
-                      "relative px-10 py-2 text-sm font-bold transition-colors",
+                      "relative px-4 sm:px-10 py-2 text-sm font-bold transition-colors",
                       statusFilter === filter
                         ? "text-foreground"
                         : "text-[#8B8FB9] hover:text-foreground/70",
@@ -558,7 +558,9 @@ export function AttendanceLogTable({
                   >
                     {filter}
                     {statusFilter === filter && (
-                      <span className="absolute -bottom-[30px] left-0 right-0 h-[3px] rounded bg-[#23D2E2]" />
+                      // On mobile the row stacks, so keep the underline close to the
+                      // tab; the -30px desktop offset would overlap the date filter.
+                      <span className="absolute -bottom-2 sm:-bottom-[30px] left-0 right-0 h-[3px] rounded bg-[#23D2E2]" />
                     )}
                   </button>
                   {idx === STATUS_FILTERS.length - 1 && (
