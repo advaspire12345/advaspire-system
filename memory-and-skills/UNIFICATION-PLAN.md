@@ -198,6 +198,18 @@ projects** with 2 different login systems.
       `school_id→branch_id`, student `user_id→student_id`, `classes/class_members→course_slots/slot_students`,
       Hub→LMS role literals. 6 open decisions (esp. **provisioning ownership** — does the Hub still
       create students/branches, or does the LMS own that now).
+  - [x] **D3-login. FIXED 2026-06-20.** Hub `app/dashboard/login/actions.ts` could not log staff
+        in by **username** post-unification: it *guessed* the auth email by suffix
+        (`<id>@staff.advaspire.com` / `@student.advaspire.com` / `@advaspire-learning.com`), which
+        only works for synthetic-email accounts. Migrated/original LMS staff keep **real** emails
+        (e.g. `myzhenhao@gmail.com`, `smartlearning@advaspire.com`), so the guess missed and only
+        the LMS (which resolves `users.username→email`) worked. Fix mirrors the LMS: resolve the
+        identifier to the real auth email via the **service-role admin client** (RLS-safe pre-login)
+        against `users.username` (staff) + `students.username`/`students.student_id` (students),
+        then fall back to the suffix guesses; full-email input still used as-is. Verified live
+        (`myzhenhao` login confirmed working) + `tsc --noEmit` exit 0. **Note:** username-NULL
+        accounts (e.g. super_admin `advaspire@gmail.com`) still log in by **email only** until an
+        admin assigns a username (per decision #10).
 
 ## App-split architecture — DECIDED 2026-06-19
 **Hub (`learn.`) = learning domain:** student learning portal (lessons, progress, assessments,
