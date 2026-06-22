@@ -2,7 +2,16 @@
 
 > **Status:** PLAN ONLY — decision record + step-by-step flow. **Nothing is amended
 > until Part C.** Parts A–B are non-destructive (inventory, backups, design).
-> **Last updated:** 2026-06-16.
+> **Last updated:** 2026-06-22.
+
+> **🌐 Domain decision (2026-06-22):** the root domain is **`advaspire.io`** (the `.com`
+> is used for an unrelated purpose). Subdomains: **`app.advaspire.io` = LMS**,
+> **`learn.advaspire.io` = Hub**; shared cookie domain **`.advaspire.io`**.
+> ⚠️ **The synthetic auth-email suffixes `@student.advaspire.com` / `@staff.advaspire.com`
+> are deliberately UNCHANGED** — they are internal, never-delivered login identifiers
+> already minted into `auth.users` (C3/C4, decisions #8/#9). They are independent of the
+> web domain; rewriting them would break login for the 397 students + 7 staff already
+> created. Only web/cookie/subdomain references were migrated to `.io`.
 
 ## 1. The decision (ADR)
 
@@ -18,14 +27,14 @@ projects** with 2 different login systems.
 - **Consolidate onto 1 Supabase** = the **LMS Supabase project** becomes the single
   **identity authority** and shared database. It has the richer role/org model and
   hosts the teacher experience.
-- **Serve both apps on subdomains of one root domain** (e.g. `app.advaspire.com` +
-  `learn.advaspire.com`) so the Supabase **auth cookie is shared at `.advaspire.com`**
+- **Serve both apps on subdomains of one root domain** (`app.advaspire.io` +
+  `learn.advaspire.io`) so the Supabase **auth cookie is shared at `.advaspire.io`**
   → true single sign-on, no redirect handshake.
 - The **unified teacher dashboard lives in the LMS app**, reading progress from the
   shared DB.
 
 **Confirmed inputs (2026-06-16):**
-- One parent domain + subdomains: **`app.advaspire.com` = LMS**, **`learn.advaspire.com` = Learning Hub**.
+- One parent domain + subdomains: **`app.advaspire.io` = LMS**, **`learn.advaspire.io` = Learning Hub**.
 - Both projects are in development **but contain real data** (migrate carefully, no throwaway).
 - Teacher home = LMS app. Hosting = Vercel.
 - **LMS `students` is the master record of students** — every Hub student must resolve
@@ -41,15 +50,15 @@ projects** with 2 different login systems.
 ## 2. Target architecture
 
 ```
-                          one root domain: advaspire.com
+                          one root domain: advaspire.io
                   ┌──────────────────────────┴──────────────────────────┐
-        app.advaspire.com (Vercel proj A)              learn.advaspire.com (Vercel proj B)
+        app.advaspire.io (Vercel proj A)              learn.advaspire.io (Vercel proj B)
             advaspire-system  (LMS)                       advaslearning-hub  (content + progress)
             attendance · payments · exams                 9 courses · lessons · progress · assessment
                   │                                                   │
                   └───────────────┬───────────────────────────────────┘
                        shared @supabase/ssr client
-                       cookie domain = ".advaspire.com"   ← single login
+                       cookie domain = ".advaspire.io"   ← single login
                                   │
                     ┌─────────────┴──────────────┐
                     │   ONE Supabase project       │   ← was the LMS project
@@ -190,8 +199,22 @@ projects** with 2 different login systems.
 
 - [x] **D1. DONE (2026-06-19).** Hub `.env.local` repointed → LMS project
       (`kbzrdsxzzqzbxqgwpsuq`): URL, publishable key, service-role key all swapped to advaspire-system.
-- [ ] **D2.** Set the Hub's `@supabase/ssr` client **cookie domain = `.advaspire.com`**
-      (and do the same in the LMS client) so the session cookie is shared.
+- [x] **D2. Cookie-domain code DONE (2026-06-22) in BOTH apps.** Added a shared
+      `lib/supabase/cookie-options.ts` → `getSupabaseCookieOptions()` returning
+      `{ domain }` only when **`NEXT_PUBLIC_COOKIE_DOMAIN`** is set (else `undefined` so
+      `localhost`/`*.vercel.app` stay host-only and local login keeps working). Wired into
+      all 3 SSR client sites per app via `cookieOptions:` — LMS: `src/lib/supabase/{server,client,proxy}.ts`;
+      Hub: `lib/supabase/{server,client,middleware}.ts`. `@supabase/ssr@0.8.0` merges this
+      over `DEFAULT_COOKIE_OPTIONS` so `path:'/'`/`sameSite:'lax'` are preserved. Both apps
+      `tsc --noEmit` exit 0. **Activated by setting the env in F2** (no domain ⇒ no behavior change).
+      ⚠️ **Env name is `NEXT_PUBLIC_COOKIE_DOMAIN`, not `COOKIE_DOMAIN`** — the browser client
+      needs it inlined at build time, and server+browser cookie domains MUST match or two
+      competing cookies are written (logout loops).
+      ⚠️ **Student-portal SSO gap (open):** the LMS student portal authenticates with its own
+      custom-JWT `student_token` cookie (`src/lib/student-auth.ts`), NOT the Supabase cookie, so
+      it does **not** participate in this shared-cookie SSO. Per the app-split decision students
+      live on the Hub (Supabase auth) — fine for F3's teacher/admin flow, but unifying the LMS
+      student portal onto Supabase auth (or domain-scoping `student_token`) is a separate decision.
 - [ ] **D3.** Update Hub queries to the unified schema. **SCOPED 2026-06-19** →
       [`PART-D-change-list.md`](PART-D-change-list.md): ~370 sites / ~30 files. Core change is a
       two-source auth resolver (student via `students.auth_id`, staff via `users.auth_id`) +
@@ -252,11 +275,36 @@ level, position; public-read) = **1028 lessons / 10 courses** (robotics seeded v
 
 ## PART F — Domains, Vercel, single-login verification
 
-- [ ] **F1.** Vercel: keep **two projects**; assign `app.advaspire.com` (LMS) and
-      `learn.advaspire.com` (Hub). Configure DNS (CNAME → Vercel).
-- [ ] **F2.** Set the shared `COOKIE_DOMAIN=.advaspire.com` env in both Vercel projects.
-- [ ] **F3.** End-to-end: log in on `app.`, open `learn.` in the same browser → already
-      authenticated. Test for all four mapped roles.
+> **Prereq DONE:** the cookie-domain code (D2) is live in both apps and dormant until the
+> env in F2 is set. **F1/F3 require actions outside this repo** (domain registrar + Vercel
+> dashboard + a real browser against the deployed subdomains), so they're owner-executed;
+> the exact values/records are spelled out below.
+
+- [ ] **F0. Buy `advaspire.io`** at a registrar (the `.com` is used elsewhere — decided 2026-06-22).
+
+- [ ] **F1. Vercel domains + DNS.** Keep **two projects**; assign `app.advaspire.io` → LMS
+      project, `learn.advaspire.io` → Hub project (Vercel → Project → Settings → Domains → Add).
+      Then add the DNS records Vercel shows. Typical:
+      - `CNAME  app    → cname.vercel-dns.com`
+      - `CNAME  learn  → cname.vercel-dns.com`
+      (use the exact target Vercel displays; if the apex is needed later, Vercel gives an A record).
+      Wait for "Valid Configuration" + issued TLS cert on both.
+      ⚠️ Both must be **true subdomains of `advaspire.io`** — `*.vercel.app` preview URLs can NOT
+      share the cookie, so SSO only works once the custom domains are live.
+
+- [ ] **F2. Set the shared cookie-domain env in BOTH Vercel projects** (Production scope):
+      `NEXT_PUBLIC_COOKIE_DOMAIN=.advaspire.io` (leading dot; **not** `COOKIE_DOMAIN` — the
+      browser bundle needs the `NEXT_PUBLIC_` prefix, see D2). Also set `NEXT_PUBLIC_LEARN_URL=https://learn.advaspire.io`
+      on the LMS project (Part E deep-links). **Redeploy both** so the new env is baked into the
+      client bundles. Leave the env UNSET in dev/Preview so `localhost` login keeps working.
+
+- [ ] **F3. End-to-end SSO smoke test** (real browser, deployed subdomains): log in on
+      `https://app.advaspire.io`, then open `https://learn.advaspire.io` in the same browser →
+      should be **already authenticated** (no second login). Verify in DevTools that the Supabase
+      `sb-*-auth-token` cookie shows **Domain = `.advaspire.io`** (one cookie, not two). Repeat for
+      the mapped staff roles (super_admin, company_admin/`school-admin`, instructor/`school-teacher`).
+      Student SSO is via the Hub's Supabase auth — the LMS student portal's custom `student_token`
+      is out of scope (see D2 caveat).
 
 ## PART G — Cutover & retire
 
@@ -274,13 +322,13 @@ level, position; public-read) = **1028 lessons / 10 courses** (robotics seeded v
   (B4) before any prod data lands; verify with a per-role smoke test.
 - **FK rewrites** (school_id→branch_id, user-id remap) are error-prone. Mitigation:
   idempotent ETL, dry-run on staging, row-count + spot-check gates (C5).
-- **Cookie domain** must be a registrable parent (`.advaspire.com`), and both apps must
+- **Cookie domain** must be a registrable parent (`.advaspire.io`), and both apps must
   be true subdomains — not `*.vercel.app` previews (those can't share the cookie).
 
 ## Decisions log
 | # | Question | Decision (2026-06-16) |
 |---|---|---|
-| 1 | Subdomains | `app.advaspire.com` = LMS, `learn.advaspire.com` = Hub |
+| 1 | Subdomains | `app.advaspire.io` = LMS, `learn.advaspire.io` = Hub (domain `.io` chosen 2026-06-22; `.com` was in use elsewhere) |
 | 2 | User import / passwords | Dedup by **student ID**; skip if exists, else create with password=username |
 | 4 | School ↔ branch | Hub school links to an **existing** LMS branch |
 | 5 | Student overlap | **LMS `students` is master**; every Hub student must resolve to an LMS student |
@@ -364,7 +412,7 @@ Live read-only inventory of both projects in org `advaspire` (`dlvmwdtgjkhtnkdzj
 
 ## Auth & identity strategy — DECIDED 2026-06-18
 
-**Goal:** one Supabase auth for *all* personas (staff, parents, students — both apps), enabling the shared `.advaspire.com` cookie SSO.
+**Goal:** one Supabase auth for *all* personas (staff, parents, students — both apps), enabling the shared `.advaspire.io` cookie SSO.
 
 **1. Onboard the 370 existing LMS students into `auth.users` (NEW migration sub-step, LMS-side).**
 - They have `password_hash` today and are NOT in `auth.users`. 369/370 have no username and none have an email.
