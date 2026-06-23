@@ -273,16 +273,16 @@ level, position; public-read) = **1028 lessons / 10 courses** (robotics seeded v
 - Follow-ups: Courses table "Lessons" count still reads legacy `course_lessons` (shows 0 for catalog
   courses); `curriculum-builder.tsx` now unused; Hub lesson-management should write to `lessons` (sync).
 
-## PART F — Domains, Vercel, single-login verification
+## PART F — Domains, Vercel, single-login verification ✅ COMPLETE (2026-06-23)
 
-> **Prereq DONE:** the cookie-domain code (D2) is live in both apps and dormant until the
-> env in F2 is set. **F1/F3 require actions outside this repo** (domain registrar + Vercel
-> dashboard + a real browser against the deployed subdomains), so they're owner-executed;
-> the exact values/records are spelled out below.
+> **DONE:** `advaspire.io` bought; both subdomains live on Vercel with TLS; `NEXT_PUBLIC_COOKIE_DOMAIN=.advaspire.io`
+> set + both projects redeployed; SSO verified end-to-end across all mapped staff roles
+> (instructor via agent-browser, super_admin + company_admin/school-admin confirmed by owner).
+> The cookie-domain code (D2) + F2 env are live in production. **Next: Part G (soak + retire old Hub Supabase).**
 
-- [ ] **F0. Buy `advaspire.io`** at a registrar (the `.com` is used elsewhere — decided 2026-06-22).
+- [x] **F0. Bought `advaspire.io`** (the `.com` is used elsewhere — decided 2026-06-22).
 
-- [ ] **F1. Vercel domains + DNS.** Keep **two projects**; assign `app.advaspire.io` → LMS
+- [x] **F1. Vercel domains + DNS — DONE.** Two projects; `app.advaspire.io` → LMS
       project, `learn.advaspire.io` → Hub project (Vercel → Project → Settings → Domains → Add).
       Then add the DNS records Vercel shows. Typical:
       - `CNAME  app    → cname.vercel-dns.com`
@@ -292,19 +292,24 @@ level, position; public-read) = **1028 lessons / 10 courses** (robotics seeded v
       ⚠️ Both must be **true subdomains of `advaspire.io`** — `*.vercel.app` preview URLs can NOT
       share the cookie, so SSO only works once the custom domains are live.
 
-- [ ] **F2. Set the shared cookie-domain env in BOTH Vercel projects** (Production scope):
+- [x] **F2. Shared cookie-domain env set in BOTH Vercel projects + redeployed — DONE** (Production scope):
       `NEXT_PUBLIC_COOKIE_DOMAIN=.advaspire.io` (leading dot; **not** `COOKIE_DOMAIN` — the
       browser bundle needs the `NEXT_PUBLIC_` prefix, see D2). Also set `NEXT_PUBLIC_LEARN_URL=https://learn.advaspire.io`
       on the LMS project (Part E deep-links). **Redeploy both** so the new env is baked into the
       client bundles. Leave the env UNSET in dev/Preview so `localhost` login keeps working.
 
-- [ ] **F3. End-to-end SSO smoke test** (real browser, deployed subdomains): log in on
-      `https://app.advaspire.io`, then open `https://learn.advaspire.io` in the same browser →
-      should be **already authenticated** (no second login). Verify in DevTools that the Supabase
-      `sb-*-auth-token` cookie shows **Domain = `.advaspire.io`** (one cookie, not two). Repeat for
-      the mapped staff roles (super_admin, company_admin/`school-admin`, instructor/`school-teacher`).
-      Student SSO is via the Hub's Supabase auth — the LMS student portal's custom `student_token`
-      is out of scope (see D2 caveat).
+- [x] **F3. End-to-end SSO smoke test — VERIFIED across all mapped staff roles (2026-06-23).**
+      Instructor verified via agent-browser: logged in on `https://app.advaspire.io` as `teacher-kepong`
+      (→ landed `/attendance`), then opened `https://learn.advaspire.io/dashboard` in the **same** browser
+      → loaded **fully authenticated as "Teacher Kepong"**, no second login, no redirect. Cookie check:
+      `sb-kbzrdsxzzqzbxqgwpsuq-auth-token` has **`domain=.advaspire.io`**, `path=/`, `sameSite=Lax` — one
+      shared cookie. Screenshot: `f3-sso-hub-authenticated.png`. **super_admin + company_admin/`school-admin`
+      confirmed working by owner.** ✅ D2 cookie-sharing code + F2 env confirmed live in both prod deploys.
+      Student SSO is via the Hub's Supabase auth — the LMS student portal's custom `student_token` is out
+      of scope (see D2 caveat).
+      - ⚠️ **Minor hardening (deferred, not blocking):** the auth cookie is `secure=false`. It works over
+            HTTPS same-site, but consider setting `secure: true` in prod (via the SSR `cookieOptions`) so it's
+            never sent over plain HTTP.
 
 ## PART G — Cutover & retire
 
