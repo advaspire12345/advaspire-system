@@ -328,9 +328,9 @@ engine, so progression is now **manual**.
       confirmed working by owner.** ✅ D2 cookie-sharing code + F2 env confirmed live in both prod deploys.
       Student SSO is via the Hub's Supabase auth — the LMS student portal's custom `student_token` is out
       of scope (see D2 caveat).
-      - ⚠️ **Minor hardening (deferred, not blocking):** the auth cookie is `secure=false`. It works over
-            HTTPS same-site, but consider setting `secure: true` in prod (via the SSR `cookieOptions`) so it's
-            never sent over plain HTTP.
+      - ✅ **Cookie hardening DONE (2026-06-23):** `getSupabaseCookieOptions()` (both apps) now returns
+            `secure:true` whenever `NEXT_PUBLIC_COOKIE_DOMAIN` is set, so the prod `.advaspire.io` cookie is
+            HTTPS-only; left off in dev so localhost works. Takes effect on next deploy (one re-login expected).
 
 ## PART G — Cutover & retire
 
@@ -346,6 +346,18 @@ engine, so progression is now **manual**.
       without breaking RLS), leaked-password toggle, `program-covers` bucket listing, `pg_trgm` in
       public, and perf INFOs (unindexed FKs / unused indexes / 2 duplicate indexes / no-PK on
       `role_hierarchy` / 9 multiple-permissive on migrated Hub tables) — revisit after soak.
+- [x] **G0b. Advisor cleanup pass 2 — DONE (2026-06-23)** via migration `advisor_cleanup`. Added covering
+      indexes for all unindexed FK columns; dropped 5 redundant duplicate indexes; added a PK to `role_hierarchy`;
+      merged the 9 multiple-permissive RLS policy pairs (staff+student) into single OR'd policies
+      (semantics-preserved). **Result: performance advisor now has 0 WARNINGS** (was 11). Remaining perf findings
+      are all INFO `unused_index` (count rose to ~120 only because the newly-added FK indexes read as "unused"
+      until queries exercise them — benign; do NOT drop). Security WARNs are the irreducible set: 52×
+      `*_security_definer_function_executable` (required for RLS to call the helper fns — not fixable without
+      breaking auth), `extension_in_public`/pg_trgm (risky to move, left), plus 2 owner-actions below.
+      **Owner dashboard actions (cannot be done via SQL/code):**
+      - [ ] Enable **Leaked Password Protection** (Auth settings). ⚠️ may block accounts whose password ==
+            student_id/username on next change.
+      - [ ] **`program-covers`** bucket: disable public listing (Storage settings) if object enumeration is a concern.
 - [ ] **G1.** Soak on the subdomains; monitor auth + RLS errors.
 - [ ] **G2.** Decommission the old `advaspire-learning` Supabase project (after a
       retention window with backups kept).
