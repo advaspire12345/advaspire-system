@@ -15,10 +15,14 @@
  * server/browser cookie domains MUST match or two competing cookies are written
  * (→ logout loops).
  *
- * Only `domain` is set here; `@supabase/ssr` merges it over `DEFAULT_COOKIE_OPTIONS`
+ * When the cookie domain is set we also mark the cookie `secure` (it only ever
+ * travels over HTTPS in production); we deliberately leave it unset in dev so the
+ * cookie still works over plain-HTTP `localhost`.
+ *
+ * `domain`/`secure` are merged by `@supabase/ssr` over `DEFAULT_COOKIE_OPTIONS`
  * (`path:"/"`, `sameSite:"lax"`, `maxAge`), so those defaults are preserved.
  */
-export function getSupabaseCookieOptions(): { domain: string } | undefined {
+export function getSupabaseCookieOptions(): { domain: string; secure: boolean } | undefined {
   const domain = process.env.NEXT_PUBLIC_COOKIE_DOMAIN?.trim();
-  return domain ? { domain } : undefined;
+  return domain ? { domain, secure: true } : undefined;
 }
