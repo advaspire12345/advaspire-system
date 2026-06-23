@@ -21,7 +21,6 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   branches: "Branches",
   trials: "Trial",
   students: "Student",
-  examinations: "Examination",
   programs: "Courses",
   slots: "Slot",
   vouchers: "Voucher",

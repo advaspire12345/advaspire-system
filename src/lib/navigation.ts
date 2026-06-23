@@ -13,7 +13,6 @@ import {
   GraduationCap,
   LineChart,
   Users,
-  Award,
   Ticket,
   Upload,
   CalendarDays,
@@ -59,12 +58,6 @@ export const navigationItems: NavItem[] = [
     icon: FileUser,
     href: "/student",
     resource: "students",
-  },
-  {
-    title: "Examination",
-    icon: Award,
-    href: "/examination",
-    resource: "examinations",
   },
   {
     title: "Student Progress",

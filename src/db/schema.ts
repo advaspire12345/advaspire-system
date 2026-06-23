@@ -1741,132 +1741,6 @@ export interface ProgramFull extends CourseExtended {
 }
 
 // ============================================
-// EXAMINATION TYPES
-// ============================================
-
-export type ExaminationStatus = 'eligible' | 'scheduled' | 'in_progress' | 'pass' | 'fail' | 'absent';
-
-/**
- * Examination - Tracks student exam records
- */
-export interface Examination {
-  id: string;
-  student_id: string;
-  enrollment_id: string | null;
-  exam_name: string;
-  exam_level: number;
-  reattempt_count: number;
-  mark: number | null;
-  notes: string | null;
-  examiner_id: string | null;
-  exam_date: string;
-  certificate_url: string | null;
-  certificate_number: string | null;
-  status: ExaminationStatus;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-}
-
-export interface ExaminationInsert {
-  student_id: string;
-  enrollment_id?: string | null;
-  exam_name: string;
-  exam_level?: number;
-  reattempt_count?: number;
-  mark?: number | null;
-  notes?: string | null;
-  examiner_id?: string | null;
-  exam_date: string;
-  certificate_url?: string | null;
-  certificate_number?: string | null;
-  status?: ExaminationStatus;
-}
-
-export interface ExaminationUpdate {
-  exam_name?: string;
-  exam_level?: number;
-  reattempt_count?: number;
-  mark?: number | null;
-  notes?: string | null;
-  examiner_id?: string | null;
-  exam_date?: string;
-  certificate_url?: string | null;
-  certificate_number?: string | null;
-  status?: ExaminationStatus;
-}
-
-/**
- * ExaminationTableRow - Flattened view for the examination table
- */
-export interface ExaminationTableRow {
-  id: string;
-  studentId: string;
-  studentName: string;
-  studentPhoto: string | null;
-  studentAge: number | null;
-  branchId: string;
-  branchName: string;
-  courseId: string;
-  courseName: string;
-  sessionAttend: number;
-  currentLevel: number;
-  examName: string;
-  examLevel: number;
-  reattemptCount: number;
-  mark: number | null;
-  notes: string | null;
-  examinerId: string | null;
-  examinerName: string | null;
-  examinerPhoto: string | null;
-  examDate: string;
-  certificateUrl: string | null;
-  certificateNumber: string | null;
-  status: ExaminationStatus;
-}
-
-/**
- * EligibleStudent - Student eligible for examination
- */
-export interface EligibleStudent {
-  studentId: string;
-  studentName: string;
-  studentPhoto: string | null;
-  dateOfBirth: string | null;
-  branchId: string;
-  branchName: string;
-  enrollmentId: string;
-  courseId: string;
-  courseName: string;
-  currentLevel: number;
-  sessionsAttended: number;
-  sessionsRequired: number;
-}
-
-/**
- * StudentExamOption - Student with enrollments for exam selection
- */
-export interface StudentExamEnrollment {
-  enrollmentId: string;
-  courseId: string;
-  courseName: string;
-  currentLevel: number;
-  sessionsAttended: number;
-  sessionsRequired: number;
-  isEligible: boolean;
-}
-
-export interface StudentExamOption {
-  studentId: string;
-  studentName: string;
-  studentPhoto: string | null;
-  dateOfBirth: string | null;
-  branchId: string;
-  branchName: string;
-  enrollments: StudentExamEnrollment[];
-}
-
-// ============================================
 // PERMISSION TYPES
 // ============================================
 
@@ -1876,7 +1750,6 @@ export type PermissionResource =
   | 'branches'
   | 'trials'
   | 'students'
-  | 'examinations'
   | 'programs'
   | 'slots'
   | 'vouchers'
@@ -1898,7 +1771,6 @@ export const ALL_RESOURCES: PermissionResource[] = [
   'branches',
   'trials',
   'students',
-  'examinations',
   'programs',
   'slots',
   'vouchers',

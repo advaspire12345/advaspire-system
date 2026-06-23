@@ -783,11 +783,6 @@ export interface AttendanceTableRow {
   lastActivities: { lesson: string; mission: string }[] | null;
   lastAdcoin: number;
   sessionsRemaining: number;
-  // Whether student has an active exam for this enrollment
-  hasExam: boolean;
-  // The level of the active exam (1..N) — surfaced so the mark-attendance modal
-  // can pre-populate the mission dropdown when lesson="Exam"
-  examLevel?: number | null;
   // Type to distinguish between enrollment and trial
   type: 'enrollment' | 'trial';
   // Trial-specific fields
@@ -914,26 +909,6 @@ export async function getEnrollmentsForAttendance(
     if (branchIds && !branchIds.includes(studentData.branch_id)) return false;
     return true;
   });
-
-  // Fetch active exams for all enrollments to mark "Exam" badge + carry exam_level for mission dropdown
-  const enrollmentIds = filteredData.map((e) => e.id);
-  const activeExamEnrollmentIds = new Set<string>();
-  const examLevelByEnrollment = new Map<string, number>();
-  if (enrollmentIds.length > 0) {
-    const { data: activeExams } = await supabaseAdmin
-      .from('examinations')
-      .select('enrollment_id, exam_level, status')
-      .in('enrollment_id', enrollmentIds)
-      .is('deleted_at', null)
-      .in('status', ['eligible', 'scheduled', 'in_progress']);
-
-    for (const exam of activeExams ?? []) {
-      if (exam.enrollment_id) {
-        activeExamEnrollmentIds.add(exam.enrollment_id);
-        examLevelByEnrollment.set(exam.enrollment_id, exam.exam_level);
-      }
-    }
-  }
 
   // Pre-fetch pool sibling counts and join order for pooled enrollments
   const poolSiblingCountMap = new Map<string, number>();
@@ -1226,8 +1201,6 @@ export async function getEnrollmentsForAttendance(
         lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
-        hasExam: activeExamEnrollmentIds.has(enrollment.id),
-        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         // Include existing attendance data if partially filled
         existingAttendance: slotAttendance ? {
@@ -1292,8 +1265,6 @@ export async function getEnrollmentsForAttendance(
         lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
-        hasExam: activeExamEnrollmentIds.has(enrollment.id),
-        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         existingAttendance: {
           id: orphan.id,
@@ -1379,7 +1350,6 @@ export async function getEnrollmentsForAttendance(
         lastActivities: null,
         lastAdcoin: 0,
         sessionsRemaining: 1,
-        hasExam: false,
         type: 'trial',
         trialId: trial.id,
         parentName: trial.parent_name,
@@ -1525,26 +1495,6 @@ export async function getEnrollmentsForAttendancePaginated(
     if (branchIds && !branchIds.includes(studentData.branch_id)) return false;
     return true;
   });
-
-  // Fetch active exams for all enrollments to mark "Exam" badge + carry exam_level for mission dropdown
-  const enrollmentIds = filteredData.map((e) => e.id);
-  const activeExamEnrollmentIds = new Set<string>();
-  const examLevelByEnrollment = new Map<string, number>();
-  if (enrollmentIds.length > 0) {
-    const { data: activeExams } = await supabaseAdmin
-      .from('examinations')
-      .select('enrollment_id, exam_level, status')
-      .in('enrollment_id', enrollmentIds)
-      .is('deleted_at', null)
-      .in('status', ['eligible', 'scheduled', 'in_progress']);
-
-    for (const exam of activeExams ?? []) {
-      if (exam.enrollment_id) {
-        activeExamEnrollmentIds.add(exam.enrollment_id);
-        examLevelByEnrollment.set(exam.enrollment_id, exam.exam_level);
-      }
-    }
-  }
 
   // Pre-fetch pool sibling counts and join order for pooled enrollments
   const poolSiblingCountMap = new Map<string, number>();
@@ -1837,8 +1787,6 @@ export async function getEnrollmentsForAttendancePaginated(
         lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
-        hasExam: activeExamEnrollmentIds.has(enrollment.id),
-        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         // Include existing attendance data if partially filled
         existingAttendance: slotAttendance ? {
@@ -1903,8 +1851,6 @@ export async function getEnrollmentsForAttendancePaginated(
         lastActivities,
         lastAdcoin,
         sessionsRemaining: computedSessionsRemaining,
-        hasExam: activeExamEnrollmentIds.has(enrollment.id),
-        examLevel: examLevelByEnrollment.get(enrollment.id) ?? null,
         type: 'enrollment',
         existingAttendance: {
           id: orphan.id,
@@ -1990,7 +1936,6 @@ export async function getEnrollmentsForAttendancePaginated(
         lastActivities: null,
         lastAdcoin: 0,
         sessionsRemaining: 1,
-        hasExam: false,
         type: 'trial',
         trialId: trial.id,
         parentName: trial.parent_name,
@@ -2220,7 +2165,6 @@ export async function getAllStudentsForManualAttendance(
       lastActivities: null,
       lastAdcoin: 0,
       sessionsRemaining: manualSessionsRemaining,
-      hasExam: false,
       type: 'enrollment',
       existingAttendance: null,
     });
@@ -2408,7 +2352,6 @@ export async function searchStudentsForManualAttendance(
       lastActivities: null,
       lastAdcoin: 0,
       sessionsRemaining: manualSessionsRemaining,
-      hasExam: false,
       type: 'enrollment',
       existingAttendance: null,
     });

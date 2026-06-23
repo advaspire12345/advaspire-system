@@ -625,9 +625,6 @@ export function StudentAttendanceModal({
     }
     opts.push({ value: "__hdr_special", label: "— SPECIAL —", disabled: true });
     opts.push({ value: "Competition", label: "Competition" });
-    if (selectedRow?.hasExam) {
-      opts.push({ value: "Exam", label: "Exam" });
-    }
     if (activeActivities.length > 0) {
       opts.push({ value: "__hdr_activity", label: "— ACTIVITY —", disabled: true });
       for (const a of activeActivities) {
@@ -638,7 +635,7 @@ export function StudentAttendanceModal({
       }
     }
     return opts;
-  }, [curriculumLessons, selectedRow?.hasExam, activeActivities]);
+  }, [curriculumLessons, activeActivities]);
 
   // Determine what's editable based on mode
   const isStudentEditable = mode === "add";

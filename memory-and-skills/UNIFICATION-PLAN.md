@@ -273,6 +273,27 @@ level, position; public-read) = **1028 lessons / 10 courses** (robotics seeded v
 - Follow-ups: Courses table "Lessons" count still reads legacy `course_lessons` (shows 0 for catalog
   courses); `curriculum-builder.tsx` now unused; Hub lesson-management should write to `lessons` (sync).
 
+## Post-E2 — Examination feature REMOVED from LMS (2026-06-23)
+Decided: the LMS examination feature is redundant now that **assessment + certification live in the Hub**,
+so it was removed entirely (avoids confusing two parallel exam systems). It had been the LMS's level-up
+engine, so progression is now **manual**.
+- **Code (LMS, `tsc --noEmit` exit 0):** deleted `(dashboard)/examination/`, `components/examination/*`,
+  `data/examinations.ts`, `api/{examination/table, import/examinations, certificate/generate}`; removed the
+  `examinations` permission resource (schema `PermissionResource`/`ALL_RESOURCES`, `permissions.ts` defaults×4 +
+  `ALL_RESOURCE_KEYS` + `RESOURCE_LABELS` + `NAV_ORDER`, `lib/navigation.ts`, both team permission modals,
+  onboarding tour) and the `Examination*`/`ExaminationStatus` types. Stripped exam coupling from
+  `attendance.ts` (Exam badge + `hasExam`/`examLevel`), `api/attendance/mark` (auto-create + Exam status-bump),
+  `api/import/attendance` (level-up scan), `api/cron/notifications` (exam reminders), `import-page.tsx` (the
+  examinations import type/section/validators).
+- **Manual progression replacement:** level is edited per-enrollment in the student modal (already existed);
+  added **`completeEnrollmentAction`** (status=completed + `redistributePoolOnInactive`) wired to a per-row
+  "Complete" button in the student table (gated by `students.can_edit`). Auto-leveling on exam-pass is gone.
+- **DB migration `drop_examinations_feature`:** backed up 187 rows →
+  [`examinations-backup-2026-06-23.json`](examinations-backup-2026-06-23.json) first; then DROP TABLE
+  `examinations` + DROP TYPE `examination_status` (+ legacy `certificate_number_seq`), and deleted 7 orphaned
+  `role_permissions` rows (`resource='examinations'`). Verified safe pre-drop (0 inbound FKs, enum unused
+  elsewhere) and confirmed gone after.
+
 ## PART F — Domains, Vercel, single-login verification ✅ COMPLETE (2026-06-23)
 
 > **DONE:** `advaspire.io` bought; both subdomains live on Vercel with TLS; `NEXT_PUBLIC_COOKIE_DOMAIN=.advaspire.io`
@@ -313,6 +334,18 @@ level, position; public-read) = **1028 lessons / 10 courses** (robotics seeded v
 
 ## PART G — Cutover & retire
 
+- [x] **G0. Advisor hardening — DONE (2026-06-23).** Ran security+performance advisors on the
+      unified project; applied migration `g_advisor_hardening` (draft kept in
+      [`G-advisor-hardening.sql`](G-advisor-hardening.sql)). Cleared: `rls_policy_always_true` x3
+      (dropped vestigial over-broad policies on `examinations` {public} USING(true) + `trials`
+      {authenticated} — both are service-role-only, verified, so now deny-by-default), 21×
+      `function_search_path_mutable` (pinned `search_path=public` on 20 SECURITY DEFINER + 1 trigger
+      fn), 4× `auth_rls_initplan` (wrapped `auth.uid()`→`(select auth.uid())` on users/parents
+      select/update). Re-run confirms 0 of each; no regressions. **Accepted/remaining (non-blocking):**
+      52× `*_security_definer_function_executable` (required for RLS to call the helpers — not fixable
+      without breaking RLS), leaked-password toggle, `program-covers` bucket listing, `pg_trgm` in
+      public, and perf INFOs (unindexed FKs / unused indexes / 2 duplicate indexes / no-PK on
+      `role_hierarchy` / 9 multiple-permissive on migrated Hub tables) — revisit after soak.
 - [ ] **G1.** Soak on the subdomains; monitor auth + RLS errors.
 - [ ] **G2.** Decommission the old `advaspire-learning` Supabase project (after a
       retention window with backups kept).

@@ -56,7 +56,7 @@ interface ImportPageProps {
   hideStudentBranchColumn?: boolean;
 }
 
-type ImportType = "students" | "attendance" | "payments" | "transactions" | "trials" | "examinations";
+type ImportType = "students" | "attendance" | "payments" | "transactions" | "trials";
 
 interface ImportSection {
   id: ImportType;
@@ -243,48 +243,6 @@ const TRIALS_EXAMPLE_ROWS = [[
   "Interested after seeing FB ad",
 ]];
 
-const EXAMINATIONS_EXAMPLE_ROWS = [
-  // 1) First attempt — FAILED. No certificate number (only awarded on pass).
-  [
-    "EXAMPLE-ADV-001-25001",
-    "Junior Robotics Level 1",
-    "1",
-    "2026-03-10",
-    "fail",
-    "42",
-    "0",
-    "instructor@example.com",
-    "",
-    "Missed timing on the line follower section",
-  ],
-  // 2) Reattempt — also FAILED. reattempt_count incremented. Still no cert.
-  [
-    "EXAMPLE-ADV-001-25001",
-    "Junior Robotics Level 1",
-    "1",
-    "2026-03-24",
-    "fail",
-    "58",
-    "1",
-    "instructor@example.com",
-    "",
-    "Better, but mission 3 still incomplete",
-  ],
-  // 3) Reattempt — PASSED. reattempt_count further incremented. Cert assigned.
-  [
-    "EXAMPLE-ADV-001-25001",
-    "Junior Robotics Level 1",
-    "1",
-    "2026-04-15",
-    "pass",
-    "85",
-    "2",
-    "instructor@example.com",
-    "CERT-2026-001",
-    "Cleared all missions within the time limit",
-  ],
-];
-
 const SECTIONS: ImportSection[] = [
   {
     id: "students",
@@ -341,17 +299,6 @@ const SECTIONS: ImportSection[] = [
       "scheduled_date", "scheduled_time", "status", "message",
     ],
     exampleRows: TRIALS_EXAMPLE_ROWS,
-  },
-  {
-    id: "examinations",
-    title: "Examinations",
-    description:
-      "Import examination records (typically migration history — past exam attempts and certifications). `student_id` matches an existing student. `status` is the outcome: eligible / scheduled / in_progress / pass / fail / absent. `mark` and `reattempt_count` are optional (reattempt defaults to 0). `examiner_email` is optional — looks up the instructor by email. `certificate_number` is the cert ID issued for THIS exam — only allowed when status=pass, must be unique (server checks both the existing table AND other rows in the upload, case-insensitive). The first three rows are samples showing a fail → reattempt → pass arc; all auto-skipped because student_id starts with \"EXAMPLE\".",
-    templateColumns: [
-      "student_id", "exam_name", "exam_level", "exam_date", "status",
-      "mark", "reattempt_count", "examiner_email", "certificate_number", "notes",
-    ],
-    exampleRows: EXAMINATIONS_EXAMPLE_ROWS,
   },
 ];
 
@@ -858,77 +805,6 @@ export function ImportPage({
                   </div>
                 )}
 
-                {/* In-file certificate_number duplicate detection
-                    (Examinations only) — flag before sending to the server. */}
-                {section.id === "examinations" && (() => {
-                  const certRowMap = new Map<string, number[]>();
-                  parsedData.forEach((r, i) => {
-                    const v = (r.certificate_number ?? "").trim();
-                    if (!v) return;
-                    if ((r.student_id ?? "").trim().toUpperCase().startsWith("EXAMPLE")) return;
-                    const key = v.toUpperCase();
-                    if (!certRowMap.has(key)) certRowMap.set(key, []);
-                    certRowMap.get(key)!.push(i + 1);
-                  });
-                  const dupes = Array.from(certRowMap.entries()).filter(([, rows]) => rows.length > 1);
-                  if (dupes.length === 0) return null;
-                  return (
-                    <div className="rounded-lg p-4 bg-red-50 border border-red-200">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="font-bold text-sm text-red-900 mb-1">
-                            Duplicate certificate_number within this file
-                          </p>
-                          <p className="text-xs text-red-800 mb-2">
-                            Each certificate number must be unique. These cert numbers appear on more than one row:
-                          </p>
-                          <ul className="text-xs font-mono text-red-700 space-y-0.5">
-                            {dupes.map(([cert, rows]) => (
-                              <li key={cert}>• {cert} — rows {rows.join(", ")}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* In-file cert-on-fail detection (Examinations only) —
-                    fail/absent/scheduled etc. should NOT carry a cert number. */}
-                {section.id === "examinations" && (() => {
-                  const offenders = parsedData
-                    .map((r, i) => ({ r, idx: i + 1 }))
-                    .filter(({ r }) =>
-                      !(r.student_id ?? "").trim().toUpperCase().startsWith("EXAMPLE") &&
-                      (r.certificate_number ?? "").trim() !== "" &&
-                      (r.status ?? "").trim().toLowerCase() !== "pass"
-                    );
-                  if (offenders.length === 0) return null;
-                  return (
-                    <div className="rounded-lg p-4 bg-red-50 border border-red-200">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-                        <div>
-                          <p className="font-bold text-sm text-red-900 mb-1">
-                            Certificate number on a non-pass row
-                          </p>
-                          <p className="text-xs text-red-800 mb-2">
-                            Certificate numbers are only awarded when status=pass. Clear the cert number on these rows OR change their status to pass:
-                          </p>
-                          <ul className="text-xs font-mono text-red-700 space-y-0.5">
-                            {offenders.map(({ r, idx }) => (
-                              <li key={idx}>
-                                • row {idx}: status=<strong>{r.status || "(blank)"}</strong>, cert=<strong>{r.certificate_number}</strong>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
                 {/* In-file receipt_seq duplicate detection (Payments only).
                     Each receipt number must be unique across the whole system
                     — flag if the user has two CSV rows with the same number. */}
@@ -1026,25 +902,6 @@ export function ImportPage({
                               }
                             }
 
-                            if (section.id === "examinations") {
-                              const certMap = new Map<string, number[]>();
-                              parsedData.forEach((r, i) => {
-                                if (isExample(r)) return;
-                                const v = (r.certificate_number ?? "").trim();
-                                if (v) {
-                                  const key = v.toUpperCase();
-                                  if (!certMap.has(key)) certMap.set(key, []);
-                                  certMap.get(key)!.push(i + 1);
-                                  // cert on non-pass
-                                  if ((r.status ?? "").trim().toLowerCase() !== "pass") {
-                                    failedRows.add(i + 1);
-                                  }
-                                }
-                              });
-                              for (const rows of certMap.values()) {
-                                if (rows.length > 1) rows.forEach((rn) => failedRows.add(rn));
-                              }
-                            }
                           }
                           // Show all rows after import AND when pre-flight
                           // found problems — otherwise the user can't see the
@@ -1100,17 +957,6 @@ export function ImportPage({
                             seqMap.set(v, (seqMap.get(v) ?? 0) + 1);
                           }
                           if (Array.from(seqMap.values()).some((n) => n > 1)) return true;
-                        }
-                        if (section.id === "examinations") {
-                          const certMap = new Map<string, number>();
-                          for (const r of parsedData) {
-                            if (isExample(r)) continue;
-                            const v = (r.certificate_number ?? "").trim();
-                            if (!v) continue;
-                            certMap.set(v.toUpperCase(), (certMap.get(v.toUpperCase()) ?? 0) + 1);
-                            if ((r.status ?? "").trim().toLowerCase() !== "pass") return true;
-                          }
-                          if (Array.from(certMap.values()).some((n) => n > 1)) return true;
                         }
                         if (section.id === "students") {
                           if (parsedData.some((r) => !isExample(r) && (r.parent_email ?? "").trim().toLowerCase() === "aiman.parent@example.com")) return true;

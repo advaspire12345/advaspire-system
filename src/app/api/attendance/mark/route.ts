@@ -489,15 +489,6 @@ export async function POST(request: NextRequest) {
         console.warn('[Attendance Mark] Session tracking warning:', trackingResult.message);
       }
 
-      // Level-up exam auto-creation: insert an "eligible" exam row when the
-      // student crosses sessions_to_level_up for their current level.
-      const { maybeCreateLevelUpExam } = await import("@/data/examinations");
-      const examId = await maybeCreateLevelUpExam(body.enrollmentId);
-      if (examId) {
-        console.log('[Attendance Mark] Auto-created level-up exam:', examId);
-        revalidatePath("/examination");
-      }
-
       // F1: payment-due notification when sessions_remaining hits 1 (per Q4).
       // For pool enrollments: check pool.sessions_remaining instead.
       try {
@@ -577,26 +568,6 @@ export async function POST(request: NextRequest) {
         }
       } catch (notifyErr) {
         console.warn("[Notify child_attendance_marked] failed:", notifyErr);
-      }
-
-      // Exam auto-progression: if "Exam" is logged in ANY activity for this
-      // session, bump the active scheduled exam to in_progress (only if it's
-      // still 'scheduled'). The teacher might log "Exam" as the primary or as
-      // a secondary activity — either way the student sat the exam. The flip
-      // is idempotent (only fires when status='scheduled') so duplicates are
-      // harmless. Already-pass / already-fail rows are NOT re-touched.
-      if (body.activities?.some((a) => a.lesson === "Exam")) {
-        const { error: examUpdateError } = await supabaseAdmin
-          .from("examinations")
-          .update({ status: "in_progress", updated_at: new Date().toISOString() })
-          .eq("enrollment_id", body.enrollmentId)
-          .eq("status", "scheduled")
-          .is("deleted_at", null);
-        if (examUpdateError) {
-          console.warn("[Attendance Mark] Failed to auto-bump exam status:", examUpdateError);
-        } else {
-          revalidatePath("/examination");
-        }
       }
 
       // ALWAYS revalidate affected pages after session tracking (even if no pending payment created)

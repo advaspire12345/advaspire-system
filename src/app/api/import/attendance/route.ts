@@ -205,22 +205,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Level-up scan — for every enrollment touched by this import, check if
-    // the accumulated attendance just crossed sessions_to_level_up − 2 and
-    // create an "eligible" exam row if so. Idempotent: existing exams aren't
-    // duplicated. Failures don't fail the whole import.
-    if (touchedEnrollmentIds.size > 0) {
-      const { maybeCreateLevelUpExam } = await import("@/data/examinations");
-      for (const enrollmentId of touchedEnrollmentIds) {
-        try {
-          await maybeCreateLevelUpExam(enrollmentId);
-        } catch (err) {
-          console.warn(`[import attendance] level-up scan failed for enrollment ${enrollmentId}:`, err);
-        }
-      }
-      revalidatePath("/examination");
-    }
-
     revalidatePath("/attendance-log");
 
     return NextResponse.json({ success, failed, skipped, errors });

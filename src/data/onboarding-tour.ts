@@ -179,12 +179,6 @@ export const TOUR_STEPS: Record<UserRole, TourStep[]> = {
         "At the start of class, click 'Mark X as Present' for each student. Fill in lesson, mission, activity, and optionally award adcoin. If a student does an unscheduled extra session the same day, use the top 'Take Attendance' button and pick a different time.",
     },
     {
-      selector: 'a[href="/examination"], a[href="/examinations"]',
-      title: "Mark exams",
-      body:
-        "When a student is taking an exam, mark them here instead. The system credits an exam attempt against their progress.",
-    },
-    {
       selector: 'a[href="/leaderboard"]',
       title: "Leaderboard",
       body:

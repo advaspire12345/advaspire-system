@@ -1388,6 +1388,73 @@ export async function deleteEnrollmentAction(
   }
 }
 
+/**
+ * Mark an enrollment as completed (the student finished all levels of the
+ * course). Mirrors the completion side-effects that used to fire on an
+ * exam-pass: it redistributes any remaining pool sessions to the siblings and
+ * detaches the enrollment from its pool, since a completed enrollment is no
+ * longer consuming sessions. Leveling itself is now manual (edit the level on
+ * the enrollment); this action only handles the terminal "completed" state.
+ */
+export async function completeEnrollmentAction(
+  enrollmentId: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await authorizeAction("students", "can_edit");
+
+    const { data: enrollment } = await supabaseAdmin
+      .from("enrollments")
+      .select("id, student_id, pool_id, status")
+      .eq("id", enrollmentId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (!enrollment) {
+      return { success: false, error: "Enrollment not found." };
+    }
+    if (enrollment.status === "completed") {
+      return { success: false, error: "Enrollment is already completed." };
+    }
+
+    // Redistribute remaining pool sessions to siblings before detaching, so
+    // they keep what was already paid for (same as cancel/expire/delete).
+    if (enrollment.pool_id) {
+      const { redistributePoolOnInactive } = await import("@/data/pools");
+      await redistributePoolOnInactive(enrollment.id, enrollment.student_id);
+    }
+
+    // Safety net: drop the pool_students row in case the pool was already gone.
+    await supabaseAdmin
+      .from("pool_students")
+      .delete()
+      .eq("enrollment_id", enrollmentId);
+
+    const { error: enrErr } = await supabaseAdmin
+      .from("enrollments")
+      .update({
+        status: "completed",
+        pool_id: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", enrollmentId);
+
+    if (enrErr) {
+      console.error("Error in completeEnrollmentAction:", enrErr);
+      return { success: false, error: "Failed to complete enrollment" };
+    }
+
+    revalidatePath("/student");
+    revalidateTag("dashboard", "max");
+    return { success: true };
+  } catch (error) {
+    console.error("Error in completeEnrollmentAction:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+    };
+  }
+}
+
 export async function deleteStudentAction(
   studentId: string
 ): Promise<{ success: boolean; error?: string }> {

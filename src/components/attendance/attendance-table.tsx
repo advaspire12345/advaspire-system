@@ -48,9 +48,6 @@ export interface AttendanceRow {
   lastActivities: { lesson: string; mission: string }[] | null;
   lastAdcoin: number;
   sessionsRemaining: number;
-  // Whether student has an active exam for this enrollment
-  hasExam: boolean;
-  examLevel?: number | null;
   // Type to distinguish between enrollment and trial
   type: 'enrollment' | 'trial';
   // Trial-specific fields
@@ -703,11 +700,6 @@ export function AttendanceTable({
                           {row.type === 'trial' && (
                             <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
                               Trial
-                            </span>
-                          )}
-                          {row.hasExam && (
-                            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-                              Exam
                             </span>
                           )}
                         </div>

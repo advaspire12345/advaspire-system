@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useBoundedLoader } from "@/hooks/use-bounded-loader";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Plus } from "lucide-react";
+import { Pencil, Trash2, Plus, CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/ui/search-bar";
@@ -39,6 +39,8 @@ interface StudentTableProps {
    *  the student record + other enrollments stay. Falls back to onDelete when
    *  the row has no enrollment (a "no-program" student row). */
   onDeleteEnrollment?: (enrollmentId: string) => Promise<{ success: boolean; error?: string }>;
+  /** Mark a single enrollment as completed (status=completed + pool redistribution). */
+  onCompleteEnrollment?: (enrollmentId: string) => Promise<{ success: boolean; error?: string }>;
   hideBranch?: boolean;
 }
 
@@ -99,6 +101,7 @@ export function StudentTable({
   onEdit,
   onDelete,
   onDeleteEnrollment,
+  onCompleteEnrollment,
   hideBranch,
 }: StudentTableProps) {
   const router = useRouter();
@@ -247,6 +250,25 @@ export function StudentTable({
     }
     if (!result.success) {
       throw new Error(result.error || "Failed to delete");
+    }
+    router.refresh();
+  };
+
+  // Per-row "mark completed": the student finished all levels of this course.
+  // Sets status=completed and redistributes any remaining pool sessions.
+  const handleCompleteEnrollment = async (row: StudentTableRow) => {
+    if (!onCompleteEnrollment || !row.enrollmentId) return;
+    if (
+      !window.confirm(
+        `Mark ${row.name}'s ${row.programName ?? "enrollment"} as completed? Any remaining pool sessions will be redistributed to poolmates.`,
+      )
+    ) {
+      return;
+    }
+    const result = await onCompleteEnrollment(row.enrollmentId);
+    if (!result.success) {
+      alert(result.error || "Failed to complete enrollment");
+      return;
     }
     router.refresh();
   };
@@ -744,6 +766,26 @@ export function StudentTable({
                                 title={isGhost ? `Transferred to ${row.transferredToBranchName} — read-only` : "Edit"}
                               >
                                 <Pencil className="h-4 w-4" />
+                              </button>
+                            );
+                          })()}
+                          {onCompleteEnrollment && row.enrollmentId && (() => {
+                            const isGhost = !!row.transferredToBranchName;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => !isGhost && handleCompleteEnrollment(row)}
+                                disabled={isGhost}
+                                className={cn(
+                                  "rounded-lg border p-2 transition",
+                                  isGhost
+                                    ? "border-muted-foreground/20 text-muted-foreground/30 cursor-not-allowed"
+                                    : "border-muted-foreground/30 text-muted-foreground hover:border-transparent hover:bg-emerald-500 hover:text-white",
+                                )}
+                                aria-label={`Mark ${row.name}'s enrollment completed`}
+                                title={isGhost ? `Transferred to ${row.transferredToBranchName} — read-only` : "Mark enrollment completed"}
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
                               </button>
                             );
                           })()}
