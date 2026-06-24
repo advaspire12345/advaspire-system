@@ -324,10 +324,21 @@ export function StudentAttendanceModal({
               : [{ lesson: "", mission: "" }],
           );
         } else {
-          // New attendance — default to current day and current time
+          // New attendance — default to current day. For the time, if today
+          // happens to match the student's scheduled slot day, pre-fill the
+          // scheduled time (typical case: instructor marks during the actual
+          // class). Otherwise pre-fill the current time (make-up / out-of-slot).
           setClassType("Physical");
-          setActualDay(getCurrentDayOfWeek());
-          setActualStartTime(getCurrentTime());
+          const todayDay = getCurrentDayOfWeek();
+          setActualDay(todayDay);
+          const scheduledDay = selectedRow.slotDay || selectedRow.dayOfWeek || "";
+          const isOnScheduleDay =
+            scheduledDay.toLowerCase() === todayDay.toLowerCase();
+          setActualStartTime(
+            isOnScheduleDay
+              ? formatTimeForInput(selectedRow.slotTime || selectedRow.startTime)
+              : getCurrentTime(),
+          );
           setInstructorName(currentUserName ?? "");
           setLastActivity("");
           setAdcoin(0);
@@ -559,10 +570,15 @@ export function StudentAttendanceModal({
     label: p.courseName,
   }));
 
-  const instructorOptions = instructors.map((i) => ({
-    value: i.name,
-    label: i.name,
-  }));
+  const instructorOptions = (() => {
+    const base = instructors.map((i) => ({ value: i.name, label: i.name }));
+    // Make sure the currently-logged-in user is always pickable, even if they
+    // aren't on the instructors team (e.g. an admin marking attendance).
+    if (currentUserName && !base.some((o) => o.value === currentUserName)) {
+      base.unshift({ value: currentUserName, label: currentUserName });
+    }
+    return base;
+  })();
 
   // Activity entries are prefixed so a downstream check can distinguish them
   // from curriculum lessons by value alone (which decides whether Mission is
@@ -928,25 +944,15 @@ export function StudentAttendanceModal({
                     />
                   )}
 
-                  {currentUserName ? (
-                    <FloatingInput
-                      id="instructor-name"
-                      label="Instructor Name"
-                      value={currentUserName}
-                      readOnly
-                      className="bg-muted"
-                    />
-                  ) : (
-                    <FloatingSelect
-                      id="select-instructor"
-                      label="Instructor Name"
-                      placeholder="Select instructor..."
-                      value={instructorName}
-                      onChange={setInstructorName}
-                      options={instructorOptions}
-                      searchable
-                    />
-                  )}
+                  <FloatingSelect
+                    id="select-instructor"
+                    label="Instructor Name"
+                    placeholder="Select instructor..."
+                    value={instructorName}
+                    onChange={setInstructorName}
+                    options={instructorOptions}
+                    searchable
+                  />
                 </div>
 
                 {/* Password field — shown only when adcoin value was changed */}

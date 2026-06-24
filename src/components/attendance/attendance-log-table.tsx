@@ -199,7 +199,8 @@ export function AttendanceLogTable({
     null,
   );
 
-  // Filter data based on search and status
+  // Filter data based on search and status, then sort by latest date + time
+  // so the most recent attendance shows first regardless of batch order.
   const filteredData = useMemo(() => {
     let result = data;
 
@@ -223,7 +224,13 @@ export function AttendanceLogTable({
       );
     }
 
-    return result;
+    return [...result].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1; // latest date first
+      const aT = a.actualStartTime ?? "";
+      const bT = b.actualStartTime ?? "";
+      if (aT !== bT) return aT < bT ? 1 : -1; // latest time first
+      return a.studentName.localeCompare(b.studentName);
+    });
   }, [data, searchQuery, statusFilter]);
 
   // Pagination

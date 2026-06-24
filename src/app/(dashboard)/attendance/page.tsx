@@ -64,7 +64,7 @@ export default async function AttendancePage() {
           instructors={instructors}
           hideBranch={role === "company_admin" || role === "instructor"}
           canCreate={perms?.can_create}
-          currentUserName={role === "instructor" ? dbUser?.name : undefined}
+          currentUserName={dbUser?.name ?? undefined}
         />
       </div>
     </main>

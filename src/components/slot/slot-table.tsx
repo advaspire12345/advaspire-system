@@ -352,6 +352,12 @@ function SlotModal({
   const [error, setError] = useState<string | null>(null);
 
   // Initialize form when modal opens
+  // Day ordering used both for sorting loaded slots and for the day dropdown.
+  const DAY_ORDER: Record<string, number> = {
+    monday: 1, tuesday: 2, wednesday: 3, thursday: 4,
+    friday: 5, saturday: 6, sunday: 7,
+  };
+
   useEffect(() => {
     if (!open) return;
     setError(null);
@@ -362,7 +368,15 @@ function SlotModal({
     } else if (group) {
       setCourseId(group.courseId);
       setBranchId(group.branchId);
-      setSlots(group.slots.map((s) => ({
+      // Sort loaded slots Mon → Sun so the rows render in a predictable order
+      // (DB returns them in insert order, which can be arbitrary).
+      const sortedSlots = [...group.slots].sort((a, b) => {
+        const da = DAY_ORDER[(a.day || "").toLowerCase()] ?? 8;
+        const db = DAY_ORDER[(b.day || "").toLowerCase()] ?? 8;
+        if (da !== db) return da - db;
+        return (a.time || "").localeCompare(b.time || "");
+      });
+      setSlots(sortedSlots.map((s) => ({
         tempId: genTempId(),
         dbId: s.id,
         day: s.day,
@@ -371,13 +385,23 @@ function SlotModal({
         limitStudent: s.limitStudent,
       })));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, group, defaultBranchId]);
 
+  // The + button lives on the first row. New rows are inserted immediately
+  // BELOW the + row (so they become the first "−" row) rather than appended
+  // to the end — easier to scan when the user is adding several slots.
   const addSlot = () => {
-    setSlots((prev) => [
-      ...prev,
-      { tempId: genTempId(), day: "monday", time: "09:00", duration: 60, limitStudent: 10 },
-    ]);
+    setSlots((prev) => {
+      if (prev.length === 0) {
+        return [{ tempId: genTempId(), day: "monday", time: "09:00", duration: 60, limitStudent: 10 }];
+      }
+      return [
+        prev[0],
+        { tempId: genTempId(), day: "monday", time: "09:00", duration: 60, limitStudent: 10 },
+        ...prev.slice(1),
+      ];
+    });
   };
 
   const removeSlot = (tempId: string) => {

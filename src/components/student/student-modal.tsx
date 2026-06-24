@@ -452,22 +452,43 @@ export function StudentModal({
     );
   }, [courseSlots, formData.courseId, formData.branchId]);
 
-  // Get unique available days from slots
+  // Get unique available days from slots, ordered Mon → Sun.
+  const DAY_ORDER: Record<string, number> = {
+    monday: 1, tuesday: 2, wednesday: 3, thursday: 4,
+    friday: 5, saturday: 6, sunday: 7,
+  };
   const availableDays = useMemo(() => {
     const days = [...new Set(availableSlots.map((s) => s.day))];
-    return days.map((day) => ({
-      value: day,
-      label: day,
-    }));
+    days.sort((a, b) => {
+      const da = DAY_ORDER[(a || "").toLowerCase()] ?? 8;
+      const db = DAY_ORDER[(b || "").toLowerCase()] ?? 8;
+      return da - db;
+    });
+    return days.map((day) => ({ value: day, label: day }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableSlots]);
 
-  // Function to get available times for a specific day
+  // Render a "HH:MM" / "HH:MM:SS" time as 12-hour with AM/PM (e.g. 11:00AM,
+  // 4:00PM) for the time dropdown labels. Underlying value stays in 24h.
+  const formatTimeLabel = (raw: string): string => {
+    const m = (raw || "").match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return raw;
+    let h = parseInt(m[1], 10);
+    const min = m[2];
+    const period = h >= 12 ? "PM" : "AM";
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${min}${period}`;
+  };
+
+  // Function to get available times for a specific day, sorted ascending.
   const getTimesForDay = (day: string) => {
     return availableSlots
       .filter((s) => s.day === day)
+      .sort((a, b) => (a.time || "").localeCompare(b.time || ""))
       .map((s) => ({
         value: s.time,
-        label: `${s.time} (${s.duration} min)`,
+        label: `${formatTimeLabel(s.time)} (${s.duration} min)`,
       }));
   };
 

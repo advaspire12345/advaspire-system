@@ -149,6 +149,13 @@ export function AttendanceTable({
     itemsPerPage: ITEMS_PER_PAGE,
     apiUrl: useCallback((offset, limit) => `/api/attendance/table?offset=${offset}&limit=${limit}`, []),
     getId: useCallback((r: AttendanceRow) => r.id, []),
+    // The server paginates by ENROLLMENT (range over the enrollments table),
+    // but each enrollment can expand into multiple rows (one per weekly slot).
+    // Without this, the loader's offset would advance by row count and skip
+    // entire enrollments mid-list — so mid-list students (like Taskeen at
+    // pos 42 of 83) silently never get loaded and search returns "no student
+    // found" even though they exist.
+    getEntityId: useCallback((r: AttendanceRow) => r.enrollmentId, []),
     setData,
   });
 
@@ -195,18 +202,39 @@ export function AttendanceTable({
   // Store attendanceId per row so it survives server refresh even if slot matching fails
   const attendanceIdMapRef = useRef<Map<string, string>>(new Map());
 
+  // Server-side sort is per-batch, but the bounded loader stitches batches
+  // ordered by created_at DESC — so the assembled list isn't globally sorted.
+  // Re-sort the accumulated data Mon → Sun → time → student name so the table
+  // stays in a stable, predictable order regardless of how many batches loaded.
+  const DAY_ORDER: Record<string, number> = {
+    monday: 1, tuesday: 2, wednesday: 3, thursday: 4,
+    friday: 5, saturday: 6, sunday: 7,
+  };
+  const sortedData = useMemo(() => {
+    return [...data].sort((a, b) => {
+      const dayA = DAY_ORDER[(a.slotDay ?? "").toLowerCase()] ?? 8;
+      const dayB = DAY_ORDER[(b.slotDay ?? "").toLowerCase()] ?? 8;
+      if (dayA !== dayB) return dayA - dayB;
+      const timeA = a.slotTime || "23:59";
+      const timeB = b.slotTime || "23:59";
+      if (timeA !== timeB) return timeA.localeCompare(timeB);
+      return a.studentName.localeCompare(b.studentName);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
   // Filter data based on search
   const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
+    if (!searchQuery.trim()) return sortedData;
 
     const query = searchQuery.toLowerCase();
-    return data.filter(
+    return sortedData.filter(
       (row) =>
         row.studentName.toLowerCase().includes(query) ||
         row.courseName.toLowerCase().includes(query) ||
         row.branchName.toLowerCase().includes(query),
     );
-  }, [data, searchQuery]);
+  }, [sortedData, searchQuery]);
 
   // Pagination
   const totalPages = searchQuery.trim()

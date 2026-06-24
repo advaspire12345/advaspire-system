@@ -67,19 +67,27 @@ Scenario-based examples covering enrollment, attendance, session tracking, pool 
 
 ---
 
-## Scenario 4b: Pool in Deficit — Per-Student Tracking
+## Scenario 4b: Pool in Deficit — Equal-Split Debt Sharing
 
-**Setup:** Ali and Abu share a pool in Coding 101. No payment made yet. Abu attends 3 classes.
+**Setup:** Ali (joined first) and Abu (joined second) share a pool in Coding 101. No payment made yet. Abu attends 3 classes.
 
 | Step | Event | Pool Remaining | Ali Display | Abu Display |
 |------|-------|----------------|-------------|-------------|
 | 1 | Pool created (no payment) | 0 | 0 | 0 |
-| 2 | Abu attends ×3 | -3 | **0** | **-3** |
+| 2 | Abu attends ×3 | -3 | **-2** | **-1** |
 | 3 | Payment approved (4 sessions) | 1 (-3+4) | **1** | **0** |
 
-**Formula (negative pool):** `floor(pool.total_sessions / count) + positionBonus - my_pool_attendance`. Only the student who actually attended goes negative — the other stays at 0.
+**Single hybrid formula:** `floor(pool.sessions_remaining / count) + positionBonus` — used for BOTH positive and negative pool balances.
 
-**After payment:** pool.sessions_remaining becomes positive → switches to equal split. 1 remaining ÷ 2 = 0 each, remainder 1 → Ali (earlier) gets 1, Abu gets 0.
+**Position bonus rule:**
+- **Pool ≥ 0** (positive): the +1 adjustment goes to the **earliest-joined** siblings (first-joined gets the extra session when there's a remainder).
+- **Pool < 0** (negative): the +1 adjustment goes to the **latest-joined** siblings (so they carry less debt; first-joined keeps the heavier debt). Specifically `positionBonus = 1` when `position >= (count − remainder)`, where `remainder = poolRemaining − perStudent × count`.
+
+**Worked example for step 2:** `perStudent = floor(-3 / 2) = -2`, `remainder = -3 − (-2 × 2) = 1`. Negative branch → bonus goes to positions `>= 2 − 1 = 1`. Ali (pos 0) gets `-2 + 0 = -2`. Abu (pos 1) gets `-2 + 1 = -1`.
+
+**Key idea:** Debt is shared equally across siblings (family pool model) — NOT attributed only to the student who attended. The pool is one shared balance; per-student attendance counts feed `pool_students.sessions_remaining` for accounting (R1 redistribution on the next credit), but the displayed balance on /student uses the equal-split formula above.
+
+**After payment:** pool.sessions_remaining = 1 (positive). `floor(1/2) = 0`, remainder = 1. Positive branch → first-joined gets bonus: Ali (pos 0) = `0 + 1 = 1`, Abu (pos 1) = `0 + 0 = 0`.
 
 ---
 
@@ -311,7 +319,7 @@ Abu's `enrollment.pool_id` breadcrumb finds the soft-deleted pool. Pool is un-de
 
 **Renewal:** When pool reaches 0, a single shared renewal payment is created.
 
-**Negative pool (over-usage):** If Abu attends one more (step 9, pool goes to -1), the display switches to **per-student tracking**: `floor(total_sessions / count) + bonus - my_attendance`. Only the student who attended goes negative — siblings stay at 0.
+**Negative pool (over-usage):** If Abu attends one more (step 9, pool goes to -1), the SAME equal-split formula applies — `floor(pool.sessions_remaining / count) + positionBonus`. The only thing that flips is which siblings get the +1 bonus: for negative pools the bonus goes to the LATEST-joined sibling(s) so they carry less debt. Example: pool=-1, count=3 → `perStudent = -1`, `remainder = -1 − (-1×3) = 2`, bonus goes to positions `>= 3 − 2 = 1`. Ali (pos 0) = -1, Abu (pos 1) = 0, Aminah (pos 2) = 0. Debt is shared across the family — NOT attributed only to the student who attended. See Scenario 4b for the full formula.
 
 **Cancel from 3-sibling pool:** If Aminah is cancelled at step 5 (pool=6, 2 remaining): pool stays, `floor(6/2) = 3` each for Ali and Abu.
 
@@ -492,7 +500,7 @@ Abu's `enrollment.pool_id` breadcrumb finds the soft-deleted pool. Pool is un-de
 6. **Invoice snapshot is frozen at payment approval** — immutable after 1 week, equal split for shared packages
 7. **Payment records locked after 1 week** — only package editable within grace period
 8. **Student table shows latest paid package** — not enrollment's original package; edit modal matches
-9. **Pool display is hybrid** — when pool.sessions_remaining >= 0: all siblings see the same equal split (`floor(remaining / count)`); when pool is negative: per-student tracking (`share_of_total - my_attendance`) so only the student who attended goes negative
+9. **Pool display uses one equal-split formula for both signs** — `floor(pool.sessions_remaining / count) + positionBonus`. The position bonus flips direction by sign: positive remainder goes to earliest-joined; negative remainder (debt) gives the +1 to latest-joined so they carry LESS debt. Debt is shared across the family, NOT attributed solely to the student who attended (see Scenario 4b).
 10. **Pool cancel/complete auto-sizing** — 3+ siblings → 1 cancels: pool stays, sessions redistribute among remaining; 2 siblings → 1 cancels: pool auto-dissolves, remaining student becomes individual with all pool sessions; cancelled student keeps 0 sessions in all cases
 11. **Pool restoration reverts** — when a cancelled student is restored to active, the pool is un-deleted and ALL siblings with the pool_id breadcrumb are re-added; sessions are re-absorbed into the pool and shared again
 12. **Individual-to-pool transition** — when siblings switch from individual to pool, their sessions are absorbed into `pool.sessions_remaining`; display uses the hybrid formula above
