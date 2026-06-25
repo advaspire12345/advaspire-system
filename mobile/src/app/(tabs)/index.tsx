@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/auth";
 import { supabase } from "@/lib/supabase";
 
@@ -19,6 +21,7 @@ type ChildSummary = {
 
 export default function HomeScreen() {
   const { user } = useAuth();
+  const router = useRouter();
   const [parent, setParent] = useState<ParentRow | null>(null);
   const [children, setChildren] = useState<ChildSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,8 +110,15 @@ export default function HomeScreen() {
         ) : null}
 
         {children.map((c) => (
-          <View key={c.studentId} style={styles.childCard}>
-            <Text style={styles.childName}>{c.studentName}</Text>
+          <Pressable
+            key={c.studentId}
+            style={({ pressed }) => [styles.childCard, pressed && styles.childCardPressed]}
+            onPress={() => router.push({ pathname: "/attendance/[studentId]", params: { studentId: c.studentId } })}
+          >
+            <View style={styles.childHeader}>
+              <Text style={styles.childName}>{c.studentName}</Text>
+              <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+            </View>
             <View style={styles.childRow}>
               <View style={styles.metric}>
                 <Text style={styles.metricLabel}>Level</Text>
@@ -119,7 +129,8 @@ export default function HomeScreen() {
                 <Text style={styles.metricValue}>{c.adcoinBalance.toLocaleString()}</Text>
               </View>
             </View>
-          </View>
+            <Text style={styles.tapHint}>Tap to see attendance</Text>
+          </Pressable>
         ))}
       </ScrollView>
     </SafeAreaView>
@@ -148,8 +159,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
-  childName: { fontSize: 18, fontWeight: "700", color: "#111827", marginBottom: 12 },
+  childCardPressed: { opacity: 0.85 },
+  childHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  childName: { fontSize: 18, fontWeight: "700", color: "#111827" },
   childRow: { flexDirection: "row", gap: 12 },
+  tapHint: { fontSize: 11, color: "#9CA3AF", marginTop: 12, fontWeight: "500" },
   metric: { flex: 1, backgroundColor: "#F3F4F6", padding: 12, borderRadius: 12 },
   metricLabel: { fontSize: 12, color: "#6B7280", marginBottom: 2 },
   metricValue: { fontSize: 20, fontWeight: "700", color: "#615DFA" },
