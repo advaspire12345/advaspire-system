@@ -1,0 +1,49 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      },
+      "env": {
+        "EXPO_PUBLIC_ENV": "development",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://kbzrdsxzzqzbxqgwpsuq.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtienJkc3h6enF6YnhxZ3dwc3VxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxNTQ0MjcsImV4cCI6MjA4NzczMDQyN30.SBzZGiAEPFVkZIScARFFJnUwLKVFmAt8gFMjy87Y11k"
+      }
+    },
+    "staging": {
+      "distribution": "internal",
+      "channel": "staging",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_ENV": "staging"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_ENV": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal"
+      }
+    }
+  }
+}
