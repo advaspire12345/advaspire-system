@@ -57,6 +57,7 @@ export default function InboxScreen() {
   const router = useRouter();
   const [parentId, setParentId] = useState<string | null>(null);
   const [items, setItems] = useState<NotificationRow[]>([]);
+  const [pendingTransferCount, setPendingTransferCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -88,6 +89,31 @@ export default function InboxScreen() {
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
+
+      // Count pending session transfers (sender or receiver side) so the
+      // "Session transfers" entry shows a badge when action is needed.
+      const { data: links } = await supabase
+        .from("parent_students")
+        .select("student_id")
+        .eq("parent_id", pid);
+      const sids = (links ?? []).map((l) => l.student_id as string);
+      if (sids.length > 0) {
+        const [{ count: outCount }, { count: inCount }] = await Promise.all([
+          supabase
+            .from("session_transfers")
+            .select("id", { count: "exact", head: true })
+            .in("from_student_id", sids)
+            .eq("status", "pending_sender"),
+          supabase
+            .from("session_transfers")
+            .select("id", { count: "exact", head: true })
+            .in("to_student_id", sids)
+            .eq("status", "pending_receiver"),
+        ]);
+        setPendingTransferCount((outCount ?? 0) + (inCount ?? 0));
+      } else {
+        setPendingTransferCount(0);
+      }
       const mapped: NotificationRow[] = (data ?? []).map((n) => ({
         id: n.id as string,
         type: (n.type as string) ?? "default",
@@ -193,6 +219,30 @@ export default function InboxScreen() {
         </View>
       ) : null}
 
+      <Pressable
+        style={({ pressed }) => [styles.transfersBanner, pressed && styles.pressed]}
+        onPress={() => router.push("/transfers")}
+      >
+        <View style={[styles.iconWrap, { backgroundColor: "#FB06D420" }]}>
+          <Ionicons name="swap-horizontal" size={20} color="#FB06D4" />
+        </View>
+        <View style={styles.bannerBody}>
+          <Text style={styles.bannerTitle}>Session transfers</Text>
+          <Text style={styles.bannerSubtitle}>
+            {pendingTransferCount > 0
+              ? `${pendingTransferCount} pending your confirmation`
+              : "Move sessions between siblings"}
+          </Text>
+        </View>
+        {pendingTransferCount > 0 ? (
+          <View style={styles.bannerBadge}>
+            <Text style={styles.bannerBadgeText}>{pendingTransferCount}</Text>
+          </View>
+        ) : (
+          <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+        )}
+      </Pressable>
+
       <FlatList
         data={items}
         keyExtractor={(n) => n.id}
@@ -289,4 +339,27 @@ const styles = StyleSheet.create({
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#615DFA", marginTop: 4 },
   cardBodyText: { fontSize: 13, color: "#6B7280", marginTop: 4, lineHeight: 18 },
   timestamp: { fontSize: 11, color: "#9CA3AF", marginTop: 6 },
+  transfersBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#FFFFFF",
+    padding: 14,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+  },
+  bannerBody: { flex: 1 },
+  bannerTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  bannerSubtitle: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  bannerBadge: {
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: "#FB06D4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bannerBadgeText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
 });
