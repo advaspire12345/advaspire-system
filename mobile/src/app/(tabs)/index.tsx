@@ -32,13 +32,14 @@ type HomeData = {
 
 export default function HomeScreen() {
   const { user } = useAuth();
+  const userId = user?.id;
   const router = useRouter();
 
   const fetchHome = async (): Promise<HomeData> => {
     const { data: parentRow, error: parentErr } = await supabase
       .from("parents")
       .select("id, name")
-      .eq("auth_id", user!.id)
+      .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
     if (parentErr) throw parentErr;
@@ -114,9 +115,9 @@ export default function HomeScreen() {
   };
 
   const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<HomeData>(
-    `home:${user?.id ?? "anon"}`,
+    `home:${userId ?? "anon"}`,
     fetchHome,
-    { enabled: !!user },
+    { enabled: !!userId },
   );
 
   const parent = data?.parent ?? null;

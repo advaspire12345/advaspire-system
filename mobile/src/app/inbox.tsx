@@ -61,13 +61,14 @@ type InboxData = {
 
 export default function InboxScreen() {
   const { user } = useAuth();
+  const userId = user?.id;
   const router = useRouter();
 
   const fetchInbox = async (): Promise<InboxData> => {
     const { data: parentRow, error: parentErr } = await supabase
       .from("parents")
       .select("id")
-      .eq("auth_id", user!.id)
+      .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
     if (parentErr) throw parentErr;
@@ -118,9 +119,9 @@ export default function InboxScreen() {
   };
 
   const { data, loading, refreshing, error, isStale, updatedAt, refetch, setData } = useCachedQuery<InboxData>(
-    `inbox:${user?.id ?? "anon"}`,
+    `inbox:${userId ?? "anon"}`,
     fetchInbox,
-    { enabled: !!user },
+    { enabled: !!userId },
   );
 
   const items = data?.items ?? [];

@@ -33,6 +33,7 @@ type ParentForm = {
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
+  const userId = user?.id;
   const [original, setOriginal] = useState<ParentForm | null>(null);
   const [form, setForm] = useState<ParentForm | null>(null);
   const [saving, setSaving] = useState(false);
@@ -49,7 +50,7 @@ export default function ProfileScreen() {
     const { data, error } = await supabase
       .from("parents")
       .select("id, name, email, phone, address, postcode, city, photo, cover_photo")
-      .eq("auth_id", user!.id)
+      .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw error;
@@ -68,9 +69,9 @@ export default function ProfileScreen() {
   };
 
   const { data, loading, error, isStale, updatedAt } = useCachedQuery<ParentForm>(
-    `profile:${user?.id ?? "anon"}`,
+    `profile:${userId ?? "anon"}`,
     fetchProfile,
-    { enabled: !!user },
+    { enabled: !!userId },
   );
 
   // Seed the editable form from fetched/cached data. `original` always tracks

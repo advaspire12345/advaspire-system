@@ -67,6 +67,7 @@ function formatDate(iso: string): string {
 
 export default function ProgressScreen() {
   const { user } = useAuth();
+  const userId = user?.id;
   const { studentId: paramStudentId } = useLocalSearchParams<{ studentId?: string }>();
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("attendance");
@@ -78,7 +79,7 @@ export default function ProgressScreen() {
     const { data: parentRow } = await supabase
       .from("parents")
       .select("id")
-      .eq("auth_id", user!.id)
+      .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
     if (!parentRow) return [];
@@ -93,9 +94,9 @@ export default function ProgressScreen() {
   };
 
   const childrenQuery = useCachedQuery<Child[]>(
-    `progress:children:${user?.id ?? "anon"}`,
+    `progress:children:${userId ?? "anon"}`,
     fetchChildren,
-    { enabled: !!user },
+    { enabled: !!userId },
   );
   const children = useMemo(() => childrenQuery.data ?? [], [childrenQuery.data]);
 

@@ -37,13 +37,14 @@ function formatRM(amount: number): string {
 
 export default function PaymentsScreen() {
   const { user } = useAuth();
+  const userId = user?.id;
   const router = useRouter();
 
   const fetchPayments = async (): Promise<PaymentRow[]> => {
     const { data: parentRow, error: parentErr } = await supabase
       .from("parents")
       .select("id")
-      .eq("auth_id", user!.id)
+      .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
     if (parentErr) throw parentErr;
@@ -94,9 +95,9 @@ export default function PaymentsScreen() {
   };
 
   const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<PaymentRow[]>(
-    `payments:${user?.id ?? "anon"}`,
+    `payments:${userId ?? "anon"}`,
     fetchPayments,
-    { enabled: !!user },
+    { enabled: !!userId },
   );
 
   const payments = data ?? [];

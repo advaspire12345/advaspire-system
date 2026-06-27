@@ -127,6 +127,7 @@ function eventOccursOn(e: EventEntry, dateKey: string): boolean {
 
 export default function CalendarScreen() {
   const { user } = useAuth();
+  const userId = user?.id;
   const router = useRouter();
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
@@ -137,7 +138,7 @@ export default function CalendarScreen() {
     const { data: parentRow } = await supabase
       .from("parents")
       .select("id, branch_id, company_id")
-      .eq("auth_id", user!.id)
+      .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
     if (!parentRow) return empty;
@@ -267,9 +268,9 @@ export default function CalendarScreen() {
   };
 
   const { data, loading, error, isStale, updatedAt } = useCachedQuery<CalendarData>(
-    `schedule:${user?.id ?? "anon"}:${month.getFullYear()}-${month.getMonth()}`,
+    `schedule:${userId ?? "anon"}:${month.getFullYear()}-${month.getMonth()}`,
     fetchCalendar,
-    { enabled: !!user },
+    { enabled: !!userId },
   );
 
   const enrollments = useMemo(() => data?.enrollments ?? [], [data]);

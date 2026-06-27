@@ -26,12 +26,13 @@ type TransferRow = {
 
 export default function TransfersScreen() {
   const { user } = useAuth();
+  const userId = user?.id;
 
   const fetchTransfers = async (): Promise<TransferRow[]> => {
     const { data: parentRow } = await supabase
       .from("parents")
       .select("id")
-      .eq("auth_id", user!.id)
+      .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
     if (!parentRow) return [];
@@ -96,9 +97,9 @@ export default function TransfersScreen() {
   };
 
   const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<TransferRow[]>(
-    `transfers:${user?.id ?? "anon"}`,
+    `transfers:${userId ?? "anon"}`,
     fetchTransfers,
-    { enabled: !!user },
+    { enabled: !!userId },
   );
 
   const transfers = data ?? [];
