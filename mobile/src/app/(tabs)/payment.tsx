@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { supabase } from "@/lib/supabase";
 
 type PaymentRow = {
@@ -37,90 +38,69 @@ function formatRM(amount: number): string {
 export default function PaymentsScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const [payments, setPayments] = useState<PaymentRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const load = async () => {
-    if (!user) return;
-    setErrorMessage(null);
-    try {
-      const { data: parentRow, error: parentErr } = await supabase
-        .from("parents")
-        .select("id")
-        .eq("auth_id", user.id)
-        .is("deleted_at", null)
-        .maybeSingle();
-      if (parentErr) throw parentErr;
-      if (!parentRow) {
-        setPayments([]);
-        return;
-      }
+  const fetchPayments = async (): Promise<PaymentRow[]> => {
+    const { data: parentRow, error: parentErr } = await supabase
+      .from("parents")
+      .select("id")
+      .eq("auth_id", user!.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (parentErr) throw parentErr;
+    if (!parentRow) return [];
 
-      const { data: links } = await supabase
-        .from("parent_students")
-        .select("student_id, student:students!inner(deleted_at)")
-        .eq("parent_id", parentRow.id);
-      const studentIds = (links ?? [])
-        .filter((l) => !(l.student as unknown as { deleted_at: string | null })?.deleted_at)
-        .map((l) => l.student_id as string);
-      if (!studentIds.length) {
-        setPayments([]);
-        return;
-      }
+    const { data: links } = await supabase
+      .from("parent_students")
+      .select("student_id, student:students!inner(deleted_at)")
+      .eq("parent_id", parentRow.id);
+    const studentIds = (links ?? [])
+      .filter((l) => !(l.student as unknown as { deleted_at: string | null })?.deleted_at)
+      .map((l) => l.student_id as string);
+    if (!studentIds.length) return [];
 
-      const { data, error } = await supabase
-        .from("payments")
-        .select(`
-          id,
-          amount,
-          status,
-          paid_at,
-          created_at,
-          student_id,
-          invoice_number,
-          student:students!inner(name),
-          course:courses(name)
-        `)
-        .in("student_id", studentIds)
-        .order("created_at", { ascending: false })
-        .limit(50);
-      if (error) throw error;
+    const { data, error } = await supabase
+      .from("payments")
+      .select(`
+        id,
+        amount,
+        status,
+        paid_at,
+        created_at,
+        student_id,
+        invoice_number,
+        student:students!inner(name),
+        course:courses(name)
+      `)
+      .in("student_id", studentIds)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw error;
 
-      const mapped: PaymentRow[] = (data ?? []).map((p) => {
-        const s = p.student as unknown as { name: string } | null;
-        const c = p.course as unknown as { name: string } | null;
-        return {
-          id: p.id as string,
-          amount: Number(p.amount ?? 0),
-          status: (p.status as PaymentRow["status"]) ?? "pending",
-          paidAt: (p.paid_at as string | null) ?? null,
-          createdAt: p.created_at as string,
-          studentId: p.student_id as string,
-          studentName: s?.name ?? "Unknown",
-          courseName: c?.name ?? null,
-          invoiceNumber: (p.invoice_number as string | null) ?? null,
-        };
-      });
-      setPayments(mapped);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to load payments");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    return (data ?? []).map((p) => {
+      const s = p.student as unknown as { name: string } | null;
+      const c = p.course as unknown as { name: string } | null;
+      return {
+        id: p.id as string,
+        amount: Number(p.amount ?? 0),
+        status: (p.status as PaymentRow["status"]) ?? "pending",
+        paidAt: (p.paid_at as string | null) ?? null,
+        createdAt: p.created_at as string,
+        studentId: p.student_id as string,
+        studentName: s?.name ?? "Unknown",
+        courseName: c?.name ?? null,
+        invoiceNumber: (p.invoice_number as string | null) ?? null,
+      };
+    });
   };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<PaymentRow[]>(
+    `payments:${user?.id ?? "anon"}`,
+    fetchPayments,
+    { enabled: !!user },
+  );
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    load();
-  };
+  const payments = data ?? [];
+  const errorMessage = error && !data ? "Couldn't load payments. Check your connection and pull down to refresh." : null;
 
   if (loading) {
     return (
@@ -147,11 +127,17 @@ export default function PaymentsScreen() {
         </View>
       ) : null}
 
+      {isStale ? (
+        <View style={styles.bannerWrap}>
+          <OfflineBanner updatedAt={updatedAt} />
+        </View>
+      ) : null}
+
       <FlatList
         data={payments}
         keyExtractor={(p) => p.id}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#615DFA" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#615DFA" />}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No payments yet</Text>
@@ -193,6 +179,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: "800", color: "#111827" },
   subtitle: { fontSize: 14, color: "#6B7280", marginTop: 2 },
   errorCard: { marginHorizontal: 16, marginBottom: 12, backgroundColor: "#FEE2E2", padding: 16, borderRadius: 12 },
+  bannerWrap: { paddingHorizontal: 16, marginBottom: 12 },
   errorText: { color: "#991B1B", fontSize: 14 },
   list: { padding: 16, paddingTop: 0, gap: 12 },
   empty: { padding: 32, alignItems: "center" },

@@ -14,7 +14,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { supabase } from "@/lib/supabase";
 
 type ParentForm = {
@@ -33,7 +35,6 @@ export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const [original, setOriginal] = useState<ParentForm | null>(null);
   const [form, setForm] = useState<ParentForm | null>(null);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -44,46 +45,45 @@ export default function ProfileScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!user) return;
-      try {
-        const { data, error } = await supabase
-          .from("parents")
-          .select("id, name, email, phone, address, postcode, city, photo, cover_photo")
-          .eq("auth_id", user.id)
-          .is("deleted_at", null)
-          .maybeSingle();
-        if (error) throw error;
-        if (cancelled) return;
-        if (!data) {
-          setErrorMessage("Parent record not found.");
-          return;
-        }
-        const next: ParentForm = {
-          id: data.id as string,
-          name: (data.name as string) ?? "",
-          email: (data.email as string) ?? "",
-          phone: (data.phone as string | null) ?? "",
-          address: (data.address as string | null) ?? "",
-          postcode: (data.postcode as string | null) ?? "",
-          city: (data.city as string | null) ?? "",
-          photo: (data.photo as string | null) ?? null,
-          coverPhoto: (data.cover_photo as string | null) ?? null,
-        };
-        setOriginal(next);
-        setForm(next);
-      } catch (err) {
-        if (!cancelled) setErrorMessage(err instanceof Error ? err.message : "Failed to load profile");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
+  const fetchProfile = async (): Promise<ParentForm> => {
+    const { data, error } = await supabase
+      .from("parents")
+      .select("id, name, email, phone, address, postcode, city, photo, cover_photo")
+      .eq("auth_id", user!.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("Parent record not found.");
+    return {
+      id: data.id as string,
+      name: (data.name as string) ?? "",
+      email: (data.email as string) ?? "",
+      phone: (data.phone as string | null) ?? "",
+      address: (data.address as string | null) ?? "",
+      postcode: (data.postcode as string | null) ?? "",
+      city: (data.city as string | null) ?? "",
+      photo: (data.photo as string | null) ?? null,
+      coverPhoto: (data.cover_photo as string | null) ?? null,
     };
-  }, [user?.id]);
+  };
+
+  const { data, loading, error, isStale, updatedAt } = useCachedQuery<ParentForm>(
+    `profile:${user?.id ?? "anon"}`,
+    fetchProfile,
+    { enabled: !!user },
+  );
+
+  // Seed the editable form from fetched/cached data. `original` always tracks
+  // the latest server snapshot (for dirty detection); `form` seeds once so we
+  // never clobber edits a refresh lands mid-typing.
+  useEffect(() => {
+    if (data) {
+      setOriginal(data);
+      setForm((prev) => prev ?? data);
+    }
+  }, [data]);
+
+  const loadErrorMessage = error && !data ? error : null;
 
   const dirty =
     form && original && (
@@ -159,10 +159,21 @@ export default function ProfileScreen() {
     );
   };
 
-  if (loading || !form) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
         <ActivityIndicator color="#615DFA" />
+      </SafeAreaView>
+    );
+  }
+
+  if (!form) {
+    return (
+      <SafeAreaView style={styles.center} edges={["top"]}>
+        <Ionicons name="cloud-offline-outline" size={32} color="#9CA3AF" />
+        <Text style={styles.errorText}>
+          {loadErrorMessage ?? "Couldn't load your profile. Connect to the internet and try again."}
+        </Text>
       </SafeAreaView>
     );
   }
@@ -206,6 +217,12 @@ export default function ProfileScreen() {
             <Text style={styles.identityName}>{original?.name}</Text>
             <Text style={styles.identityEmail}>{form.email}</Text>
           </View>
+
+          {isStale ? (
+            <View style={styles.bannerWrap}>
+              <OfflineBanner updatedAt={updatedAt} />
+            </View>
+          ) : null}
 
           {errorMessage ? (
             <View style={styles.errorCard}>
@@ -336,7 +353,8 @@ function Field({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F6FB" },
   flex: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB", gap: 12, paddingHorizontal: 24 },
+  bannerWrap: { paddingHorizontal: 20, marginBottom: 8 },
   scroll: { paddingBottom: 32 },
   coverWrap: { position: "relative", marginBottom: 56 },
   coverPressable: { width: "100%", height: 120, backgroundColor: "#615DFA" },

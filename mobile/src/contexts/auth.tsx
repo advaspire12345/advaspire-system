@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { clearCache } from "@/lib/cache";
 import { supabase } from "@/lib/supabase";
 
 type AuthState = {
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       },
       async signOut() {
         await supabase.auth.signOut();
+        await clearCache();
       },
     }),
     [session, loading],

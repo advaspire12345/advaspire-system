@@ -2,7 +2,7 @@
   "expo": {
     "name": "Advaspire",
     "slug": "advaspire",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "advaspire",
@@ -20,7 +20,10 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "web": {
       "output": "static",
@@ -52,6 +55,12 @@
         "projectId": "590a41fb-f906-48ed-a585-4cb9fe7b599d"
       }
     },
-    "owner": "advaspire"
+    "owner": "advaspire",
+    "updates": {
+      "url": "https://u.expo.dev/590a41fb-f906-48ed-a585-4cb9fe7b599d"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
   }
 }

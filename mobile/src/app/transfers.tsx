@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { supabase } from "@/lib/supabase";
 
 type TransferRow = {
@@ -25,37 +26,25 @@ type TransferRow = {
 
 export default function TransfersScreen() {
   const { user } = useAuth();
-  const [transfers, setTransfers] = useState<TransferRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const load = async () => {
-    if (!user) return;
-    setErrorMessage(null);
-    try {
-      const { data: parentRow } = await supabase
-        .from("parents")
-        .select("id")
-        .eq("auth_id", user.id)
-        .is("deleted_at", null)
-        .maybeSingle();
-      if (!parentRow) {
-        setTransfers([]);
-        return;
-      }
-      const { data: links } = await supabase
-        .from("parent_students")
-        .select("student_id")
-        .eq("parent_id", parentRow.id);
-      const studentIds = (links ?? []).map((l) => l.student_id as string);
-      if (studentIds.length === 0) {
-        setTransfers([]);
-        return;
-      }
+  const fetchTransfers = async (): Promise<TransferRow[]> => {
+    const { data: parentRow } = await supabase
+      .from("parents")
+      .select("id")
+      .eq("auth_id", user!.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (!parentRow) return [];
 
-      // Two queries in parallel: outgoing-to-approve, incoming-to-accept.
-      const [outRes, inRes] = await Promise.all([
+    const { data: links } = await supabase
+      .from("parent_students")
+      .select("student_id")
+      .eq("parent_id", parentRow.id);
+    const studentIds = (links ?? []).map((l) => l.student_id as string);
+    if (studentIds.length === 0) return [];
+
+    // Two queries in parallel: outgoing-to-approve, incoming-to-accept.
+    const [outRes, inRes] = await Promise.all([
         supabase
           .from("session_transfers")
           .select(`
@@ -80,42 +69,40 @@ export default function TransfersScreen() {
           .order("created_at", { ascending: false }),
       ]);
 
-      if (outRes.error) throw outRes.error;
-      if (inRes.error) throw inRes.error;
+    if (outRes.error) throw outRes.error;
+    if (inRes.error) throw inRes.error;
 
-      const map = (raw: typeof outRes.data, kind: TransferRow["kind"]): TransferRow[] =>
-        (raw ?? []).map((t) => {
-          const from = t.from_student as unknown as { name: string } | null;
-          const to = t.to_student as unknown as { name: string } | null;
-          const c = t.course as unknown as { name: string } | null;
-          return {
-            id: t.id as string,
-            fromStudentId: t.from_student_id as string,
-            fromStudentName: from?.name ?? "Unknown",
-            toStudentId: t.to_student_id as string,
-            toStudentName: to?.name ?? "Unknown",
-            courseName: c?.name ?? "Class",
-            sessions: Number(t.sessions ?? 0),
-            status: t.status as TransferRow["status"],
-            notes: (t.notes as string | null) ?? null,
-            createdAt: t.created_at as string,
-            kind,
-          };
-        });
+    const map = (raw: typeof outRes.data, kind: TransferRow["kind"]): TransferRow[] =>
+      (raw ?? []).map((t) => {
+        const from = t.from_student as unknown as { name: string } | null;
+        const to = t.to_student as unknown as { name: string } | null;
+        const c = t.course as unknown as { name: string } | null;
+        return {
+          id: t.id as string,
+          fromStudentId: t.from_student_id as string,
+          fromStudentName: from?.name ?? "Unknown",
+          toStudentId: t.to_student_id as string,
+          toStudentName: to?.name ?? "Unknown",
+          courseName: c?.name ?? "Class",
+          sessions: Number(t.sessions ?? 0),
+          status: t.status as TransferRow["status"],
+          notes: (t.notes as string | null) ?? null,
+          createdAt: t.created_at as string,
+          kind,
+        };
+      });
 
-      setTransfers([...map(outRes.data, "outgoing-approve"), ...map(inRes.data, "incoming-accept")]);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to load transfers");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    return [...map(outRes.data, "outgoing-approve"), ...map(inRes.data, "incoming-accept")];
   };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<TransferRow[]>(
+    `transfers:${user?.id ?? "anon"}`,
+    fetchTransfers,
+    { enabled: !!user },
+  );
+
+  const transfers = data ?? [];
+  const errorMessage = error && !data ? "Couldn't load transfers. Check your connection and pull down to refresh." : null;
 
   const onAct = (action: "approve" | "accept" | "reject", _id: string) => {
     Alert.alert(
@@ -142,11 +129,17 @@ export default function TransfersScreen() {
         </View>
       ) : null}
 
+      {isStale ? (
+        <View style={styles.bannerWrap}>
+          <OfflineBanner updatedAt={updatedAt} />
+        </View>
+      ) : null}
+
       <FlatList
         data={transfers}
         keyExtractor={(t) => t.id}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#615DFA" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#615DFA" />}
         ListHeaderComponent={
           <View style={styles.intro}>
             <Text style={styles.introTitle}>Sibling session transfers</Text>
@@ -227,6 +220,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F6FB" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
   errorCard: { marginHorizontal: 16, marginTop: 12, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
+  bannerWrap: { paddingHorizontal: 16, marginTop: 12 },
   errorText: { color: "#991B1B", fontSize: 13 },
   list: { padding: 16, gap: 12 },
   intro: { paddingBottom: 4 },

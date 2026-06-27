@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,7 +11,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
+import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { supabase } from "@/lib/supabase";
 
 type NotificationRow = {
@@ -52,101 +53,96 @@ function iconFor(type: string) {
   return TYPE_ICONS[type] ?? { icon: "notifications", color: "#6B7280" };
 }
 
+type InboxData = {
+  parentId: string | null;
+  items: NotificationRow[];
+  pendingTransferCount: number;
+};
+
 export default function InboxScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const [parentId, setParentId] = useState<string | null>(null);
-  const [items, setItems] = useState<NotificationRow[]>([]);
-  const [pendingTransferCount, setPendingTransferCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setErrorMessage(null);
-    try {
-      let pid = parentId;
-      if (!pid) {
-        const { data: parentRow, error: parentErr } = await supabase
-          .from("parents")
-          .select("id")
-          .eq("auth_id", user.id)
-          .is("deleted_at", null)
-          .maybeSingle();
-        if (parentErr) throw parentErr;
-        pid = (parentRow?.id as string) ?? null;
-        setParentId(pid);
-      }
-      if (!pid) {
-        setItems([]);
-        return;
-      }
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("id, type, title, body, link, read_at, created_at")
-        .eq("parent_id", pid)
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (error) throw error;
+  const fetchInbox = async (): Promise<InboxData> => {
+    const { data: parentRow, error: parentErr } = await supabase
+      .from("parents")
+      .select("id")
+      .eq("auth_id", user!.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (parentErr) throw parentErr;
+    const pid = (parentRow?.id as string) ?? null;
+    if (!pid) return { parentId: null, items: [], pendingTransferCount: 0 };
 
-      // Count pending session transfers (sender or receiver side) so the
-      // "Session transfers" entry shows a badge when action is needed.
-      const { data: links } = await supabase
-        .from("parent_students")
-        .select("student_id")
-        .eq("parent_id", pid);
-      const sids = (links ?? []).map((l) => l.student_id as string);
-      if (sids.length > 0) {
-        const [{ count: outCount }, { count: inCount }] = await Promise.all([
-          supabase
-            .from("session_transfers")
-            .select("id", { count: "exact", head: true })
-            .in("from_student_id", sids)
-            .eq("status", "pending_sender"),
-          supabase
-            .from("session_transfers")
-            .select("id", { count: "exact", head: true })
-            .in("to_student_id", sids)
-            .eq("status", "pending_receiver"),
-        ]);
-        setPendingTransferCount((outCount ?? 0) + (inCount ?? 0));
-      } else {
-        setPendingTransferCount(0);
-      }
-      const mapped: NotificationRow[] = (data ?? []).map((n) => ({
-        id: n.id as string,
-        type: (n.type as string) ?? "default",
-        title: (n.title as string) ?? "(no title)",
-        body: (n.body as string) ?? null,
-        link: (n.link as string) ?? null,
-        readAt: (n.read_at as string | null) ?? null,
-        createdAt: n.created_at as string,
-      }));
-      setItems(mapped);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to load notifications");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("id, type, title, body, link, read_at, created_at")
+      .eq("parent_id", pid)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) throw error;
+
+    // Count pending session transfers (sender or receiver side) so the
+    // "Session transfers" entry shows a badge when action is needed.
+    const { data: links } = await supabase
+      .from("parent_students")
+      .select("student_id")
+      .eq("parent_id", pid);
+    const sids = (links ?? []).map((l) => l.student_id as string);
+    let pendingTransferCount = 0;
+    if (sids.length > 0) {
+      const [{ count: outCount }, { count: inCount }] = await Promise.all([
+        supabase
+          .from("session_transfers")
+          .select("id", { count: "exact", head: true })
+          .in("from_student_id", sids)
+          .eq("status", "pending_sender"),
+        supabase
+          .from("session_transfers")
+          .select("id", { count: "exact", head: true })
+          .in("to_student_id", sids)
+          .eq("status", "pending_receiver"),
+      ]);
+      pendingTransferCount = (outCount ?? 0) + (inCount ?? 0);
     }
-  }, [user, parentId]);
+    const items: NotificationRow[] = (data ?? []).map((n) => ({
+      id: n.id as string,
+      type: (n.type as string) ?? "default",
+      title: (n.title as string) ?? "(no title)",
+      body: (n.body as string) ?? null,
+      link: (n.link as string) ?? null,
+      readAt: (n.read_at as string | null) ?? null,
+      createdAt: n.created_at as string,
+    }));
+    return { parentId: pid, items, pendingTransferCount };
+  };
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, loading, refreshing, error, isStale, updatedAt, refetch, setData } = useCachedQuery<InboxData>(
+    `inbox:${user?.id ?? "anon"}`,
+    fetchInbox,
+    { enabled: !!user },
+  );
+
+  const items = data?.items ?? [];
+  const parentId = data?.parentId ?? null;
+  const pendingTransferCount = data?.pendingTransferCount ?? 0;
+  const errorMessage =
+    error && !data ? "Couldn't load notifications. Check your connection and pull down to refresh." : null;
+
+  const patchItems = (fn: (rows: NotificationRow[]) => NotificationRow[]) =>
+    setData((prev) => (prev ? { ...prev, items: fn(prev.items) } : prev));
 
   const markRead = async (id: string) => {
     // Optimistic update
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)));
-    const { error } = await supabase
+    patchItems((rows) => rows.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)));
+    const { error: updErr } = await supabase
       .from("notifications")
       .update({ read_at: new Date().toISOString() })
       .eq("id", id);
-    if (error) {
+    if (updErr) {
       // Revert on failure
-      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: null } : n)));
-      Alert.alert("Could not mark read", error.message);
+      patchItems((rows) => rows.map((n) => (n.id === id ? { ...n, readAt: null } : n)));
+      Alert.alert("Could not mark read", updErr.message);
     }
   };
 
@@ -155,15 +151,15 @@ export default function InboxScreen() {
     const unread = items.filter((n) => !n.readAt);
     if (unread.length === 0) return;
     const now = new Date().toISOString();
-    setItems((prev) => prev.map((n) => (n.readAt ? n : { ...n, readAt: now })));
-    const { error } = await supabase
+    patchItems((rows) => rows.map((n) => (n.readAt ? n : { ...n, readAt: now })));
+    const { error: updErr } = await supabase
       .from("notifications")
       .update({ read_at: now })
       .eq("parent_id", parentId)
       .is("read_at", null);
-    if (error) {
-      Alert.alert("Could not mark all read", error.message);
-      load();
+    if (updErr) {
+      Alert.alert("Could not mark all read", updErr.message);
+      refetch();
     }
   };
 
@@ -180,11 +176,6 @@ export default function InboxScreen() {
       }
       // Otherwise just stay — future iterations can map more link shapes
     }
-  };
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    load();
   };
 
   const unreadCount = items.filter((n) => !n.readAt).length;
@@ -219,6 +210,12 @@ export default function InboxScreen() {
         </View>
       ) : null}
 
+      {isStale ? (
+        <View style={styles.bannerWrap}>
+          <OfflineBanner updatedAt={updatedAt} />
+        </View>
+      ) : null}
+
       <Pressable
         style={({ pressed }) => [styles.transfersBanner, pressed && styles.pressed]}
         onPress={() => router.push("/transfers")}
@@ -247,7 +244,7 @@ export default function InboxScreen() {
         data={items}
         keyExtractor={(n) => n.id}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#615DFA" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#615DFA" />}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="notifications-off-outline" size={48} color="#D1D5DB" />
@@ -313,6 +310,7 @@ const styles = StyleSheet.create({
   markAllText: { fontSize: 12, fontWeight: "700", color: "#615DFA" },
   errorCard: { marginHorizontal: 16, marginBottom: 12, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
   errorText: { color: "#991B1B", fontSize: 13 },
+  bannerWrap: { paddingHorizontal: 16, marginBottom: 12 },
   list: { padding: 16, paddingTop: 0, gap: 8 },
   empty: { padding: 48, alignItems: "center", gap: 8 },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },

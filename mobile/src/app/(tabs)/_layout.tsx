@@ -1,11 +1,10 @@
 import { Tabs } from "expo-router";
-import { useColorScheme } from "react-native";
+import { Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 export default function TabsLayout() {
-  const scheme = useColorScheme();
   const active = "#615DFA";
-  const inactive = scheme === "dark" ? "#9CA3AF" : "#6B7280";
+  const inactive = "#9CA3AF";
 
   return (
     <Tabs
@@ -13,42 +12,56 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: active,
         tabBarInactiveTintColor: inactive,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "700", marginTop: -2 },
+        tabBarStyle: {
+          backgroundColor: "#FFFFFF",
+          borderTopWidth: 0,
+          elevation: 16,
+          shadowColor: "#0F172A",
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: -4 },
+          height: Platform.OS === "ios" ? 84 : 64,
+          paddingTop: 8,
+          paddingBottom: Platform.OS === "ios" ? 24 : 8,
+        },
+        tabBarItemStyle: { paddingVertical: 4 },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "home" : "home-outline"} size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="calendar"
+        name="progress"
         options={{
-          title: "Calendar",
-          tabBarIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
+          title: "Progress",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "trending-up" : "trending-up-outline"} size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="payments"
+        name="schedule"
         options={{
-          title: "Payments",
-          tabBarIcon: ({ color, size }) => <Ionicons name="card" size={size} color={color} />,
+          title: "Schedule",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "calendar" : "calendar-outline"} size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="inbox"
+        name="payment"
         options={{
-          title: "Inbox",
-          tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+          title: "Payment",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "card" : "card-outline"} size={22} color={color} />
+          ),
         }}
       />
     </Tabs>
