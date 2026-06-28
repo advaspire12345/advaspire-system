@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -28,6 +28,10 @@ import { supabase } from "@/lib/supabase";
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const CELL_COLLAPSED = 66;
+const CELL_EXPANDED = 108;
 
 const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -106,9 +110,11 @@ function buildMonthGrid(year: number, month: number): (Date | null)[][] {
   const first = new Date(year, month, 1);
   const firstWeekday = first.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+  // Only the weeks this month actually spans (4–6), so there's no empty row.
+  const weeks = Math.ceil((firstWeekday + daysInMonth) / 7);
   const grid: (Date | null)[][] = [];
   let cursor = 1 - firstWeekday;
-  for (let row = 0; row < 6; row++) {
+  for (let row = 0; row < weeks; row++) {
     const rowCells: (Date | null)[] = [];
     for (let col = 0; col < 7; col++) {
       rowCells.push(cursor >= 1 && cursor <= daysInMonth ? new Date(year, month, cursor) : null);
@@ -117,6 +123,13 @@ function buildMonthGrid(year: number, month: number): (Date | null)[][] {
     grid.push(rowCells);
   }
   return grid;
+}
+
+// Year-view mini months pad to 6 rows so the 12-month grid stays aligned.
+function monthGridPadded(year: number, month: number): (Date | null)[][] {
+  const g = buildMonthGrid(year, month);
+  while (g.length < 6) g.push([null, null, null, null, null, null, null]);
+  return g;
 }
 
 const STATUS_COLORS: Record<AttendanceMarker["status"], string> = {
@@ -184,6 +197,8 @@ export default function CalendarScreen() {
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
+  // Live month cell height (drives the pull-to-expand; follows the finger).
+  const cellH = useMemo(() => new Animated.Value(CELL_COLLAPSED), []);
 
   const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
   useFocusEffect(
@@ -393,18 +408,36 @@ export default function CalendarScreen() {
   const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
     router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
 
-  // vertical drag on the handle → expand / collapse / week
-  const expandPan = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 12 && Math.abs(g.dy) > Math.abs(g.dx),
-        onPanResponderRelease: (_e, g) => {
-          if (g.dy > 40) { animate(); if (view === "week") setView("month"); else setExpanded(true); }
-          else if (g.dy < -40) { animate(); if (view === "month" && expanded) setExpanded(false); else setView("week"); }
-        },
-      }),
-    [view, expanded],
-  );
+  // vertical drag on the handle → live finger-following expand / collapse / week
+  const expandPan = useMemo(() => {
+    let base = CELL_COLLAPSED;
+    const settle = (v: number) => {
+      const target = v > (CELL_COLLAPSED + CELL_EXPANDED) / 2 ? CELL_EXPANDED : CELL_COLLAPSED;
+      Animated.spring(cellH, { toValue: target, useNativeDriver: false, bounciness: 0, speed: 16 }).start();
+      setExpanded(target === CELL_EXPANDED);
+    };
+    return PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderGrant: () => { cellH.stopAnimation((v) => { base = v; }); },
+      onPanResponderMove: (_e, g) => {
+        if (view !== "month") return;
+        cellH.setValue(Math.max(CELL_COLLAPSED, Math.min(CELL_EXPANDED, base + g.dy)));
+      },
+      onPanResponderRelease: (_e, g) => {
+        if (view === "week") { if (g.dy > 30) { animate(); setView("month"); } return; }
+        if (g.dy < -40 && base <= CELL_COLLAPSED + 4) { animate(); setView("week"); return; }
+        settle(Math.max(CELL_COLLAPSED, Math.min(CELL_EXPANDED, base + g.dy)));
+      },
+      onPanResponderTerminate: () => settle(CELL_COLLAPSED),
+    });
+  }, [cellH, view]);
+
+  const toggleExpand = () => {
+    if (view === "week") { animate(); setView("month"); return; }
+    const next = !expanded;
+    setExpanded(next);
+    Animated.spring(cellH, { toValue: next ? CELL_EXPANDED : CELL_COLLAPSED, useNativeDriver: false, bounciness: 0, speed: 16 }).start();
+  };
 
   const periodTitle = useMemo(() => {
     if (view === "year") return String(month.getFullYear());
@@ -463,12 +496,12 @@ export default function CalendarScreen() {
       ) : null}
 
       {view === "year" ? (
-        <SwipePager fill onShift={shift} renderPanel={(o) => (
+        <SwipePager fill onShift={shift} pageKey={`y-${month.getFullYear()}`} renderPanel={(o) => (
           <YearView year={month.getFullYear() + o} hasAnyItem={hasAnyItem} todayKey={todayKey}
             onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear() + o, mi, 1)); setView("month"); }} />
         )} />
       ) : view === "day" ? (
-        <SwipePager fill onShift={shift} renderPanel={(o) => {
+        <SwipePager fill onShift={shift} pageKey={`d-${ymd(selectedDay)}`} renderPanel={(o) => {
           const d = addDays(selectedDay, o);
           return <DayAgenda day={d} items={buildDayItems(ymd(d))} onReschedule={onReschedule} big />;
         }} />
@@ -477,20 +510,25 @@ export default function CalendarScreen() {
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          <SwipePager onShift={shift} renderPanel={(o) => (
-            <MonthOrWeekGrid
-              view={view}
-              periodDate={view === "month" ? addMonths(month, o) : addDays(selectedDay, o * 7)}
-              selectedDay={selectedDay}
-              expanded={expanded}
-              todayKey={todayKey}
-              buildDayItems={buildDayItems}
-              onPickDay={pickDay}
-            />
-          )} />
-          {/* drag handle to expand / collapse */}
+          <SwipePager
+            onShift={shift}
+            pageKey={view === "month" ? `m-${month.getFullYear()}-${month.getMonth()}` : `w-${ymd(startOfWeek(selectedDay))}`}
+            renderPanel={(o) => (
+              <MonthOrWeekGrid
+                view={view}
+                periodDate={view === "month" ? addMonths(month, o) : addDays(selectedDay, o * 7)}
+                selectedDay={selectedDay}
+                expanded={expanded}
+                cellHeight={view === "week" ? 150 : cellH}
+                todayKey={todayKey}
+                buildDayItems={buildDayItems}
+                onPickDay={pickDay}
+              />
+            )}
+          />
+          {/* drag handle: pull down to expand, up to collapse / go to week */}
           <View style={styles.handleWrap} {...expandPan.panHandlers}>
-            <Pressable onPress={() => { animate(); if (view === "week") { setView("month"); } else setExpanded((e) => !e); }} hitSlop={10}>
+            <Pressable onPress={toggleExpand} hitSlop={10}>
               <View style={styles.handleBar} />
             </Pressable>
           </View>
@@ -526,12 +564,13 @@ export default function CalendarScreen() {
 
 // ── Month / Week grid with pills ──
 function MonthOrWeekGrid({
-  view, periodDate, selectedDay, expanded, todayKey, buildDayItems, onPickDay,
+  view, periodDate, selectedDay, expanded, cellHeight, todayKey, buildDayItems, onPickDay,
 }: {
   view: ViewMode;
   periodDate: Date;
   selectedDay: Date;
   expanded: boolean;
+  cellHeight: number | Animated.Value;
   todayKey: string;
   buildDayItems: (k: string) => DayItem[];
   onPickDay: (d: Date) => void;
@@ -540,7 +579,6 @@ function MonthOrWeekGrid({
     ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(periodDate), i))]
     : buildMonthGrid(periodDate.getFullYear(), periodDate.getMonth());
   const maxPills = view === "week" ? 6 : expanded ? 4 : 2;
-  const cellHeight = view === "week" ? 150 : expanded ? 108 : 66;
   const selKey = ymd(selectedDay);
 
   return (
@@ -548,14 +586,14 @@ function MonthOrWeekGrid({
       {rows.map((row, ri) => (
         <View key={ri} style={styles.gridRow}>
           {row.map((d, ci) => {
-            if (!d) return <View key={ci} style={[styles.cell, { height: cellHeight }]} />;
+            if (!d) return <Animated.View key={ci} style={[styles.cell, { height: cellHeight }]} />;
             const key = ymd(d);
             const items = buildDayItems(key);
             const isToday = key === todayKey;
             const isSelected = key === selKey;
             const dim = view === "month" && d.getMonth() !== periodDate.getMonth();
             return (
-              <Pressable key={ci} style={[styles.cell, { height: cellHeight }, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
+              <AnimatedPressable key={ci} style={[styles.cell, { height: cellHeight }, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
                 <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
                   <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
                     {d.getDate()}
@@ -569,7 +607,7 @@ function MonthOrWeekGrid({
                   ))}
                   {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
                 </View>
-              </Pressable>
+              </AnimatedPressable>
             );
           })}
         </View>
@@ -594,7 +632,7 @@ function YearView({
           <Pressable key={mi} style={styles.miniMonth} onPress={() => onPickMonth(mi)}>
             <Text style={styles.miniTitle}>{MONTH_NAMES[mi]}</Text>
             <View>
-              {buildMonthGrid(year, mi).map((row, ri) => (
+              {monthGridPadded(year, mi).map((row, ri) => (
                 <View key={ri} style={styles.miniRow}>
                   {row.map((d, ci) => {
                     if (!d) return <View key={ci} style={styles.miniCell} />;
@@ -620,16 +658,22 @@ function YearView({
 // ── Interactive swipe pager: three panels (prev/current/next) that track the
 // finger and snap to the neighbour on release, then commit via onShift. ──
 function SwipePager({
-  fill, onShift, renderPanel,
+  fill, onShift, renderPanel, pageKey,
 }: {
   fill?: boolean;
   onShift: (dir: -1 | 1) => void;
   renderPanel: (offset: -1 | 0 | 1) => React.ReactNode;
+  pageKey: string;
 }) {
   const { width } = useWindowDimensions();
   // tx is the live drag delta (0 = current panel centred). Base offset that
   // centres the middle panel is applied statically via marginLeft.
   const tx = useMemo(() => new Animated.Value(0), []);
+
+  // After a commit the period (pageKey) changes and all panels re-render with
+  // shifted data; snap back to centre BEFORE paint so the day numbers never
+  // flash in the wrong place ("rearranging").
+  useLayoutEffect(() => { tx.setValue(0); }, [pageKey, tx]);
 
   const responder = useMemo(
     () =>
@@ -639,9 +683,9 @@ function SwipePager({
         onPanResponderRelease: (_e, g) => {
           const threshold = width * 0.22;
           if (g.dx > threshold || g.vx > 0.4) {
-            Animated.timing(tx, { toValue: width, duration: 160, useNativeDriver: true }).start(() => { onShift(-1); tx.setValue(0); });
+            Animated.timing(tx, { toValue: width, duration: 160, useNativeDriver: true }).start(() => onShift(-1));
           } else if (g.dx < -threshold || g.vx < -0.4) {
-            Animated.timing(tx, { toValue: -width, duration: 160, useNativeDriver: true }).start(() => { onShift(1); tx.setValue(0); });
+            Animated.timing(tx, { toValue: -width, duration: 160, useNativeDriver: true }).start(() => onShift(1));
           } else {
             Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
           }
