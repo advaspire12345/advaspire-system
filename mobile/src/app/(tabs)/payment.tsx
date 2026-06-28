@@ -36,7 +36,7 @@ function formatDate(iso: string): string {
 function formatRM(amount: number): string {
   return `RM${amount.toFixed(2)}`;
 }
-function joinNames(names: string[]): string {
+function joinNames(names: string[] = []): string {
   if (names.length <= 1) return names[0] ?? "—";
   if (names.length === 2) return `${names[0]} & ${names[1]}`;
   return `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
@@ -199,7 +199,7 @@ export default function PaymentsScreen() {
                 </View>
                 <View style={styles.childRow}>
                   {b.isShared ? <Ionicons name="people" size={14} color="#615DFA" /> : <Ionicons name="person" size={14} color="#9CA3AF" />}
-                  <Text style={styles.childNames} numberOfLines={1}>{joinNames(b.childNames)}</Text>
+                  <Text style={styles.childNames} numberOfLines={1}>{joinNames(b.childNames ?? [])}</Text>
                   {b.isShared ? <View style={styles.sharedBadge}><Text style={styles.sharedText}>Shared</Text></View> : null}
                 </View>
                 <Text style={styles.courseName}>{b.courseName}</Text>

@@ -13,16 +13,19 @@ type ParentRow = {
   name: string;
 };
 
+type ProgramSessions = {
+  name: string;
+  remaining: number;
+  total: number;
+};
+
 type ChildSummary = {
   studentId: string;
   studentName: string;
   photo: string | null;
   level: number;
   adcoinBalance: number;
-  programName: string | null;
-  sessionsRemaining: number;
-  sessionsTotal: number;
-  sessionsUsed: number;
+  programs: ProgramSessions[];
 };
 
 type HomeData = {
@@ -92,22 +95,25 @@ export default function HomeScreen() {
       })
       .filter((s) => s && !s.deleted_at)
       .map((s) => {
-        const active = (s.enrollments ?? [])
+        // All active enrollments, newest first, one entry per program (course).
+        const actives = (s.enrollments ?? [])
           .filter((e) => !e.deleted_at && e.status === "active")
-          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
-        const total = active?.package?.duration ?? 0;
-        const remaining = Number(active?.sessions_remaining ?? 0);
-        const used = Math.max(0, total - remaining);
+          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+        const seen = new Set<string>();
+        const programs: ProgramSessions[] = [];
+        for (const e of actives) {
+          const name = e.course?.name ?? "Program";
+          if (seen.has(name)) continue;
+          seen.add(name);
+          programs.push({ name, remaining: Number(e.sessions_remaining ?? 0), total: e.package?.duration ?? 0 });
+        }
         return {
           studentId: s.id,
           studentName: s.name,
           photo: s.photo,
           level: s.level,
           adcoinBalance: s.adcoin_balance ?? 0,
-          programName: active?.course?.name ?? null,
-          sessionsRemaining: remaining,
-          sessionsTotal: total,
-          sessionsUsed: used,
+          programs,
         };
       });
 
@@ -187,80 +193,70 @@ export default function HomeScreen() {
           <Text style={styles.sectionLabel}>My children</Text>
         ) : null}
 
-        {children.map((c) => {
-          const usedFraction = c.sessionsTotal > 0 ? Math.min(1, c.sessionsUsed / c.sessionsTotal) : 0;
-          const remainingPct = Math.round((1 - usedFraction) * 100);
-          return (
-            <Pressable
-              key={c.studentId}
-              style={({ pressed }) => [styles.childCard, pressed && styles.cardPressed]}
-              onPress={() => router.push({ pathname: "/(tabs)/progress", params: { studentId: c.studentId } })}
-            >
-              <View style={styles.childTop}>
-                <View style={styles.avatarStack}>
-                  {c.photo ? (
-                    <Image source={{ uri: c.photo }} style={styles.childAvatar} />
-                  ) : (
-                    <View style={[styles.childAvatar, styles.childAvatarFallback]}>
-                      <Text style={styles.childAvatarInitial}>{c.studentName.charAt(0).toUpperCase()}</Text>
-                    </View>
-                  )}
-                  <View style={styles.levelBadge}>
-                    <Text style={styles.levelBadgeText}>Lv {c.level}</Text>
+        {children.map((c) => (
+          <Pressable
+            key={c.studentId}
+            style={({ pressed }) => [styles.childCard, pressed && styles.cardPressed]}
+            onPress={() => router.push({ pathname: "/(tabs)/progress", params: { studentId: c.studentId } })}
+          >
+            <View style={styles.childTop}>
+              <View style={styles.avatarStack}>
+                {c.photo ? (
+                  <Image source={{ uri: c.photo }} style={styles.childAvatar} />
+                ) : (
+                  <View style={[styles.childAvatar, styles.childAvatarFallback]}>
+                    <Text style={styles.childAvatarInitial}>{c.studentName.charAt(0).toUpperCase()}</Text>
                   </View>
+                )}
+                <View style={styles.levelBadge}>
+                  <Text style={styles.levelBadgeText}>Lv {c.level}</Text>
                 </View>
-                <View style={styles.childInfo}>
-                  <Text style={styles.childName} numberOfLines={1}>
-                    {c.studentName}
+              </View>
+              <View style={styles.childInfo}>
+                <Text style={styles.childName} numberOfLines={1}>{c.studentName}</Text>
+                <View style={styles.programChip}>
+                  <View style={styles.programDot} />
+                  <Text style={styles.childProgram} numberOfLines={1}>
+                    {c.programs.length === 0
+                      ? "No active program"
+                      : `${c.programs.length} program${c.programs.length === 1 ? "" : "s"}`}
                   </Text>
-                  <View style={styles.programChip}>
-                    <View style={styles.programDot} />
-                    <Text style={styles.childProgram} numberOfLines={1}>
-                      {c.programName ?? "No active program"}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.chevronWrap}>
-                  <Ionicons name="chevron-forward" size={18} color="#615DFA" />
                 </View>
               </View>
-
-              <View style={styles.metricsRow}>
-                <View style={[styles.metric, styles.metricAccent]}>
-                  <View style={styles.metricIcon}>
-                    <Ionicons name="diamond" size={14} color="#FFFFFF" />
-                  </View>
-                  <View>
-                    <Text style={styles.metricLabel}>Adcoins</Text>
-                    <Text style={styles.metricValueLight}>{c.adcoinBalance.toLocaleString()}</Text>
-                  </View>
-                </View>
-                <View style={styles.metric}>
-                  <Text style={styles.metricLabel}>Sessions left</Text>
-                  <Text style={styles.metricValue}>{c.sessionsRemaining}</Text>
-                </View>
-                <View style={styles.metric}>
-                  <Text style={styles.metricLabel}>Total</Text>
-                  <Text style={styles.metricValue}>{c.sessionsTotal}</Text>
-                </View>
+              <View style={styles.chevronWrap}>
+                <Ionicons name="chevron-forward" size={18} color="#615DFA" />
               </View>
+            </View>
 
-              {c.sessionsTotal > 0 ? (
-                <View style={styles.progressBlock}>
-                  <View style={styles.progressHeader}>
-                    <Text style={styles.progressLabel}>
-                      {c.sessionsUsed} of {c.sessionsTotal} sessions used
-                    </Text>
-                    <Text style={styles.progressRemaining}>{remainingPct}% left</Text>
-                  </View>
-                  <View style={styles.progressBarBg}>
-                    <View style={[styles.progressBarFill, { width: `${usedFraction * 100}%` }]} />
-                  </View>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
+            <View style={styles.adcoinBar}>
+              <View style={styles.metricIcon}>
+                <Ionicons name="diamond" size={14} color="#FFFFFF" />
+              </View>
+              <Text style={styles.adcoinBarLabel}>Adcoins</Text>
+              <Text style={styles.adcoinBarValue}>{c.adcoinBalance.toLocaleString()}</Text>
+            </View>
+
+            {c.programs.length > 0 ? (
+              <View style={styles.programsList}>
+                <Text style={styles.programsHeader}>Sessions left per program</Text>
+                {c.programs.map((pr) => {
+                  const ok = pr.remaining > 0;
+                  return (
+                    <View key={pr.name} style={styles.progRow}>
+                      <Text style={styles.progName} numberOfLines={1}>{pr.name}</Text>
+                      <View style={[styles.sessPill, ok ? styles.sessOk : styles.sessLow]}>
+                        <Ionicons name={ok ? "checkmark-circle" : "alert-circle"} size={12} color={ok ? "#065F46" : "#991B1B"} />
+                        <Text style={[styles.sessText, { color: ok ? "#065F46" : "#991B1B" }]}>
+                          {pr.remaining} left
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
+          </Pressable>
+        ))}
 
         {children.length > 0 ? (
           <View style={styles.tipCard}>
@@ -342,6 +338,25 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   cardPressed: { opacity: 0.88, transform: [{ scale: 0.99 }] },
+  adcoinBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#615DFA",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  adcoinBarLabel: { flex: 1, fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.85)" },
+  adcoinBarValue: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
+  programsList: { gap: 8, marginTop: 2 },
+  programsHeader: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6 },
+  progRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  progName: { flex: 1, fontSize: 14, fontWeight: "600", color: "#374151" },
+  sessPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  sessOk: { backgroundColor: "#D1FAE5" },
+  sessLow: { backgroundColor: "#FEE2E2" },
+  sessText: { fontSize: 12, fontWeight: "800" },
   childTop: { flexDirection: "row", alignItems: "center", gap: 14 },
   avatarStack: { position: "relative", width: 56, height: 56 },
   childAvatar: { width: 56, height: 56, borderRadius: 18, backgroundColor: "#F3F4F6" },

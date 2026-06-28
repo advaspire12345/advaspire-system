@@ -510,27 +510,31 @@ export default function CalendarScreen() {
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          <SwipePager
-            onShift={shift}
-            pageKey={view === "month" ? `m-${month.getFullYear()}-${month.getMonth()}` : `w-${ymd(startOfWeek(selectedDay))}`}
-            renderPanel={(o) => (
-              <MonthOrWeekGrid
-                view={view}
-                periodDate={view === "month" ? addMonths(month, o) : addDays(selectedDay, o * 7)}
-                selectedDay={selectedDay}
-                expanded={expanded}
-                cellHeight={view === "week" ? 150 : cellH}
-                todayKey={todayKey}
-                buildDayItems={buildDayItems}
-                onPickDay={pickDay}
-              />
-            )}
-          />
-          {/* drag handle: pull down to expand, up to collapse / go to week */}
-          <View style={styles.handleWrap} {...expandPan.panHandlers}>
-            <Pressable onPress={toggleExpand} hitSlop={10}>
-              <View style={styles.handleBar} />
-            </Pressable>
+          {/* Vertical drags anywhere on the calendar expand/collapse (finger-following);
+              horizontal drags fall through to the SwipePager for month paging. */}
+          <View {...expandPan.panHandlers}>
+            <SwipePager
+              onShift={shift}
+              pageKey={view === "month" ? `m-${month.getFullYear()}-${month.getMonth()}` : `w-${ymd(startOfWeek(selectedDay))}`}
+              renderPanel={(o) => (
+                <MonthOrWeekGrid
+                  view={view}
+                  periodDate={view === "month" ? addMonths(month, o) : addDays(selectedDay, o * 7)}
+                  selectedDay={selectedDay}
+                  expanded={expanded}
+                  cellHeight={view === "week" ? 150 : cellH}
+                  todayKey={todayKey}
+                  buildDayItems={buildDayItems}
+                  onPickDay={pickDay}
+                />
+              )}
+            />
+            {/* visual grabber — tap to toggle, or drag the calendar up/down */}
+            <View style={styles.handleWrap}>
+              <Pressable onPress={toggleExpand} hitSlop={14}>
+                <View style={styles.handleBar} />
+              </Pressable>
+            </View>
           </View>
           <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} />
         </View>

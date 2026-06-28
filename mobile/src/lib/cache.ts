@@ -2,8 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // On-device cache of last-fetched screen data so the app can show the last
 // known view when offline instead of spinning forever. Bump the version
-// segment if a cached shape changes incompatibly.
-const PREFIX = "cache:v1:";
+// segment whenever a cached shape changes incompatibly — old entries are then
+// ignored (and refetched) instead of hydrating into mismatched UI and crashing.
+const PREFIX = "cache:v2:";
 
 export type CachedEntry<T> = { data: T; updatedAt: number };
 
