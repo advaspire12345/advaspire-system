@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
+import { listLocalEvents, localEventOccursOn, type LocalEvent } from "@/lib/localEvents";
 import { supabase } from "@/lib/supabase";
 
 const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -130,7 +131,18 @@ export default function CalendarScreen() {
   const userId = user?.id;
   const router = useRouter();
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
-  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [selectedDay, setSelectedDay] = useState<Date | null>(new Date());
+
+  // Personal on-device events. Reload whenever the tab refocuses (e.g. after
+  // creating one) so new events appear immediately.
+  const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      if (userId) listLocalEvents(userId).then((evs) => { if (active) setLocalEvents(evs); });
+      return () => { active = false; };
+    }, [userId]),
+  );
 
   const fetchCalendar = async (): Promise<CalendarData> => {
     const empty: CalendarData = { parentId: null, enrollments: [], attendance: [], events: [] };
@@ -310,7 +322,7 @@ export default function CalendarScreen() {
       if (enrollments.some((e) => e.scheduleDays.includes(wd))) {
         existing.hasClass = true;
       }
-      if (events.some((e) => eventOccursOn(e, k))) {
+      if (events.some((e) => eventOccursOn(e, k)) || localEvents.some((e) => localEventOccursOn(e, k))) {
         existing.hasEvent = true;
       }
       if (existing.hasAttendance || existing.hasClass || existing.hasEvent) {
@@ -318,7 +330,7 @@ export default function CalendarScreen() {
       }
     }
     return map;
-  }, [attendance, enrollments, events, month]);
+  }, [attendance, enrollments, events, localEvents, month]);
 
   const todayKey = ymd(new Date());
 
@@ -415,13 +427,12 @@ export default function CalendarScreen() {
         </View>
       </View>
 
-      <DayDetailModal
-        visible={!!selectedDay}
-        day={selectedDay}
+      <DayAgenda
+        day={selectedDay ?? new Date()}
         enrollments={enrollments}
         attendance={attendance}
         events={events}
-        onClose={() => setSelectedDay(null)}
+        localEvents={localEvents}
         onReschedule={(enrollmentId, originalDate, studentId, courseName) =>
           router.push({
             pathname: "/reschedule",
@@ -445,118 +456,152 @@ export default function CalendarScreen() {
   );
 }
 
-function DayDetailModal({
-  visible,
+function toMinutes(t: string | null): number | null {
+  if (!t) return null;
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  return h * 60 + m;
+}
+function fmt12(t: string | null): string | null {
+  if (!t) return null;
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  const period = h < 12 ? "AM" : "PM";
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${period}`;
+}
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+type AgendaItem = {
+  id: string;
+  time: number | null;
+  timeLabel: string | null;
+  title: string;
+  subtitle: string;
+  color: string;
+  reschedule?: { enrollmentId: string; studentId: string; courseName: string | null; date: string };
+};
+
+function DayAgenda({
   day,
   enrollments,
   attendance,
   events,
-  onClose,
+  localEvents,
   onReschedule,
 }: {
-  visible: boolean;
-  day: Date | null;
+  day: Date;
   enrollments: EnrollmentSchedule[];
   attendance: AttendanceMarker[];
   events: EventEntry[];
-  onClose: () => void;
+  localEvents: LocalEvent[];
   onReschedule: (enrollmentId: string, originalDate: string, studentId: string, courseName: string | null) => void;
 }) {
-  if (!day) return null;
   const key = ymd(day);
   const dayWeekday = WEEKDAYS_FULL[day.getDay()];
-  const classesThisDay = enrollments.filter((e) => e.scheduleDays.includes(dayWeekday));
   const attendanceThisDay = attendance.filter((a) => a.date === key);
-  const eventsThisDay = events.filter((e) => eventOccursOn(e, key));
-  const isFuture = day > new Date();
+  const isFuture = day.getTime() > new Date().setHours(23, 59, 59, 999) - 86_400_000;
+
+  const items: AgendaItem[] = [];
+
+  for (const e of localEvents.filter((ev) => localEventOccursOn(ev, key))) {
+    const typeName = e.type === "birthday" ? "Birthday" : e.type === "holiday" ? "Holiday" : "Event";
+    items.push({
+      id: `le-${e.id}`,
+      time: toMinutes(e.startTime),
+      timeLabel: fmt12(e.startTime) ?? "All day",
+      title: e.title,
+      subtitle: typeName,
+      color: e.color,
+    });
+  }
+
+  for (const e of events.filter((ev) => eventOccursOn(ev, key))) {
+    const meta = EVENT_TYPE_META[e.eventType];
+    const t = e.isRecurring ? e.recurringStartTime : e.startTime;
+    items.push({
+      id: `se-${e.id}`,
+      time: toMinutes(t),
+      timeLabel: fmt12(t) ?? "All day",
+      title: e.title,
+      subtitle: meta.label,
+      color: e.color || meta.color,
+    });
+  }
+
+  for (const c of enrollments.filter((en) => en.scheduleDays.includes(dayWeekday))) {
+    const att = attendanceThisDay.find((a) => a.studentId === c.studentId && a.courseName === c.courseName);
+    items.push({
+      id: `cl-${c.enrollmentId}`,
+      time: toMinutes(c.startTime),
+      timeLabel: fmt12(c.startTime) ?? "Class",
+      title: c.studentName,
+      subtitle: `${c.courseName ?? "Class"}${att ? ` · ${cap(att.status)}` : ""}`,
+      color: att ? STATUS_COLORS[att.status] : "#23D2E2",
+      reschedule: isFuture && !att ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: key } : undefined,
+    });
+  }
+
+  items.sort((a, b) => (a.time ?? -1) - (b.time ?? -1));
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose} />
-      <View style={styles.modalSheet}>
-        <View style={styles.modalHandle} />
-        <Text style={styles.modalDate}>{day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</Text>
-
-        {classesThisDay.length === 0 && attendanceThisDay.length === 0 && eventsThisDay.length === 0 ? (
-          <Text style={styles.modalEmpty}>Nothing scheduled on this day.</Text>
-        ) : null}
-
-        <ScrollView style={{ maxHeight: 420 }}>
-          {eventsThisDay.length > 0 ? (
-            <>
-              <Text style={styles.modalSection}>Events</Text>
-              {eventsThisDay.map((e) => {
-                const meta = EVENT_TYPE_META[e.eventType];
-                const timeStr =
-                  e.isRecurring
-                    ? e.recurringStartTime && e.recurringEndTime
-                      ? `${e.recurringStartTime.slice(0, 5)} – ${e.recurringEndTime.slice(0, 5)}`
-                      : null
-                    : e.startTime && e.endTime
-                      ? `${e.startTime.slice(0, 5)} – ${e.endTime.slice(0, 5)}`
-                      : null;
-                return (
-                  <View key={e.id} style={styles.modalItem}>
-                    <View style={[styles.eventSwatch, { backgroundColor: e.color || meta.color }]} />
-                    <View style={styles.modalItemMain}>
-                      <Text style={styles.modalItemTitle}>{e.title}</Text>
-                      <Text style={styles.modalItemSubtitle}>
-                        {meta.label}
-                        {timeStr ? ` · ${timeStr}` : ""}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </>
-          ) : null}
-
-          {classesThisDay.length > 0 ? (
-            <>
-              <Text style={[styles.modalSection, eventsThisDay.length > 0 && { marginTop: 16 }]}>Scheduled classes</Text>
-              {classesThisDay.map((c) => {
-                const att = attendanceThisDay.find((a) => a.studentId === c.studentId && a.courseName === c.courseName);
-                const status = att ? STATUS_COLORS[att.status] : "#9CA3AF";
-                return (
-                  <View key={c.enrollmentId} style={styles.modalItem}>
-                    <View style={styles.modalItemMain}>
-                      <Text style={styles.modalItemTitle}>{c.studentName}</Text>
-                      <Text style={styles.modalItemSubtitle}>
-                        {c.courseName ?? "Class"}
-                        {c.startTime ? ` · ${c.startTime.slice(0, 5)}` : ""}
-                      </Text>
-                      {att ? (
-                        <Text style={[styles.modalItemStatus, { color: status }]}>
-                          {att.status.charAt(0).toUpperCase() + att.status.slice(1)}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {isFuture && !att ? (
-                      <Pressable
-                        style={({ pressed }) => [styles.rescheduleButton, pressed && styles.pressed]}
-                        onPress={() => {
-                          onClose();
-                          onReschedule(c.enrollmentId, key, c.studentId, c.courseName);
-                        }}
-                      >
-                        <Ionicons name="swap-horizontal" size={16} color="#615DFA" />
-                        <Text style={styles.rescheduleText}>Reschedule</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </>
-          ) : null}
-        </ScrollView>
-      </View>
-    </Modal>
+    <View style={styles.agenda}>
+      <Text style={styles.agendaDate}>
+        {day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })}
+      </Text>
+      <ScrollView style={styles.flex} contentContainerStyle={styles.agendaList} showsVerticalScrollIndicator={false}>
+        {items.length === 0 ? (
+          <Text style={styles.agendaEmpty}>Nothing scheduled on this day.</Text>
+        ) : (
+          items.map((it) => (
+            <View key={it.id} style={styles.agendaItem}>
+              <Text style={styles.agendaTime}>{it.timeLabel}</Text>
+              <View style={[styles.agendaBar, { backgroundColor: it.color }]} />
+              <View style={styles.flex}>
+                <Text style={styles.agendaTitle} numberOfLines={1}>{it.title}</Text>
+                <Text style={styles.agendaSub} numberOfLines={1}>{it.subtitle}</Text>
+              </View>
+              {it.reschedule ? (
+                <Pressable
+                  style={({ pressed }) => [styles.rescheduleButton, pressed && styles.pressed]}
+                  onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}
+                >
+                  <Ionicons name="swap-horizontal" size={16} color="#615DFA" />
+                  <Text style={styles.rescheduleText}>Move</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ))
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F6FB" },
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
+  agenda: { flex: 1, marginTop: 4 },
+  agendaDate: { fontSize: 14, fontWeight: "800", color: "#0F172A", paddingHorizontal: 16, marginBottom: 8 },
+  agendaList: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
+  agendaEmpty: { fontSize: 13, color: "#9CA3AF", textAlign: "center", paddingVertical: 24 },
+  agendaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 12,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
+  agendaTime: { width: 64, fontSize: 11, fontWeight: "700", color: "#6B7280" },
+  agendaBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
+  agendaTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  agendaSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   header: {
     flexDirection: "row",
     alignItems: "center",

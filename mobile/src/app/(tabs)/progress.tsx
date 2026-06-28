@@ -15,7 +15,6 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import * as WebBrowser from "expo-web-browser";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
@@ -37,13 +36,11 @@ type AttendanceRow = {
 };
 type Certification = {
   id: string;
-  examName: string | null;
-  examLevel: number;
-  mark: number | null;
-  examDate: string | null;
-  certificateNumber: string | null;
-  certificateUrl: string | null;
   courseName: string | null;
+  grade: string | null;
+  code: string | null;
+  dateIssued: string | null;
+  template: string | null;
 };
 
 type Section = "attendance" | "certifications";
@@ -130,25 +127,16 @@ export default function ProgressScreen() {
         .eq("enrollment.student_id", selectedChildId!)
         .order("date", { ascending: false })
         .limit(50),
+      // Certificates live in the `certificates` table keyed directly by
+      // student_id (not via examinations/enrollment). Best-effort: parents
+      // may lack RLS read access, so its failure must NOT block attendance.
       supabase
-        .from("examinations")
-        .select(`
-          id,
-          exam_name,
-          exam_level,
-          mark,
-          exam_date,
-          certificate_number,
-          certificate_url,
-          status,
-          enrollment:enrollments!inner(student_id, course:courses(name))
-        `)
-        .eq("enrollment.student_id", selectedChildId!)
-        .eq("status", "pass")
-        .order("exam_date", { ascending: false }),
+        .from("certificates")
+        .select("id, course_name, grade, code, date_issued, template")
+        .eq("student_id", selectedChildId!)
+        .order("date_issued", { ascending: false }),
     ]);
     if (attErr) throw attErr;
-    if (examErr) throw examErr;
 
     const attendance: AttendanceRow[] = (att ?? []).map((a) => {
       const enr = a.enrollment as unknown as { course: { name: string } | null } | null;
@@ -164,19 +152,15 @@ export default function ProgressScreen() {
         courseName: enr?.course?.name ?? null,
       };
     });
-    const certifications: Certification[] = (exams ?? []).map((e) => {
-      const enr = e.enrollment as unknown as { course: { name: string } | null } | null;
-      return {
-        id: e.id as string,
-        examName: (e.exam_name as string | null) ?? null,
-        examLevel: Number(e.exam_level ?? 1),
-        mark: e.mark == null ? null : Number(e.mark),
-        examDate: (e.exam_date as string | null) ?? null,
-        certificateNumber: (e.certificate_number as string | null) ?? null,
-        certificateUrl: (e.certificate_url as string | null) ?? null,
-        courseName: enr?.course?.name ?? null,
-      };
-    });
+    const certRows = examErr ? [] : (exams ?? []);
+    const certifications: Certification[] = certRows.map((c) => ({
+      id: c.id as string,
+      courseName: (c.course_name as string | null) ?? null,
+      grade: (c.grade as string | null) ?? null,
+      code: (c.code as string | null) ?? null,
+      dateIssued: (c.date_issued as string | null) ?? null,
+      template: (c.template as string | null) ?? null,
+    }));
     return { attendance, certifications };
   };
 
@@ -438,17 +422,14 @@ function CertCard({ cert, onPress }: { cert: Certification; onPress: () => void 
         <Ionicons name="ribbon" size={28} color="#F59E0B" />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={styles.certTitle}>
-          Level {cert.examLevel}
-          {cert.courseName ? ` · ${cert.courseName}` : ""}
-        </Text>
+        <Text style={styles.certTitle}>{cert.courseName ?? "Certificate"}</Text>
         <View style={styles.certRow}>
-          {cert.mark != null ? <Text style={styles.certMark}>{cert.mark}%</Text> : null}
-          {cert.examDate ? (
-            <Text style={styles.certDate}>{new Date(cert.examDate).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</Text>
+          {cert.grade ? <Text style={styles.certMark}>Grade {cert.grade}</Text> : null}
+          {cert.dateIssued ? (
+            <Text style={styles.certDate}>{new Date(cert.dateIssued).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</Text>
           ) : null}
         </View>
-        {cert.certificateNumber ? <Text style={styles.certNumber}>{cert.certificateNumber}</Text> : null}
+        {cert.code ? <Text style={styles.certNumber}>{cert.code}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
     </Pressable>
@@ -456,12 +437,6 @@ function CertCard({ cert, onPress }: { cert: Certification; onPress: () => void 
 }
 
 function CertPreview({ cert, studentName, onClose }: { cert: Certification; studentName: string; onClose: () => void }) {
-  const onOpen = async () => {
-    if (cert.certificateUrl) {
-      await WebBrowser.openBrowserAsync(cert.certificateUrl);
-    }
-  };
-  const isImage = cert.certificateUrl ? /\.(png|jpe?g|webp|gif)(\?|$)/i.test(cert.certificateUrl) : false;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.previewBackdrop} onPress={onClose} />
@@ -474,28 +449,15 @@ function CertPreview({ cert, studentName, onClose }: { cert: Certification; stud
         <View style={styles.previewBody}>
           <PreviewRow label="Student" value={studentName} />
           {cert.courseName ? <PreviewRow label="Course" value={cert.courseName} /> : null}
-          <PreviewRow label="Level" value={String(cert.examLevel)} />
-          {cert.mark != null ? <PreviewRow label="Mark" value={`${cert.mark}%`} /> : null}
-          {cert.examDate ? (
+          {cert.grade ? <PreviewRow label="Grade" value={cert.grade} /> : null}
+          {cert.dateIssued ? (
             <PreviewRow
               label="Date"
-              value={new Date(cert.examDate).toLocaleDateString("en-MY", { day: "numeric", month: "long", year: "numeric" })}
+              value={new Date(cert.dateIssued).toLocaleDateString("en-MY", { day: "numeric", month: "long", year: "numeric" })}
             />
           ) : null}
-          {cert.certificateNumber ? <PreviewRow label="Cert. no." value={cert.certificateNumber} /> : null}
+          {cert.code ? <PreviewRow label="Cert. no." value={cert.code} /> : null}
         </View>
-        {cert.certificateUrl ? (
-          isImage ? (
-            <Image source={{ uri: cert.certificateUrl }} style={styles.previewImage} resizeMode="contain" />
-          ) : (
-            <Pressable style={styles.previewButton} onPress={onOpen}>
-              <Ionicons name="open-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.previewButtonText}>Open certificate</Text>
-            </Pressable>
-          )
-        ) : (
-          <Text style={styles.previewPending}>Certificate document is being generated.</Text>
-        )}
         <Pressable style={styles.previewClose} onPress={onClose}>
           <Text style={styles.previewCloseText}>Close</Text>
         </Pressable>

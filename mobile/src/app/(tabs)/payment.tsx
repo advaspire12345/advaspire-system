@@ -1,4 +1,4 @@
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { OfflineBanner } from "@/components/OfflineBanner";
@@ -113,6 +113,20 @@ export default function PaymentsScreen() {
 
   const pendingCount = payments.filter((p) => p.status === "pending").length;
 
+  // Group payments under each child so siblings don't get mixed together.
+  const childOrder: string[] = [];
+  const byChild: Record<string, { studentId: string; title: string; data: PaymentRow[] }> = {};
+  for (const p of payments) {
+    if (!byChild[p.studentId]) {
+      byChild[p.studentId] = { studentId: p.studentId, title: p.studentName, data: [] };
+      childOrder.push(p.studentId);
+    }
+    byChild[p.studentId].data.push(p);
+  }
+  const sections = childOrder
+    .map((id) => byChild[id])
+    .sort((a, b) => a.title.localeCompare(b.title));
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
@@ -134,10 +148,11 @@ export default function PaymentsScreen() {
         </View>
       ) : null}
 
-      <FlatList
-        data={payments}
+      <SectionList
+        sections={sections}
         keyExtractor={(p) => p.id}
         contentContainerStyle={styles.list}
+        stickySectionHeadersEnabled={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#615DFA" />}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -147,6 +162,22 @@ export default function PaymentsScreen() {
             </Text>
           </View>
         }
+        renderSectionHeader={({ section }) => {
+          const pending = section.data.filter((p) => p.status === "pending").length;
+          return (
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionAvatar}>
+                <Text style={styles.sectionAvatarText}>{section.title.charAt(0).toUpperCase()}</Text>
+              </View>
+              <Text style={styles.sectionHeaderText} numberOfLines={1}>{section.title}</Text>
+              {pending > 0 ? (
+                <View style={styles.sectionPendingBadge}>
+                  <Text style={styles.sectionPendingText}>{pending} pending</Text>
+                </View>
+              ) : null}
+            </View>
+          );
+        }}
         renderItem={({ item }) => {
           const statusStyle = STATUS_STYLES[item.status];
           return (
@@ -183,6 +214,25 @@ const styles = StyleSheet.create({
   bannerWrap: { paddingHorizontal: 16, marginBottom: 12 },
   errorText: { color: "#991B1B", fontSize: 14 },
   list: { padding: 16, paddingTop: 0, gap: 12 },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  sectionAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#615DFA",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sectionAvatarText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
+  sectionHeaderText: { flex: 1, fontSize: 16, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
+  sectionPendingBadge: { backgroundColor: "#FEF3C7", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  sectionPendingText: { fontSize: 11, fontWeight: "800", color: "#92400E" },
   empty: { padding: 32, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 4 },
   emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
