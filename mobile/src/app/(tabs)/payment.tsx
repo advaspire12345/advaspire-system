@@ -1,24 +1,28 @@
-import { ActivityIndicator, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { supabase } from "@/lib/supabase";
 
-type PaymentRow = {
+type Bill = {
   id: string;
   amount: number;
   status: "pending" | "paid" | "failed" | "refunded" | "cancelled";
   paidAt: string | null;
   createdAt: string;
-  studentId: string;
-  studentName: string;
-  courseName: string | null;
-  invoiceNumber: string | null;
+  courseId: string | null;
+  courseName: string;
+  childNames: string[];
+  isShared: boolean;
 };
 
-const STATUS_STYLES: Record<PaymentRow["status"], { bg: string; fg: string; label: string }> = {
+type Program = { courseId: string; courseName: string; bills: Bill[] };
+
+const STATUS_STYLES: Record<Bill["status"], { bg: string; fg: string; label: string }> = {
   pending: { bg: "#FEF3C7", fg: "#92400E", label: "Pending" },
   paid: { bg: "#D1FAE5", fg: "#065F46", label: "Paid" },
   failed: { bg: "#FEE2E2", fg: "#991B1B", label: "Failed" },
@@ -27,20 +31,24 @@ const STATUS_STYLES: Record<PaymentRow["status"], { bg: string; fg: string; labe
 };
 
 function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" });
 }
-
 function formatRM(amount: number): string {
   return `RM${amount.toFixed(2)}`;
+}
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "—";
+  if (names.length === 2) return `${names[0]} & ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
 }
 
 export default function PaymentsScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const router = useRouter();
+  const [programId, setProgramId] = useState<string | null>(null);
 
-  const fetchPayments = async (): Promise<PaymentRow[]> => {
+  const fetchBills = async (): Promise<Bill[]> => {
     const { data: parentRow, error: parentErr } = await supabase
       .from("parents")
       .select("id")
@@ -52,56 +60,80 @@ export default function PaymentsScreen() {
 
     const { data: links } = await supabase
       .from("parent_students")
-      .select("student_id, student:students!inner(deleted_at)")
+      .select("student_id, student:students!inner(name, deleted_at)")
       .eq("parent_id", parentRow.id);
-    const studentIds = (links ?? [])
-      .filter((l) => !(l.student as unknown as { deleted_at: string | null })?.deleted_at)
-      .map((l) => l.student_id as string);
+    const nameById = new Map<string, string>();
+    const studentIds: string[] = [];
+    for (const l of links ?? []) {
+      const s = l.student as unknown as { name: string; deleted_at: string | null } | null;
+      if (s && !s.deleted_at) {
+        nameById.set(l.student_id as string, s.name);
+        studentIds.push(l.student_id as string);
+      }
+    }
     if (!studentIds.length) return [];
 
+    // One row per bill already (pooled bills carry shared_with = all sibling ids).
     const { data, error } = await supabase
       .from("payments")
-      .select(`
-        id,
-        amount,
-        status,
-        paid_at,
-        created_at,
-        student_id,
-        invoice_number,
-        student:students!inner(name),
-        course:courses(name)
-      `)
+      .select(`id, amount, status, paid_at, created_at, student_id, course_id, is_shared_package, shared_with, course:courses(name)`)
       .in("student_id", studentIds)
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(80);
     if (error) throw error;
 
     return (data ?? []).map((p) => {
-      const s = p.student as unknown as { name: string } | null;
       const c = p.course as unknown as { name: string } | null;
+      const shared = !!p.is_shared_package;
+      let childNames: string[] = [];
+      if (shared && p.shared_with) {
+        try {
+          const ids = JSON.parse(p.shared_with as string) as string[];
+          childNames = ids.map((id) => nameById.get(id)).filter((n): n is string => !!n);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (childNames.length === 0) {
+        childNames = [nameById.get(p.student_id as string) ?? "Child"];
+      }
       return {
         id: p.id as string,
         amount: Number(p.amount ?? 0),
-        status: (p.status as PaymentRow["status"]) ?? "pending",
+        status: (p.status as Bill["status"]) ?? "pending",
         paidAt: (p.paid_at as string | null) ?? null,
         createdAt: p.created_at as string,
-        studentId: p.student_id as string,
-        studentName: s?.name ?? "Unknown",
-        courseName: c?.name ?? null,
-        invoiceNumber: (p.invoice_number as string | null) ?? null,
+        courseId: (p.course_id as string | null) ?? null,
+        courseName: c?.name ?? "Program",
+        childNames,
+        isShared: shared,
       };
     });
   };
 
-  const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<PaymentRow[]>(
+  const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<Bill[]>(
     `payments:${userId ?? "anon"}`,
-    fetchPayments,
+    fetchBills,
     { enabled: !!userId },
   );
 
-  const payments = data ?? [];
+  const bills = data ?? [];
   const errorMessage = error && !data ? "Couldn't load payments. Check your connection and pull down to refresh." : null;
+
+  // Group bills by program (course).
+  const order: string[] = [];
+  const byCourse: Record<string, Program> = {};
+  for (const b of bills) {
+    const key = b.courseId ?? "none";
+    if (!byCourse[key]) {
+      byCourse[key] = { courseId: key, courseName: b.courseName, bills: [] };
+      order.push(key);
+    }
+    byCourse[key].bills.push(b);
+  }
+  const programs = order.map((k) => byCourse[k]);
+  const selected = programs.find((p) => p.courseId === programId) ?? programs[0] ?? null;
+  const pendingTotal = bills.filter((b) => b.status === "pending").length;
 
   if (loading) {
     return (
@@ -111,95 +143,74 @@ export default function PaymentsScreen() {
     );
   }
 
-  const pendingCount = payments.filter((p) => p.status === "pending").length;
-
-  // Group payments under each child so siblings don't get mixed together.
-  const childOrder: string[] = [];
-  const byChild: Record<string, { studentId: string; title: string; data: PaymentRow[] }> = {};
-  for (const p of payments) {
-    if (!byChild[p.studentId]) {
-      byChild[p.studentId] = { studentId: p.studentId, title: p.studentName, data: [] };
-      childOrder.push(p.studentId);
-    }
-    byChild[p.studentId].data.push(p);
-  }
-  const sections = childOrder
-    .map((id) => byChild[id])
-    .sort((a, b) => a.title.localeCompare(b.title));
-
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
         <Text style={styles.title}>Payments</Text>
-        <Text style={styles.subtitle}>
-          {pendingCount > 0 ? `${pendingCount} pending` : "All up to date"}
-        </Text>
+        <Text style={styles.subtitle}>{pendingTotal > 0 ? `${pendingTotal} pending` : "All up to date"}</Text>
       </View>
 
       {errorMessage ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
+        <View style={styles.errorCard}><Text style={styles.errorText}>{errorMessage}</Text></View>
       ) : null}
-
       {isStale ? (
-        <View style={styles.bannerWrap}>
-          <OfflineBanner updatedAt={updatedAt} />
-        </View>
+        <View style={styles.bannerWrap}><OfflineBanner updatedAt={updatedAt} /></View>
       ) : null}
 
-      <SectionList
-        sections={sections}
-        keyExtractor={(p) => p.id}
+      {/* Program tabs — only when the parent's children span more than one program */}
+      {programs.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsRow} contentContainerStyle={styles.tabsContent}>
+          {programs.map((p) => {
+            const active = selected?.courseId === p.courseId;
+            const pend = p.bills.filter((b) => b.status === "pending").length;
+            return (
+              <Pressable key={p.courseId} style={[styles.tab, active && styles.tabActive]} onPress={() => setProgramId(p.courseId)}>
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{p.courseName}</Text>
+                {pend > 0 ? <View style={styles.tabDot} /> : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+
+      <ScrollView
         contentContainerStyle={styles.list}
-        stickySectionHeadersEnabled={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#615DFA" />}
-        ListEmptyComponent={
+      >
+        {!selected ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No payments yet</Text>
-            <Text style={styles.emptyText}>
-              When a payment is created for your child, it&apos;ll appear here.
-            </Text>
+            <Text style={styles.emptyText}>When a payment is created for your child, it&apos;ll appear here.</Text>
           </View>
-        }
-        renderSectionHeader={({ section }) => {
-          const pending = section.data.filter((p) => p.status === "pending").length;
-          return (
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionAvatar}>
-                <Text style={styles.sectionAvatarText}>{section.title.charAt(0).toUpperCase()}</Text>
-              </View>
-              <Text style={styles.sectionHeaderText} numberOfLines={1}>{section.title}</Text>
-              {pending > 0 ? (
-                <View style={styles.sectionPendingBadge}>
-                  <Text style={styles.sectionPendingText}>{pending} pending</Text>
+        ) : (
+          selected.bills.map((b) => {
+            const st = STATUS_STYLES[b.status];
+            return (
+              <Pressable
+                key={b.id}
+                style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+                onPress={() => router.push({ pathname: "/payment/[id]", params: { id: b.id } })}
+              >
+                <View style={styles.cardTop}>
+                  <Text style={styles.amount}>{formatRM(b.amount)}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: st.bg }]}>
+                    <Text style={[styles.statusText, { color: st.fg }]}>{st.label}</Text>
+                  </View>
                 </View>
-              ) : null}
-            </View>
-          );
-        }}
-        renderItem={({ item }) => {
-          const statusStyle = STATUS_STYLES[item.status];
-          return (
-            <Pressable
-              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-              onPress={() => router.push({ pathname: "/payment/[id]", params: { id: item.id } })}
-            >
-              <View style={styles.cardTop}>
-                <Text style={styles.amount}>{formatRM(item.amount)}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
-                  <Text style={[styles.statusText, { color: statusStyle.fg }]}>{statusStyle.label}</Text>
+                <View style={styles.childRow}>
+                  {b.isShared ? <Ionicons name="people" size={14} color="#615DFA" /> : <Ionicons name="person" size={14} color="#9CA3AF" />}
+                  <Text style={styles.childNames} numberOfLines={1}>{joinNames(b.childNames)}</Text>
+                  {b.isShared ? <View style={styles.sharedBadge}><Text style={styles.sharedText}>Shared</Text></View> : null}
                 </View>
-              </View>
-              <Text style={styles.studentName}>{item.studentName}</Text>
-              {item.courseName ? <Text style={styles.courseName}>{item.courseName}</Text> : null}
-              <Text style={styles.dateText}>
-                {item.paidAt ? `Paid ${formatDate(item.paidAt)}` : `Created ${formatDate(item.createdAt)}`}
-              </Text>
-            </Pressable>
-          );
-        }}
-      />
+                <Text style={styles.courseName}>{b.courseName}</Text>
+                <Text style={styles.dateText}>
+                  {b.paidAt ? `Paid ${formatDate(b.paidAt)}` : `Created ${formatDate(b.createdAt)}`}
+                </Text>
+              </Pressable>
+            );
+          })
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -211,47 +222,29 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: "800", color: "#111827" },
   subtitle: { fontSize: 14, color: "#6B7280", marginTop: 2 },
   errorCard: { marginHorizontal: 16, marginBottom: 12, backgroundColor: "#FEE2E2", padding: 16, borderRadius: 12 },
-  bannerWrap: { paddingHorizontal: 16, marginBottom: 12 },
   errorText: { color: "#991B1B", fontSize: 14 },
+  bannerWrap: { paddingHorizontal: 16, marginBottom: 12 },
+  tabsRow: { flexGrow: 0, marginBottom: 8 },
+  tabsContent: { paddingHorizontal: 16, gap: 8 },
+  tab: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: "#FFFFFF" },
+  tabActive: { backgroundColor: "#615DFA" },
+  tabText: { fontSize: 13, fontWeight: "700", color: "#374151" },
+  tabTextActive: { color: "#FFFFFF" },
+  tabDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#F59E0B" },
   list: { padding: 16, paddingTop: 0, gap: 12 },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingTop: 8,
-    paddingBottom: 2,
-  },
-  sectionAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#615DFA",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sectionAvatarText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
-  sectionHeaderText: { flex: 1, fontSize: 16, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
-  sectionPendingBadge: { backgroundColor: "#FEF3C7", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  sectionPendingText: { fontSize: 11, fontWeight: "800", color: "#92400E" },
   empty: { padding: 32, alignItems: "center" },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827", marginBottom: 4 },
   emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
-  card: {
-    backgroundColor: "#FFFFFF",
-    padding: 16,
-    borderRadius: 16,
-    shadowColor: "#615DFA",
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
+  card: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, shadowColor: "#615DFA", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   cardPressed: { opacity: 0.85 },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
   amount: { fontSize: 20, fontWeight: "800", color: "#111827" },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   statusText: { fontSize: 12, fontWeight: "700" },
-  studentName: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  childRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  childNames: { fontSize: 15, fontWeight: "700", color: "#374151", flexShrink: 1 },
+  sharedBadge: { backgroundColor: "#EEF2FF", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  sharedText: { fontSize: 10, fontWeight: "800", color: "#615DFA" },
   courseName: { fontSize: 13, color: "#6B7280", marginTop: 2 },
   dateText: { fontSize: 12, color: "#9CA3AF", marginTop: 8 },
 });

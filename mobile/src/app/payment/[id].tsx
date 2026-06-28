@@ -12,21 +12,25 @@ type PaymentDetail = {
   status: "pending" | "paid" | "failed" | "refunded" | "cancelled";
   paidAt: string | null;
   createdAt: string;
+  dueDate: string | null;
   studentId: string;
-  studentName: string;
+  childNames: string[];
   courseId: string | null;
   courseName: string | null;
   invoiceNumber: string | null;
+  receiptNumber: string | null;
   isShared: boolean;
   packageName: string | null;
   packageId: string | null;
   packageDuration: number | null;
+  discount: number;
 };
 
 type CoveredSession = {
   index: number; // 1-based
   date: string | null;
   status: "present" | "absent" | "late" | "excused" | "upcoming";
+  studentName: string;
 };
 
 const STATUS_STYLES: Record<PaymentDetail["status"], { bg: string; fg: string; label: string }> = {
@@ -53,6 +57,14 @@ function formatDate(iso: string): string {
 function formatRM(amount: number): string {
   return `RM${amount.toFixed(2)}`;
 }
+function formatDateShort(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" });
+}
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "—";
+  if (names.length === 2) return `${names[0]} & ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
+}
 
 type PaymentDetailData = {
   payment: PaymentDetail;
@@ -72,12 +84,16 @@ export default function PaymentDetailScreen() {
         status,
         paid_at,
         created_at,
+        due_date,
         invoice_number,
+        receipt_number,
+        discount_amount,
         is_shared_package,
+        shared_with,
+        custom_sessions,
         student_id,
         course_id,
         package_id,
-        student:students!inner(name),
         course:courses(name),
         package:course_pricing(description, duration)
       `)
@@ -86,54 +102,65 @@ export default function PaymentDetailScreen() {
     if (error) throw error;
     if (!data) throw new Error("Payment not found");
 
-    const s = data.student as unknown as { name: string } | null;
     const c = data.course as unknown as { name: string } | null;
     const pkg = data.package as unknown as { description: string | null; duration: number | null } | null;
+    const shared = !!data.is_shared_package;
+
+    // Pooled bills cover several siblings — resolve all their names.
+    let sharedWith: string[] = [];
+    if (shared && data.shared_with) {
+      try { sharedWith = JSON.parse(data.shared_with as string) as string[]; } catch { /* ignore */ }
+    }
+    const studentIds = sharedWith.length ? sharedWith : [data.student_id as string];
+    const { data: studs } = await supabase.from("students").select("id, name").in("id", studentIds);
+    const nameById = new Map<string, string>((studs ?? []).map((s) => [s.id as string, s.name as string]));
+    const childNames = studentIds.map((sid) => nameById.get(sid) ?? "Child");
+
+    const duration = pkg?.duration ?? (data.custom_sessions ? Number(data.custom_sessions) : 0);
     const p: PaymentDetail = {
       id: data.id as string,
       amount: Number(data.amount ?? 0),
       status: (data.status as PaymentDetail["status"]) ?? "pending",
       paidAt: (data.paid_at as string | null) ?? null,
       createdAt: data.created_at as string,
+      dueDate: (data.due_date as string | null) ?? null,
       studentId: data.student_id as string,
-      studentName: s?.name ?? "Unknown",
+      childNames,
       courseId: (data.course_id as string | null) ?? null,
       courseName: c?.name ?? null,
       invoiceNumber: (data.invoice_number as string | null) ?? null,
-      isShared: !!data.is_shared_package,
+      receiptNumber: (data.receipt_number as string | null) ?? null,
+      isShared: shared,
       packageName: pkg?.description ?? null,
       packageId: (data.package_id as string | null) ?? null,
-      packageDuration: pkg?.duration ?? null,
+      packageDuration: duration || null,
+      discount: Number(data.discount_amount ?? 0),
     };
 
-    // Compute the first-N attendance rows that this payment "covered".
-    // The schema has no payment_id → attendance link, so we infer:
-    // for the enrollment matching (student, course), take attendance
-    // rows with date >= paid_at, ordered ascending, limit = duration.
+    // Sessions this payment "covered" — for a shared pool we combine ALL the
+    // pooled children's attendance chronologically (they share the sessions).
     const coveredSessions: CoveredSession[] = [];
-    if (p.status === "paid" && p.paidAt && p.packageDuration && p.studentId && p.courseId) {
+    if (p.status === "paid" && p.paidAt && duration && p.courseId) {
       const paidDate = p.paidAt.slice(0, 10);
       const { data: att } = await supabase
         .from("attendance")
-        .select(`
-          id, date, status,
-          enrollment:enrollments!inner(student_id, course_id)
-        `)
-        .eq("enrollment.student_id", p.studentId)
+        .select(`date, status, enrollment:enrollments!inner(student_id, course_id)`)
+        .in("enrollment.student_id", studentIds)
         .eq("enrollment.course_id", p.courseId)
         .gte("date", paidDate)
         .order("date", { ascending: true })
-        .limit(p.packageDuration);
+        .limit(duration);
       (att ?? []).forEach((a, i) => {
+        const enr = a.enrollment as unknown as { student_id: string } | null;
         coveredSessions.push({
           index: i + 1,
           date: a.date as string,
           status: (a.status as CoveredSession["status"]) ?? "present",
+          studentName: nameById.get(enr?.student_id ?? "") ?? "",
         });
       });
-      // Fill remaining slots with "upcoming"
-      for (let i = coveredSessions.length; i < p.packageDuration; i++) {
-        coveredSessions.push({ index: i + 1, date: null, status: "upcoming" });
+      for (let i = coveredSessions.length; i < duration; i++) {
+        coveredSessions.push({ index: i + 1, date: null, status: "upcoming", studentName: "" });
       }
     }
 
@@ -202,23 +229,55 @@ export default function PaymentDetailScreen() {
         </View>
 
         <View style={styles.detailCard}>
-          <Row label="Student" value={payment.studentName} />
+          <Row label={payment.childNames.length > 1 ? "Children" : "Student"} value={joinNames(payment.childNames)} />
           {payment.courseName ? <Row label="Program" value={payment.courseName} /> : null}
           {payment.packageName ? <Row label="Package" value={payment.packageName} /> : null}
-          {payment.isShared ? <Row label="Type" value="Shared (siblings)" /> : null}
-          {payment.invoiceNumber ? <Row label="Invoice" value={payment.invoiceNumber} /> : null}
-          <Row
-            label={payment.paidAt ? "Paid at" : "Created"}
-            value={formatDate(payment.paidAt ?? payment.createdAt)}
-          />
+          <Row label="Type" value={payment.isShared ? "Shared pool (siblings)" : "Individual"} />
         </View>
+
+        {/* Invoice */}
+        <View style={styles.docCard}>
+          <View style={styles.docHeader}>
+            <Ionicons name="document-text-outline" size={18} color="#615DFA" />
+            <Text style={styles.docTitle}>Invoice</Text>
+            <Text style={styles.docNo}>{payment.invoiceNumber ?? "Pending approval"}</Text>
+          </View>
+          <Row label="Bill to" value={joinNames(payment.childNames)} />
+          <Row label="Program" value={payment.courseName ?? "—"} />
+          {payment.packageName ? <Row label="Package" value={payment.packageName} /> : null}
+          {payment.packageDuration ? <Row label="Sessions" value={String(payment.packageDuration)} /> : null}
+          <Row label="Issued" value={formatDateShort(payment.createdAt)} />
+          {payment.dueDate ? <Row label="Due" value={formatDateShort(payment.dueDate)} /> : null}
+          {payment.discount > 0 ? <Row label="Discount" value={`- ${formatRM(payment.discount)}`} /> : null}
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalValue}>{formatRM(payment.amount)}</Text>
+          </View>
+        </View>
+
+        {/* Receipt — only once paid */}
+        {payment.status === "paid" ? (
+          <View style={[styles.docCard, styles.receiptCard]}>
+            <View style={styles.docHeader}>
+              <Ionicons name="receipt-outline" size={18} color="#065F46" />
+              <Text style={[styles.docTitle, { color: "#065F46" }]}>Receipt</Text>
+              <Text style={[styles.docNo, { color: "#047857" }]}>{payment.receiptNumber ?? "—"}</Text>
+            </View>
+            <Row label="Paid by" value={joinNames(payment.childNames)} />
+            <Row label="Amount paid" value={formatRM(payment.amount)} />
+            {payment.paidAt ? <Row label="Paid on" value={formatDate(payment.paidAt)} /> : null}
+            <View style={styles.paidStamp}>
+              <Ionicons name="checkmark-circle" size={16} color="#065F46" />
+              <Text style={styles.paidStampText}>PAID</Text>
+            </View>
+          </View>
+        ) : null}
 
         {coveredSessions.length > 0 ? (
           <View style={styles.detailCard}>
             <Text style={styles.coveredHeader}>Sessions this payment covered</Text>
             <Text style={styles.coveredSubtitle}>
-              Computed from attendance after the payment date. Sessions still in the future appear as
-              upcoming.
+              {payment.isShared ? "Shared across siblings — " : ""}computed from attendance after the payment date. Future sessions show as upcoming.
             </Text>
             <View style={styles.sessionList}>
               {coveredSessions.map((s) => {
@@ -234,6 +293,7 @@ export default function PaymentDetailScreen() {
                           ? new Date(s.date).toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short", year: "numeric" })
                           : "Upcoming"}
                       </Text>
+                      {s.studentName ? <Text style={styles.sessionStudent}>{s.studentName}</Text> : null}
                     </View>
                     <View style={[styles.sessionBadge, { backgroundColor: meta.bg }]}>
                       <Text style={[styles.sessionBadgeText, { color: meta.fg }]}>{meta.label}</Text>
@@ -281,6 +341,17 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, marginTop: 4 },
   statusText: { fontSize: 12, fontWeight: "700" },
   detailCard: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16 },
+  docCard: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, borderWidth: 1, borderColor: "#EEF2FF" },
+  receiptCard: { borderColor: "#D1FAE5", backgroundColor: "#F0FDF4" },
+  docHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
+  docTitle: { fontSize: 15, fontWeight: "800", color: "#615DFA", flex: 1 },
+  docNo: { fontSize: 12, fontWeight: "700", color: "#9CA3AF" },
+  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: "#E5E7EB" },
+  totalLabel: { fontSize: 14, fontWeight: "800", color: "#111827" },
+  totalValue: { fontSize: 18, fontWeight: "800", color: "#615DFA" },
+  paidStamp: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: 10, backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  paidStampText: { fontSize: 12, fontWeight: "800", color: "#065F46", letterSpacing: 1 },
+  sessionStudent: { fontSize: 11, color: "#6B7280", marginTop: 1 },
   row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
   rowLabel: { fontSize: 14, color: "#6B7280", fontWeight: "500" },
   rowValue: { fontSize: 14, color: "#111827", fontWeight: "600", flex: 1, textAlign: "right", marginLeft: 16 },
