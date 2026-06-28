@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   LayoutAnimation,
   Modal,
   PanResponder,
@@ -11,6 +12,7 @@ import {
   Text,
   TextInput,
   UIManager,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -365,20 +367,18 @@ export default function CalendarScreen() {
 
   // ── navigation ──
   const animate = () => LayoutAnimation.configureNext(LayoutAnimation.create(180, "easeInEaseOut", "opacity"));
-  const goPrev = () => {
-    animate();
-    if (view === "year") setMonth(new Date(month.getFullYear() - 1, month.getMonth(), 1));
-    else if (view === "month") setMonth(addMonths(month, -1));
-    else if (view === "week") { const nd = addDays(selectedDay, -7); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
-    else { const nd = addDays(selectedDay, -1); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
-  };
-  const goNext = () => {
-    animate();
-    if (view === "year") setMonth(new Date(month.getFullYear() + 1, month.getMonth(), 1));
-    else if (view === "month") setMonth(addMonths(month, 1));
-    else if (view === "week") { const nd = addDays(selectedDay, 7); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
-    else { const nd = addDays(selectedDay, 1); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
-  };
+  // Shift the focused period by dir (-1 prev, +1 next) for the current view.
+  const shift = useCallback(
+    (dir: -1 | 1) => {
+      if (view === "year") setMonth((m) => new Date(m.getFullYear() + dir, m.getMonth(), 1));
+      else if (view === "month") setMonth((m) => addMonths(m, dir));
+      else if (view === "week") setSelectedDay((d) => { const nd = addDays(d, dir * 7); setMonth(startOfMonth(nd)); return nd; });
+      else setSelectedDay((d) => { const nd = addDays(d, dir); setMonth(startOfMonth(nd)); return nd; });
+    },
+    [view],
+  );
+  const goPrev = () => { animate(); shift(-1); };
+  const goNext = () => { animate(); shift(1); };
   const goToday = () => {
     animate();
     const t = new Date();
@@ -390,20 +390,8 @@ export default function CalendarScreen() {
     if (d.getMonth() !== month.getMonth() || d.getFullYear() !== month.getFullYear()) setMonth(startOfMonth(d));
   };
   const switchView = (v: ViewMode) => { animate(); setView(v); };
-
-  // horizontal swipe → prev / next period
-  const swipe = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        onPanResponderRelease: (_e, g) => {
-          if (g.dx > 50) goPrev();
-          else if (g.dx < -50) goNext();
-        },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [view, month, selectedDay],
-  );
+  const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
+    router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
 
   // vertical drag on the handle → expand / collapse / week
   const expandPan = useMemo(
@@ -475,38 +463,38 @@ export default function CalendarScreen() {
       ) : null}
 
       {view === "year" ? (
-        <YearView year={month.getFullYear()} hasAnyItem={hasAnyItem} swipe={swipe} todayKey={todayKey}
-          onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear(), mi, 1)); setView("month"); }} />
+        <SwipePager fill onShift={shift} renderPanel={(o) => (
+          <YearView year={month.getFullYear() + o} hasAnyItem={hasAnyItem} todayKey={todayKey}
+            onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear() + o, mi, 1)); setView("month"); }} />
+        )} />
       ) : view === "day" ? (
-        <DayPane day={selectedDay} items={buildDayItems(ymd(selectedDay))} swipe={swipe}
-          onReschedule={(eid, dt, sid, cn) => router.push({ pathname: "/reschedule", params: { enrollmentId: eid, originalDate: dt, studentId: sid, courseName: cn ?? "" } })} />
+        <SwipePager fill onShift={shift} renderPanel={(o) => {
+          const d = addDays(selectedDay, o);
+          return <DayAgenda day={d} items={buildDayItems(ymd(d))} onReschedule={onReschedule} big />;
+        }} />
       ) : (
         <View style={styles.flex}>
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          <View {...swipe.panHandlers}>
+          <SwipePager onShift={shift} renderPanel={(o) => (
             <MonthOrWeekGrid
               view={view}
-              month={month}
+              periodDate={view === "month" ? addMonths(month, o) : addDays(selectedDay, o * 7)}
               selectedDay={selectedDay}
               expanded={expanded}
               todayKey={todayKey}
               buildDayItems={buildDayItems}
               onPickDay={pickDay}
             />
-          </View>
+          )} />
           {/* drag handle to expand / collapse */}
           <View style={styles.handleWrap} {...expandPan.panHandlers}>
             <Pressable onPress={() => { animate(); if (view === "week") { setView("month"); } else setExpanded((e) => !e); }} hitSlop={10}>
               <View style={styles.handleBar} />
             </Pressable>
           </View>
-          <DayAgenda
-            day={selectedDay}
-            items={buildDayItems(ymd(selectedDay))}
-            onReschedule={(eid, dt, sid, cn) => router.push({ pathname: "/reschedule", params: { enrollmentId: eid, originalDate: dt, studentId: sid, courseName: cn ?? "" } })}
-          />
+          <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} />
         </View>
       )}
 
@@ -538,17 +526,19 @@ export default function CalendarScreen() {
 
 // ── Month / Week grid with pills ──
 function MonthOrWeekGrid({
-  view, month, selectedDay, expanded, todayKey, buildDayItems, onPickDay,
+  view, periodDate, selectedDay, expanded, todayKey, buildDayItems, onPickDay,
 }: {
   view: ViewMode;
-  month: Date;
+  periodDate: Date;
   selectedDay: Date;
   expanded: boolean;
   todayKey: string;
   buildDayItems: (k: string) => DayItem[];
   onPickDay: (d: Date) => void;
 }) {
-  const rows = view === "week" ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay), i))] : buildMonthGrid(month.getFullYear(), month.getMonth());
+  const rows = view === "week"
+    ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(periodDate), i))]
+    : buildMonthGrid(periodDate.getFullYear(), periodDate.getMonth());
   const maxPills = view === "week" ? 6 : expanded ? 4 : 2;
   const cellHeight = view === "week" ? 150 : expanded ? 108 : 66;
   const selKey = ymd(selectedDay);
@@ -563,7 +553,7 @@ function MonthOrWeekGrid({
             const items = buildDayItems(key);
             const isToday = key === todayKey;
             const isSelected = key === selKey;
-            const dim = view === "month" && d.getMonth() !== month.getMonth();
+            const dim = view === "month" && d.getMonth() !== periodDate.getMonth();
             return (
               <Pressable key={ci} style={[styles.cell, { height: cellHeight }, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
                 <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
@@ -590,16 +580,15 @@ function MonthOrWeekGrid({
 
 // ── Year view: 12 mini months ──
 function YearView({
-  year, hasAnyItem, onPickMonth, swipe, todayKey,
+  year, hasAnyItem, onPickMonth, todayKey,
 }: {
   year: number;
   hasAnyItem: (k: string) => boolean;
   onPickMonth: (m: number) => void;
-  swipe: ReturnType<typeof PanResponder.create>;
   todayKey: string;
 }) {
   return (
-    <ScrollView style={styles.flex} contentContainerStyle={styles.yearScroll} {...swipe.panHandlers}>
+    <ScrollView style={styles.flex} contentContainerStyle={styles.yearScroll}>
       <View style={styles.yearGrid}>
         {Array.from({ length: 12 }, (_, mi) => (
           <Pressable key={mi} style={styles.miniMonth} onPress={() => onPickMonth(mi)}>
@@ -628,18 +617,49 @@ function YearView({
   );
 }
 
-// ── Day pane (full-screen single day) ──
-function DayPane({
-  day, items, swipe, onReschedule,
+// ── Interactive swipe pager: three panels (prev/current/next) that track the
+// finger and snap to the neighbour on release, then commit via onShift. ──
+function SwipePager({
+  fill, onShift, renderPanel,
 }: {
-  day: Date;
-  items: DayItem[];
-  swipe: ReturnType<typeof PanResponder.create>;
-  onReschedule: (enrollmentId: string, date: string, studentId: string, courseName: string | null) => void;
+  fill?: boolean;
+  onShift: (dir: -1 | 1) => void;
+  renderPanel: (offset: -1 | 0 | 1) => React.ReactNode;
 }) {
+  const { width } = useWindowDimensions();
+  // tx is the live drag delta (0 = current panel centred). Base offset that
+  // centres the middle panel is applied statically via marginLeft.
+  const tx = useMemo(() => new Animated.Value(0), []);
+
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
+        onPanResponderMove: (_e, g) => tx.setValue(g.dx),
+        onPanResponderRelease: (_e, g) => {
+          const threshold = width * 0.22;
+          if (g.dx > threshold || g.vx > 0.4) {
+            Animated.timing(tx, { toValue: width, duration: 160, useNativeDriver: true }).start(() => { onShift(-1); tx.setValue(0); });
+          } else if (g.dx < -threshold || g.vx < -0.4) {
+            Animated.timing(tx, { toValue: -width, duration: 160, useNativeDriver: true }).start(() => { onShift(1); tx.setValue(0); });
+          } else {
+            Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+          }
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+        },
+      }),
+    [tx, width, onShift],
+  );
+
   return (
-    <View style={styles.flex} {...swipe.panHandlers}>
-      <DayAgenda day={day} items={items} onReschedule={onReschedule} big />
+    <View style={[{ width, overflow: "hidden" }, fill && styles.flex]} {...responder.panHandlers}>
+      <Animated.View style={[{ flexDirection: "row", width: width * 3, marginLeft: -width, transform: [{ translateX: tx }] }, fill && styles.flex]}>
+        <View style={[{ width }, fill && styles.flex]}>{renderPanel(-1)}</View>
+        <View style={[{ width }, fill && styles.flex]}>{renderPanel(0)}</View>
+        <View style={[{ width }, fill && styles.flex]}>{renderPanel(1)}</View>
+      </Animated.View>
     </View>
   );
 }
