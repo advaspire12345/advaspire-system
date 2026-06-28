@@ -15,7 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { TopBar } from "@/components/TopBar";
@@ -190,6 +190,8 @@ export default function CalendarScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const router = useRouter();
+  const { height: winH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const [view, setView] = useState<ViewMode>("month");
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
@@ -458,7 +460,10 @@ export default function CalendarScreen() {
   }, [view, month, selectedDay]);
 
   // Calendar area sizing is controlled HERE (by the current month only) so the
-  // pager's neighbour months never add phantom space. Interpolated on vt.
+  // pager's neighbour months never add phantom space. Interpolations are
+  // MEMOISED so tapping a day doesn't recreate the animated nodes (which made
+  // rows flash blank). Expanded row height is capped so the bottom week never
+  // slides under the tab bar.
   const currentGrid = useMemo(() => buildMonthGrid(month.getFullYear(), month.getMonth()), [month]);
   const currentRows = currentGrid.length;
   const selWeekIdx = useMemo(() => {
@@ -466,12 +471,20 @@ export default function CalendarScreen() {
     const i = currentGrid.findIndex((row) => row.some((d) => d && ymd(d) === k));
     return i < 0 ? 0 : i;
   }, [currentGrid, selectedDay]);
-  const rowHeight = vt.interpolate({ inputRange: [-1, 0, 1], outputRange: [ROW_H, ROW_H, ROW_H_BIG] });
-  const calHeight = vt.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: [ROW_H, currentRows * ROW_H, currentRows * ROW_H_BIG],
-  });
-  const calTranslateY = vt.interpolate({ inputRange: [-1, 0, 1], outputRange: [-selWeekIdx * ROW_H, 0, 0] });
+  const maxCalH = Math.max(ROW_H * 4, winH - insets.top - insets.bottom - 300);
+  const expandedRowH = Math.max(ROW_H, Math.min(ROW_H_BIG, Math.floor(maxCalH / Math.max(1, currentRows))));
+  const rowHeight = useMemo(
+    () => vt.interpolate({ inputRange: [-1, 0, 1], outputRange: [ROW_H, ROW_H, expandedRowH] }),
+    [vt, expandedRowH],
+  );
+  const calHeight = useMemo(
+    () => vt.interpolate({ inputRange: [-1, 0, 1], outputRange: [ROW_H, currentRows * ROW_H, currentRows * expandedRowH] }),
+    [vt, currentRows, expandedRowH],
+  );
+  const calTranslateY = useMemo(
+    () => vt.interpolate({ inputRange: [-1, 0, 1], outputRange: [-selWeekIdx * ROW_H, 0, 0] }),
+    [vt, selWeekIdx],
+  );
 
   if (loading) {
     return (

@@ -125,6 +125,7 @@ export default function ProgressScreen() {
           enrollment:enrollments!inner(student_id, course:courses(name))
         `)
         .eq("enrollment.student_id", selectedChildId!)
+        .eq("status", "present")
         .order("date", { ascending: false })
         .limit(50),
       // Certificates live in the `certificates` table keyed directly by
