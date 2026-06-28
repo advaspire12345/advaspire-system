@@ -1,5 +1,18 @@
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  LayoutAnimation,
+  Modal,
+  PanResponder,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  UIManager,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -10,8 +23,13 @@ import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { listLocalEvents, localEventOccursOn, type LocalEvent } from "@/lib/localEvents";
 import { supabase } from "@/lib/supabase";
 
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 type EnrollmentSchedule = {
   enrollmentId: string;
@@ -57,6 +75,8 @@ type CalendarData = {
   events: EventEntry[];
 };
 
+type ViewMode = "year" | "month" | "week" | "day";
+
 type DayKey = string; // yyyy-mm-dd
 
 function ymd(d: Date): DayKey {
@@ -65,25 +85,31 @@ function ymd(d: Date): DayKey {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-
 function startOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+function addMonths(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth() + n, 1);
+}
+function startOfWeek(d: Date): Date {
+  return addDays(d, -d.getDay()); // weeks start Sunday
 }
 
 function buildMonthGrid(year: number, month: number): (Date | null)[][] {
   const first = new Date(year, month, 1);
-  const firstWeekday = first.getDay(); // 0 = Sun
+  const firstWeekday = first.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const grid: (Date | null)[][] = [];
-  let cursor = 1 - firstWeekday; // start of first row (may be in prev month)
+  let cursor = 1 - firstWeekday;
   for (let row = 0; row < 6; row++) {
     const rowCells: (Date | null)[] = [];
     for (let col = 0; col < 7; col++) {
-      if (cursor >= 1 && cursor <= daysInMonth) {
-        rowCells.push(new Date(year, month, cursor));
-      } else {
-        rowCells.push(null);
-      }
+      rowCells.push(cursor >= 1 && cursor <= daysInMonth ? new Date(year, month, cursor) : null);
       cursor++;
     }
     grid.push(rowCells);
@@ -112,29 +138,51 @@ function eventOccursOn(e: EventEntry, dateKey: string): boolean {
     const wd = WEEKDAYS_FULL[d.getDay()];
     if (!e.recurringDays.includes(wd)) return false;
     if (e.isBounded) {
-      const start = e.recurringStartDate;
-      const end = e.recurringEndDate;
-      if (start && dateKey < start) return false;
-      if (end && dateKey > end) return false;
+      if (e.recurringStartDate && dateKey < e.recurringStartDate) return false;
+      if (e.recurringEndDate && dateKey > e.recurringEndDate) return false;
     }
     return true;
   }
-  // Single or multi-day non-recurring
-  if (e.endDate) {
-    return dateKey >= e.date && dateKey <= e.endDate;
-  }
+  if (e.endDate) return dateKey >= e.date && dateKey <= e.endDate;
   return dateKey === e.date;
 }
+
+function toMinutes(t: string | null): number | null {
+  if (!t) return null;
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  return h * 60 + m;
+}
+function fmt12(t: string | null): string | null {
+  if (!t) return null;
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  const period = h < 12 ? "AM" : "PM";
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${period}`;
+}
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+type DayItem = {
+  id: string;
+  time: number | null;
+  timeLabel: string | null;
+  title: string;
+  subtitle: string;
+  color: string;
+  reschedule?: { enrollmentId: string; studentId: string; courseName: string | null; date: string };
+};
 
 export default function CalendarScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const router = useRouter();
-  const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
-  const [selectedDay, setSelectedDay] = useState<Date | null>(new Date());
 
-  // Personal on-device events. Reload whenever the tab refocuses (e.g. after
-  // creating one) so new events appear immediately.
+  const [view, setView] = useState<ViewMode>("month");
+  const [expanded, setExpanded] = useState(false);
+  const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
+  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
+  const [searchOpen, setSearchOpen] = useState(false);
+
   const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
   useFocusEffect(
     useCallback(() => {
@@ -146,7 +194,6 @@ export default function CalendarScreen() {
 
   const fetchCalendar = async (): Promise<CalendarData> => {
     const empty: CalendarData = { parentId: null, enrollments: [], attendance: [], events: [] };
-
     const { data: parentRow } = await supabase
       .from("parents")
       .select("id, branch_id, company_id")
@@ -166,7 +213,6 @@ export default function CalendarScreen() {
     const studentIds = studentRows.map((s) => s.id);
     if (studentIds.length === 0) return { ...empty, parentId };
 
-    // Recurring schedule per active enrollment
     const { data: enrs, error: enrErr } = await supabase
       .from("enrollments")
       .select("id, student_id, day_of_week, start_time, schedule, course:courses(name)")
@@ -178,7 +224,6 @@ export default function CalendarScreen() {
     const enrollments: EnrollmentSchedule[] = (enrs ?? []).map((e) => {
       let days: string[] = [];
       let startTime: string | null = (e.start_time as string | null) ?? null;
-      // schedule is a JSON array string [{day, time}, ...]; fall back to day_of_week.
       const scheduleRaw = e.schedule as string | null;
       if (scheduleRaw) {
         try {
@@ -194,9 +239,7 @@ export default function CalendarScreen() {
       if (days.length === 0 && e.day_of_week) {
         try {
           const parsed = JSON.parse(e.day_of_week as string);
-          if (Array.isArray(parsed)) {
-            days = parsed.map((d: string) => String(d).toLowerCase());
-          }
+          if (Array.isArray(parsed)) days = parsed.map((d: string) => String(d).toLowerCase());
         } catch {
           /* ignore */
         }
@@ -213,16 +256,11 @@ export default function CalendarScreen() {
       };
     });
 
-    // Attendance for this month + a buffer
     const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
-    const monthEnd = new Date(month.getFullYear(), month.getMonth() + 2, 0); // end of next month
+    const monthEnd = new Date(month.getFullYear(), month.getMonth() + 2, 0);
     const { data: att, error: attErr } = await supabase
       .from("attendance")
-      .select(`
-        date,
-        status,
-        enrollment:enrollments!inner(student_id, course:courses(name))
-      `)
+      .select(`date, status, enrollment:enrollments!inner(student_id, course:courses(name))`)
       .gte("date", ymd(monthStart))
       .lte("date", ymd(monthEnd))
       .in("enrollment.student_id", studentIds);
@@ -240,8 +278,6 @@ export default function CalendarScreen() {
       };
     });
 
-    // Events: holidays / activities / competitions visible to this parent,
-    // plus parent-created own_schedule events. We rely on RLS to scope.
     const { data: evs, error: evErr } = await supabase
       .from("events")
       .select(`
@@ -252,10 +288,7 @@ export default function CalendarScreen() {
       `)
       .is("deleted_at", null)
       .neq("status", "rejected");
-    if (evErr) {
-      // Don't block the calendar if events table isn't readable by this role
-      console.warn("events load failed", evErr.message);
-    }
+    if (evErr) console.warn("events load failed", evErr.message);
     const events: EventEntry[] = (evs ?? []).map((e) => ({
       id: e.id as string,
       title: (e.title as string) ?? "",
@@ -291,48 +324,110 @@ export default function CalendarScreen() {
   const parentId = data?.parentId ?? null;
   const errorMessage = error && !data ? "Couldn't load your calendar. Check your connection." : null;
 
-  const grid = useMemo(() => buildMonthGrid(month.getFullYear(), month.getMonth()), [month]);
-
-  const monthLabel = useMemo(() => {
-    return month.toLocaleDateString("en-MY", { month: "long", year: "numeric" });
-  }, [month]);
-
-  const goPrevMonth = () => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1));
-  const goNextMonth = () => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1));
-  const goToday = () => {
-    const today = new Date();
-    setMonth(startOfMonth(today));
-    setSelectedDay(today);
-  };
-
-  // Attendance + class + event indicators per day key
-  const dayMarkers = useMemo(() => {
-    const map = new Map<DayKey, { hasAttendance: boolean; hasClass: boolean; hasEvent: boolean }>();
-    for (const a of attendance) {
-      const existing = map.get(a.date) ?? { hasAttendance: false, hasClass: false, hasEvent: false };
-      existing.hasAttendance = true;
-      map.set(a.date, existing);
-    }
-    const winStart = new Date(month.getFullYear(), month.getMonth() - 1, 1);
-    const winEnd = new Date(month.getFullYear(), month.getMonth() + 2, 0);
-    for (let d = new Date(winStart); d <= winEnd; d.setDate(d.getDate() + 1)) {
-      const k = ymd(d);
+  // Build the time-ordered items for a day (events + local + classes).
+  const buildDayItems = useCallback(
+    (dateKey: string): DayItem[] => {
+      const d = new Date(dateKey + "T00:00:00");
       const wd = WEEKDAYS_FULL[d.getDay()];
-      const existing = map.get(k) ?? { hasAttendance: false, hasClass: false, hasEvent: false };
-      if (enrollments.some((e) => e.scheduleDays.includes(wd))) {
-        existing.hasClass = true;
+      const items: DayItem[] = [];
+      for (const e of localEvents.filter((ev) => localEventOccursOn(ev, dateKey))) {
+        const typeName = e.type === "birthday" ? "Birthday" : e.type === "holiday" ? "Holiday" : "Event";
+        items.push({ id: `le-${e.id}`, time: toMinutes(e.startTime), timeLabel: fmt12(e.startTime) ?? "All day", title: e.title, subtitle: typeName, color: e.color });
       }
-      if (events.some((e) => eventOccursOn(e, k)) || localEvents.some((e) => localEventOccursOn(e, k))) {
-        existing.hasEvent = true;
+      for (const e of events.filter((ev) => eventOccursOn(ev, dateKey))) {
+        const meta = EVENT_TYPE_META[e.eventType];
+        const t = e.isRecurring ? e.recurringStartTime : e.startTime;
+        items.push({ id: `se-${e.id}`, time: toMinutes(t), timeLabel: fmt12(t) ?? "All day", title: e.title, subtitle: meta.label, color: e.color || meta.color });
       }
-      if (existing.hasAttendance || existing.hasClass || existing.hasEvent) {
-        map.set(k, existing);
+      const attToday = attendance.filter((a) => a.date === dateKey);
+      const isFuture = d.getTime() > new Date().setHours(0, 0, 0, 0);
+      for (const c of enrollments.filter((en) => en.scheduleDays.includes(wd))) {
+        const at = attToday.find((a) => a.studentId === c.studentId && a.courseName === c.courseName);
+        items.push({
+          id: `cl-${c.enrollmentId}-${dateKey}`,
+          time: toMinutes(c.startTime),
+          timeLabel: fmt12(c.startTime) ?? "Class",
+          title: c.studentName,
+          subtitle: `${c.courseName ?? "Class"}${at ? ` · ${cap(at.status)}` : ""}`,
+          color: at ? STATUS_COLORS[at.status] : "#23D2E2",
+          reschedule: isFuture && !at ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: dateKey } : undefined,
+        });
       }
-    }
-    return map;
-  }, [attendance, enrollments, events, localEvents, month]);
+      items.sort((a, b) => (a.time ?? -1) - (b.time ?? -1));
+      return items;
+    },
+    [enrollments, attendance, events, localEvents],
+  );
+
+  const hasAnyItem = useCallback((dateKey: string): boolean => buildDayItems(dateKey).length > 0, [buildDayItems]);
 
   const todayKey = ymd(new Date());
+
+  // ── navigation ──
+  const animate = () => LayoutAnimation.configureNext(LayoutAnimation.create(180, "easeInEaseOut", "opacity"));
+  const goPrev = () => {
+    animate();
+    if (view === "year") setMonth(new Date(month.getFullYear() - 1, month.getMonth(), 1));
+    else if (view === "month") setMonth(addMonths(month, -1));
+    else if (view === "week") { const nd = addDays(selectedDay, -7); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
+    else { const nd = addDays(selectedDay, -1); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
+  };
+  const goNext = () => {
+    animate();
+    if (view === "year") setMonth(new Date(month.getFullYear() + 1, month.getMonth(), 1));
+    else if (view === "month") setMonth(addMonths(month, 1));
+    else if (view === "week") { const nd = addDays(selectedDay, 7); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
+    else { const nd = addDays(selectedDay, 1); setSelectedDay(nd); setMonth(startOfMonth(nd)); }
+  };
+  const goToday = () => {
+    animate();
+    const t = new Date();
+    setMonth(startOfMonth(t));
+    setSelectedDay(t);
+  };
+  const pickDay = (d: Date) => {
+    setSelectedDay(d);
+    if (d.getMonth() !== month.getMonth() || d.getFullYear() !== month.getFullYear()) setMonth(startOfMonth(d));
+  };
+  const switchView = (v: ViewMode) => { animate(); setView(v); };
+
+  // horizontal swipe → prev / next period
+  const swipe = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+        onPanResponderRelease: (_e, g) => {
+          if (g.dx > 50) goPrev();
+          else if (g.dx < -50) goNext();
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, month, selectedDay],
+  );
+
+  // vertical drag on the handle → expand / collapse / week
+  const expandPan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 12 && Math.abs(g.dy) > Math.abs(g.dx),
+        onPanResponderRelease: (_e, g) => {
+          if (g.dy > 40) { animate(); if (view === "week") setView("month"); else setExpanded(true); }
+          else if (g.dy < -40) { animate(); if (view === "month" && expanded) setExpanded(false); else setView("week"); }
+        },
+      }),
+    [view, expanded],
+  );
+
+  const periodTitle = useMemo(() => {
+    if (view === "year") return String(month.getFullYear());
+    if (view === "month") return `${month.toLocaleDateString("en-MY", { month: "long" })} ${month.getFullYear()}`;
+    if (view === "week") {
+      const s = startOfWeek(selectedDay);
+      const e = addDays(s, 6);
+      return `${MONTH_NAMES[s.getMonth()]} ${s.getDate()} – ${s.getMonth() === e.getMonth() ? "" : MONTH_NAMES[e.getMonth()] + " "}${e.getDate()}`;
+    }
+    return selectedDay.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" });
+  }, [view, month, selectedDay]);
 
   if (loading) {
     return (
@@ -345,209 +440,224 @@ export default function CalendarScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <TopBar title="Schedule" />
+
+      {/* View tabs */}
+      <View style={styles.tabs}>
+        {(["year", "month", "week", "day"] as ViewMode[]).map((v) => (
+          <Pressable key={v} style={[styles.tab, view === v && styles.tabActive]} onPress={() => switchView(v)}>
+            <Text style={[styles.tabText, view === v && styles.tabTextActive]}>{cap(v)}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* Header: prev / title / next  + today + search */}
       <View style={styles.header}>
-        <Pressable onPress={goPrevMonth} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
+        <Pressable onPress={goPrev} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
           <Ionicons name="chevron-back" size={18} color="#615DFA" />
         </Pressable>
-        <Pressable onPress={goToday} style={styles.monthLabelButton}>
-          <Text style={styles.monthLabel}>{monthLabel}</Text>
-          <Text style={styles.todayHint}>Tap for today</Text>
-        </Pressable>
-        <Pressable onPress={goNextMonth} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
+        <Text style={styles.headerTitle} numberOfLines={1}>{periodTitle}</Text>
+        <Pressable onPress={goNext} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
           <Ionicons name="chevron-forward" size={18} color="#615DFA" />
+        </Pressable>
+        <Pressable onPress={goToday} style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}>
+          <Text style={styles.todayText}>Today</Text>
+        </Pressable>
+        <Pressable onPress={() => setSearchOpen(true)} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
+          <Ionicons name="search" size={18} color="#615DFA" />
         </Pressable>
       </View>
 
       {errorMessage ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
+        <View style={styles.errorCard}><Text style={styles.errorText}>{errorMessage}</Text></View>
       ) : null}
-
       {isStale ? (
-        <View style={styles.bannerWrap}>
-          <OfflineBanner updatedAt={updatedAt} />
-        </View>
+        <View style={styles.bannerWrap}><OfflineBanner updatedAt={updatedAt} /></View>
       ) : null}
 
-      <View style={styles.weekdays}>
-        {WEEKDAY_LABELS.map((w) => (
-          <Text key={w} style={styles.weekdayLabel}>
-            {w}
-          </Text>
-        ))}
-      </View>
-
-      <View style={styles.grid}>
-        {grid.map((row, rowIdx) => (
-          <View key={rowIdx} style={styles.gridRow}>
-            {row.map((d, colIdx) => {
-              if (!d) return <View key={colIdx} style={styles.cellEmpty} />;
-              const key = ymd(d);
-              const marker = dayMarkers.get(key);
-              const isToday = key === todayKey;
-              const isSelected = selectedDay && ymd(selectedDay) === key;
-              return (
-                <Pressable
-                  key={colIdx}
-                  style={[
-                    styles.cell,
-                    isSelected && styles.cellSelected,
-                    isToday && !isSelected && styles.cellToday,
-                  ]}
-                  onPress={() => setSelectedDay(d)}
-                >
-                  <Text style={[styles.cellDate, isSelected && styles.cellDateSelected, isToday && !isSelected && styles.cellDateToday]}>
-                    {d.getDate()}
-                  </Text>
-                  <View style={styles.cellDots}>
-                    {marker?.hasClass ? <View style={[styles.dot, { backgroundColor: "#23D2E2" }]} /> : null}
-                    {marker?.hasAttendance ? <View style={[styles.dot, { backgroundColor: "#615DFA" }]} /> : null}
-                    {marker?.hasEvent ? <View style={[styles.dot, { backgroundColor: "#F59E0B" }]} /> : null}
-                  </View>
-                </Pressable>
-              );
-            })}
+      {view === "year" ? (
+        <YearView year={month.getFullYear()} hasAnyItem={hasAnyItem} swipe={swipe} todayKey={todayKey}
+          onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear(), mi, 1)); setView("month"); }} />
+      ) : view === "day" ? (
+        <DayPane day={selectedDay} items={buildDayItems(ymd(selectedDay))} swipe={swipe}
+          onReschedule={(eid, dt, sid, cn) => router.push({ pathname: "/reschedule", params: { enrollmentId: eid, originalDate: dt, studentId: sid, courseName: cn ?? "" } })} />
+      ) : (
+        <View style={styles.flex}>
+          <View style={styles.weekdays}>
+            {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-        ))}
-      </View>
-
-      <View style={styles.legend}>
-        <View style={styles.legendItem}>
-          <View style={[styles.dot, { backgroundColor: "#23D2E2" }]} />
-          <Text style={styles.legendText}>Class scheduled</Text>
+          <View {...swipe.panHandlers}>
+            <MonthOrWeekGrid
+              view={view}
+              month={month}
+              selectedDay={selectedDay}
+              expanded={expanded}
+              todayKey={todayKey}
+              buildDayItems={buildDayItems}
+              onPickDay={pickDay}
+            />
+          </View>
+          {/* drag handle to expand / collapse */}
+          <View style={styles.handleWrap} {...expandPan.panHandlers}>
+            <Pressable onPress={() => { animate(); if (view === "week") { setView("month"); } else setExpanded((e) => !e); }} hitSlop={10}>
+              <View style={styles.handleBar} />
+            </Pressable>
+          </View>
+          <DayAgenda
+            day={selectedDay}
+            items={buildDayItems(ymd(selectedDay))}
+            onReschedule={(eid, dt, sid, cn) => router.push({ pathname: "/reschedule", params: { enrollmentId: eid, originalDate: dt, studentId: sid, courseName: cn ?? "" } })}
+          />
         </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.dot, { backgroundColor: "#615DFA" }]} />
-          <Text style={styles.legendText}>Attended</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.dot, { backgroundColor: "#F59E0B" }]} />
-          <Text style={styles.legendText}>Event</Text>
-        </View>
-      </View>
-
-      <DayAgenda
-        day={selectedDay ?? new Date()}
-        enrollments={enrollments}
-        attendance={attendance}
-        events={events}
-        localEvents={localEvents}
-        onReschedule={(enrollmentId, originalDate, studentId, courseName) =>
-          router.push({
-            pathname: "/reschedule",
-            params: { enrollmentId, originalDate, studentId, courseName: courseName ?? "" },
-          })
-        }
-      />
+      )}
 
       <Pressable
         style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
-        onPress={() =>
-          router.push({
-            pathname: "/event/new",
-            params: parentId ? { parentId } : {},
-          })
-        }
+        onPress={() => router.push({ pathname: "/event/new", params: parentId ? { parentId } : {} })}
       >
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </Pressable>
+
+      {searchOpen ? (
+        <SearchModal
+          localEvents={localEvents}
+          events={events}
+          onClose={() => setSearchOpen(false)}
+          onPick={(dateKey) => {
+            const d = new Date(dateKey + "T00:00:00");
+            animate();
+            setSelectedDay(d);
+            setMonth(startOfMonth(d));
+            setView("day");
+            setSearchOpen(false);
+          }}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
 
-function toMinutes(t: string | null): number | null {
-  if (!t) return null;
-  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
-  return h * 60 + m;
-}
-function fmt12(t: string | null): string | null {
-  if (!t) return null;
-  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
-  const period = h < 12 ? "AM" : "PM";
-  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${period}`;
-}
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-type AgendaItem = {
-  id: string;
-  time: number | null;
-  timeLabel: string | null;
-  title: string;
-  subtitle: string;
-  color: string;
-  reschedule?: { enrollmentId: string; studentId: string; courseName: string | null; date: string };
-};
-
-function DayAgenda({
-  day,
-  enrollments,
-  attendance,
-  events,
-  localEvents,
-  onReschedule,
+// ── Month / Week grid with pills ──
+function MonthOrWeekGrid({
+  view, month, selectedDay, expanded, todayKey, buildDayItems, onPickDay,
 }: {
-  day: Date;
-  enrollments: EnrollmentSchedule[];
-  attendance: AttendanceMarker[];
-  events: EventEntry[];
-  localEvents: LocalEvent[];
-  onReschedule: (enrollmentId: string, originalDate: string, studentId: string, courseName: string | null) => void;
+  view: ViewMode;
+  month: Date;
+  selectedDay: Date;
+  expanded: boolean;
+  todayKey: string;
+  buildDayItems: (k: string) => DayItem[];
+  onPickDay: (d: Date) => void;
 }) {
-  const key = ymd(day);
-  const dayWeekday = WEEKDAYS_FULL[day.getDay()];
-  const attendanceThisDay = attendance.filter((a) => a.date === key);
-  const isFuture = day.getTime() > new Date().setHours(23, 59, 59, 999) - 86_400_000;
-
-  const items: AgendaItem[] = [];
-
-  for (const e of localEvents.filter((ev) => localEventOccursOn(ev, key))) {
-    const typeName = e.type === "birthday" ? "Birthday" : e.type === "holiday" ? "Holiday" : "Event";
-    items.push({
-      id: `le-${e.id}`,
-      time: toMinutes(e.startTime),
-      timeLabel: fmt12(e.startTime) ?? "All day",
-      title: e.title,
-      subtitle: typeName,
-      color: e.color,
-    });
-  }
-
-  for (const e of events.filter((ev) => eventOccursOn(ev, key))) {
-    const meta = EVENT_TYPE_META[e.eventType];
-    const t = e.isRecurring ? e.recurringStartTime : e.startTime;
-    items.push({
-      id: `se-${e.id}`,
-      time: toMinutes(t),
-      timeLabel: fmt12(t) ?? "All day",
-      title: e.title,
-      subtitle: meta.label,
-      color: e.color || meta.color,
-    });
-  }
-
-  for (const c of enrollments.filter((en) => en.scheduleDays.includes(dayWeekday))) {
-    const att = attendanceThisDay.find((a) => a.studentId === c.studentId && a.courseName === c.courseName);
-    items.push({
-      id: `cl-${c.enrollmentId}`,
-      time: toMinutes(c.startTime),
-      timeLabel: fmt12(c.startTime) ?? "Class",
-      title: c.studentName,
-      subtitle: `${c.courseName ?? "Class"}${att ? ` · ${cap(att.status)}` : ""}`,
-      color: att ? STATUS_COLORS[att.status] : "#23D2E2",
-      reschedule: isFuture && !att ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: key } : undefined,
-    });
-  }
-
-  items.sort((a, b) => (a.time ?? -1) - (b.time ?? -1));
+  const rows = view === "week" ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(selectedDay), i))] : buildMonthGrid(month.getFullYear(), month.getMonth());
+  const maxPills = view === "week" ? 6 : expanded ? 4 : 2;
+  const cellHeight = view === "week" ? 150 : expanded ? 108 : 66;
+  const selKey = ymd(selectedDay);
 
   return (
+    <View style={styles.grid}>
+      {rows.map((row, ri) => (
+        <View key={ri} style={styles.gridRow}>
+          {row.map((d, ci) => {
+            if (!d) return <View key={ci} style={[styles.cell, { height: cellHeight }]} />;
+            const key = ymd(d);
+            const items = buildDayItems(key);
+            const isToday = key === todayKey;
+            const isSelected = key === selKey;
+            const dim = view === "month" && d.getMonth() !== month.getMonth();
+            return (
+              <Pressable key={ci} style={[styles.cell, { height: cellHeight }, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
+                <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
+                  <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
+                    {d.getDate()}
+                  </Text>
+                </View>
+                <View style={styles.pills}>
+                  {items.slice(0, maxPills).map((it) => (
+                    <View key={it.id} style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }]}>
+                      <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
+                    </View>
+                  ))}
+                  {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ── Year view: 12 mini months ──
+function YearView({
+  year, hasAnyItem, onPickMonth, swipe, todayKey,
+}: {
+  year: number;
+  hasAnyItem: (k: string) => boolean;
+  onPickMonth: (m: number) => void;
+  swipe: ReturnType<typeof PanResponder.create>;
+  todayKey: string;
+}) {
+  return (
+    <ScrollView style={styles.flex} contentContainerStyle={styles.yearScroll} {...swipe.panHandlers}>
+      <View style={styles.yearGrid}>
+        {Array.from({ length: 12 }, (_, mi) => (
+          <Pressable key={mi} style={styles.miniMonth} onPress={() => onPickMonth(mi)}>
+            <Text style={styles.miniTitle}>{MONTH_NAMES[mi]}</Text>
+            <View>
+              {buildMonthGrid(year, mi).map((row, ri) => (
+                <View key={ri} style={styles.miniRow}>
+                  {row.map((d, ci) => {
+                    if (!d) return <View key={ci} style={styles.miniCell} />;
+                    const key = ymd(d);
+                    const isToday = key === todayKey;
+                    return (
+                      <View key={ci} style={styles.miniCell}>
+                        <Text style={[styles.miniDay, isToday && styles.miniToday]}>{d.getDate()}</Text>
+                        {hasAnyItem(key) ? <View style={styles.miniDot} /> : <View style={styles.miniDotEmpty} />}
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+// ── Day pane (full-screen single day) ──
+function DayPane({
+  day, items, swipe, onReschedule,
+}: {
+  day: Date;
+  items: DayItem[];
+  swipe: ReturnType<typeof PanResponder.create>;
+  onReschedule: (enrollmentId: string, date: string, studentId: string, courseName: string | null) => void;
+}) {
+  return (
+    <View style={styles.flex} {...swipe.panHandlers}>
+      <DayAgenda day={day} items={items} onReschedule={onReschedule} big />
+    </View>
+  );
+}
+
+// ── Day agenda list ──
+function DayAgenda({
+  day, items, onReschedule, big,
+}: {
+  day: Date;
+  items: DayItem[];
+  onReschedule: (enrollmentId: string, date: string, studentId: string, courseName: string | null) => void;
+  big?: boolean;
+}) {
+  return (
     <View style={styles.agenda}>
-      <Text style={styles.agendaDate}>
-        {day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })}
-      </Text>
+      {!big ? (
+        <Text style={styles.agendaDate}>{day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })}</Text>
+      ) : null}
       <ScrollView style={styles.flex} contentContainerStyle={styles.agendaList} showsVerticalScrollIndicator={false}>
         {items.length === 0 ? (
           <Text style={styles.agendaEmpty}>Nothing scheduled on this day.</Text>
@@ -561,12 +671,9 @@ function DayAgenda({
                 <Text style={styles.agendaSub} numberOfLines={1}>{it.subtitle}</Text>
               </View>
               {it.reschedule ? (
-                <Pressable
-                  style={({ pressed }) => [styles.rescheduleButton, pressed && styles.pressed]}
-                  onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}
-                >
+                <Pressable style={({ pressed }) => [styles.moveButton, pressed && styles.pressed]} onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}>
                   <Ionicons name="swap-horizontal" size={16} color="#615DFA" />
-                  <Text style={styles.rescheduleText}>Move</Text>
+                  <Text style={styles.moveText}>Move</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -577,143 +684,127 @@ function DayAgenda({
   );
 }
 
+// ── Search ──
+function SearchModal({
+  localEvents, events, onClose, onPick,
+}: {
+  localEvents: LocalEvent[];
+  events: EventEntry[];
+  onClose: () => void;
+  onPick: (dateKey: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const results = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return [] as { id: string; title: string; date: string; color: string; sub: string }[];
+    const out: { id: string; title: string; date: string; color: string; sub: string }[] = [];
+    for (const e of localEvents) {
+      if (e.title.toLowerCase().includes(needle)) out.push({ id: `le-${e.id}`, title: e.title, date: e.startDate, color: e.color, sub: cap(e.type) });
+    }
+    for (const e of events) {
+      if ((e.title ?? "").toLowerCase().includes(needle)) {
+        const meta = EVENT_TYPE_META[e.eventType];
+        out.push({ id: `se-${e.id}`, title: e.title, date: e.isRecurring ? e.recurringStartDate ?? e.date : e.date, color: e.color || meta.color, sub: meta.label });
+      }
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date));
+  }, [q, localEvents, events]);
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={styles.searchSafe} edges={["top"]}>
+        <View style={styles.searchHeader}>
+          <View style={styles.searchBox}>
+            <Ionicons name="search" size={18} color="#9CA3AF" />
+            <TextInput value={q} onChangeText={setQ} placeholder="Search events" placeholderTextColor="#9CA3AF" style={styles.searchInput} autoFocus />
+          </View>
+          <Pressable onPress={onClose} hitSlop={8}><Text style={styles.searchCancel}>Cancel</Text></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={styles.searchList} keyboardShouldPersistTaps="handled">
+          {q.trim() && results.length === 0 ? <Text style={styles.agendaEmpty}>No events found.</Text> : null}
+          {results.map((r) => (
+            <Pressable key={r.id} style={styles.searchRow} onPress={() => onPick(r.date)}>
+              <View style={[styles.searchDot, { backgroundColor: r.color }]} />
+              <View style={styles.flex}>
+                <Text style={styles.searchTitle} numberOfLines={1}>{r.title}</Text>
+                <Text style={styles.searchSub}>{r.sub} · {new Date(r.date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F6FB" },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
-  agenda: { flex: 1, marginTop: 4 },
+  tabs: { flexDirection: "row", marginHorizontal: 16, backgroundColor: "#EEF0F6", borderRadius: 12, padding: 4, gap: 4 },
+  tab: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: "center" },
+  tabActive: { backgroundColor: "#FFFFFF", shadowColor: "#0F172A", shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  tabText: { fontSize: 13, fontWeight: "700", color: "#6B7280" },
+  tabTextActive: { color: "#615DFA" },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
+  navButton: { width: 36, height: 36, borderRadius: 12, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", shadowColor: "#0F172A", shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  headerTitle: { flex: 1, textAlign: "center", fontSize: 16, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
+  todayButton: { paddingHorizontal: 12, height: 36, borderRadius: 12, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
+  todayText: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
+  pressed: { opacity: 0.7 },
+  errorCard: { marginHorizontal: 16, marginBottom: 8, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
+  errorText: { color: "#991B1B", fontSize: 13 },
+  bannerWrap: { paddingHorizontal: 16, marginBottom: 8 },
+  weekdays: { flexDirection: "row", paddingHorizontal: 8, marginBottom: 2 },
+  weekdayLabel: { flex: 1, textAlign: "center", fontSize: 10, fontWeight: "800", color: "#9CA3AF", letterSpacing: 0.6, textTransform: "uppercase" },
+  grid: { paddingHorizontal: 6 },
+  gridRow: { flexDirection: "row" },
+  cell: { flex: 1, margin: 1.5, borderRadius: 10, backgroundColor: "#FFFFFF", paddingTop: 4, paddingHorizontal: 3, overflow: "hidden" },
+  cellSelected: { borderWidth: 1.5, borderColor: "#615DFA" },
+  cellDateWrap: { alignSelf: "flex-start", minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
+  cellTodayWrap: { backgroundColor: "#615DFA" },
+  cellDate: { fontSize: 12, fontWeight: "700", color: "#374151" },
+  cellDateToday: { color: "#FFFFFF" },
+  cellDateSel: { color: "#615DFA" },
+  cellDim: { color: "#D1D5DB" },
+  pills: { marginTop: 2, gap: 2 },
+  pill: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1 },
+  pillText: { fontSize: 9, fontWeight: "700" },
+  pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
+  handleWrap: { alignItems: "center", paddingVertical: 8 },
+  handleBar: { width: 44, height: 5, borderRadius: 3, backgroundColor: "#D1D5DB" },
+  agenda: { flex: 1 },
   agendaDate: { fontSize: 14, fontWeight: "800", color: "#0F172A", paddingHorizontal: 16, marginBottom: 8 },
   agendaList: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
   agendaEmpty: { fontSize: 13, color: "#9CA3AF", textAlign: "center", paddingVertical: 24 },
-  agendaItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    padding: 12,
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
+  agendaItem: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, shadowColor: "#0F172A", shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   agendaTime: { width: 64, fontSize: 11, fontWeight: "700", color: "#6B7280" },
   agendaBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
   agendaTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
   agendaSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    justifyContent: "space-between",
-  },
-  navButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#0F172A",
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
-  monthLabelButton: { alignItems: "center" },
-  monthLabel: { fontSize: 18, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
-  todayHint: { fontSize: 10, color: "#9CA3AF", marginTop: 2, fontWeight: "600" },
-  errorCard: { marginHorizontal: 16, marginBottom: 12, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
-  errorText: { color: "#991B1B", fontSize: 13 },
-  bannerWrap: { paddingHorizontal: 16, marginBottom: 12 },
-  weekdays: { flexDirection: "row", paddingHorizontal: 14, marginBottom: 6, marginTop: 4 },
-  weekdayLabel: { flex: 1, textAlign: "center", fontSize: 10, fontWeight: "800", color: "#9CA3AF", letterSpacing: 0.8, textTransform: "uppercase" },
-  grid: { paddingHorizontal: 14 },
-  gridRow: { flexDirection: "row" },
-  cell: {
-    flex: 1,
-    aspectRatio: 1,
-    margin: 2,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cellEmpty: { flex: 1, aspectRatio: 1, margin: 2 },
-  cellToday: { borderWidth: 1.5, borderColor: "#615DFA" },
-  cellSelected: {
-    backgroundColor: "#615DFA",
-    shadowColor: "#615DFA",
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  cellDate: { fontSize: 14, fontWeight: "700", color: "#374151" },
-  cellDateToday: { color: "#615DFA", fontWeight: "800" },
-  cellDateSelected: { color: "#FFFFFF" },
-  cellDots: { flexDirection: "row", gap: 3, marginTop: 3, height: 5 },
-  dot: { width: 5, height: 5, borderRadius: 2.5 },
-  legend: { flexDirection: "row", justifyContent: "center", gap: 16, paddingVertical: 16 },
-  legendItem: { flexDirection: "row", alignItems: "center", gap: 6 },
-  legendText: { fontSize: 12, color: "#6B7280" },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" },
-  modalSheet: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-    paddingTop: 12,
-  },
-  modalHandle: { width: 40, height: 4, backgroundColor: "#E5E7EB", borderRadius: 2, alignSelf: "center", marginBottom: 12 },
-  modalDate: { fontSize: 16, fontWeight: "800", color: "#111827", marginBottom: 12 },
-  modalEmpty: { fontSize: 14, color: "#6B7280", textAlign: "center", paddingVertical: 24 },
-  modalSection: { fontSize: 12, fontWeight: "700", color: "#6B7280", letterSpacing: 1, textTransform: "uppercase", marginBottom: 8 },
-  modalItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-  },
-  modalItemMain: { flex: 1 },
-  modalItemTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  modalItemSubtitle: { fontSize: 13, color: "#6B7280", marginTop: 2 },
-  modalItemStatus: { fontSize: 12, fontWeight: "700", marginTop: 4 },
-  rescheduleButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#F3F4F6",
-    borderRadius: 8,
-  },
-  pressed: { opacity: 0.8 },
-  rescheduleText: { fontSize: 13, fontWeight: "700", color: "#615DFA" },
-  eventSwatch: { width: 4, height: 36, borderRadius: 2, marginRight: 12 },
-  fab: {
-    position: "absolute",
-    right: 20,
-    bottom: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#615DFA",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#615DFA",
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
+  moveButton: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#F3F4F6", borderRadius: 8 },
+  moveText: { fontSize: 13, fontWeight: "700", color: "#615DFA" },
+  yearScroll: { padding: 12, paddingBottom: 100 },
+  yearGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  miniMonth: { width: "31%", backgroundColor: "#FFFFFF", borderRadius: 12, padding: 8, marginBottom: 12 },
+  miniTitle: { fontSize: 12, fontWeight: "800", color: "#615DFA", marginBottom: 4, textAlign: "center" },
+  miniRow: { flexDirection: "row" },
+  miniCell: { flex: 1, alignItems: "center", justifyContent: "center", height: 16 },
+  miniDay: { fontSize: 7, color: "#374151", fontWeight: "600" },
+  miniToday: { color: "#FFFFFF", backgroundColor: "#615DFA", borderRadius: 6, width: 12, height: 12, textAlign: "center", overflow: "hidden", lineHeight: 12 },
+  miniDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: "#F59E0B", marginTop: 1 },
+  miniDotEmpty: { width: 3, height: 3, marginTop: 1 },
+  fab: { position: "absolute", right: 20, bottom: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", shadowColor: "#615DFA", shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   fabPressed: { opacity: 0.85, transform: [{ scale: 0.96 }] },
+  searchSafe: { flex: 1, backgroundColor: "#F6F6FB" },
+  searchHeader: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
+  searchBox: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFFFF", borderRadius: 12, paddingHorizontal: 12, height: 44 },
+  searchInput: { flex: 1, fontSize: 15, color: "#111827" },
+  searchCancel: { fontSize: 15, color: "#615DFA", fontWeight: "700" },
+  searchList: { padding: 16, gap: 10 },
+  searchRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 12, padding: 14 },
+  searchDot: { width: 10, height: 10, borderRadius: 5 },
+  searchTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  searchSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
 });
