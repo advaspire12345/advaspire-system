@@ -29,9 +29,7 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-const CELL_COLLAPSED = 66;
-const CELL_EXPANDED = 108;
+const ROW_H = 70; // height of one calendar week row (month view)
 
 const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -193,12 +191,12 @@ export default function CalendarScreen() {
   const router = useRouter();
 
   const [view, setView] = useState<ViewMode>("month");
-  const [expanded, setExpanded] = useState(false);
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
-  // Live month cell height (drives the pull-to-expand; follows the finger).
-  const cellH = useMemo(() => new Animated.Value(CELL_COLLAPSED), []);
+  // 0 = full month, 1 = single (selected) week. Drives the finger-following
+  // month↔week collapse; the grid wrapper height + row offset interpolate on it.
+  const collapseT = useMemo(() => new Animated.Value(0), []);
 
   const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
   useFocusEffect(
@@ -382,62 +380,63 @@ export default function CalendarScreen() {
 
   // ── navigation ──
   const animate = () => LayoutAnimation.configureNext(LayoutAnimation.create(180, "easeInEaseOut", "opacity"));
-  // Shift the focused period by dir (-1 prev, +1 next) for the current view.
+  const springCollapse = (toWeek: boolean) =>
+    Animated.spring(collapseT, { toValue: toWeek ? 1 : 0, useNativeDriver: false, bounciness: 0, speed: 16 }).start();
+
+  // Shift the focused period by dir for the current view. Month/week stay scoped
+  // so the agenda below never shows another month's day.
   const shift = useCallback(
     (dir: -1 | 1) => {
       if (view === "year") setMonth((m) => new Date(m.getFullYear() + dir, m.getMonth(), 1));
-      else if (view === "month") setMonth((m) => addMonths(m, dir));
-      else if (view === "week") setSelectedDay((d) => { const nd = addDays(d, dir * 7); setMonth(startOfMonth(nd)); return nd; });
+      else if (view === "month") {
+        const nm = addMonths(month, dir);
+        setMonth(nm);
+        const t = new Date();
+        setSelectedDay(t.getMonth() === nm.getMonth() && t.getFullYear() === nm.getFullYear() ? t : new Date(nm.getFullYear(), nm.getMonth(), 1));
+      } else if (view === "week") setSelectedDay((d) => { const nd = addDays(d, dir * 7); setMonth(startOfMonth(nd)); return nd; });
       else setSelectedDay((d) => { const nd = addDays(d, dir); setMonth(startOfMonth(nd)); return nd; });
     },
-    [view],
+    [view, month],
   );
-  const goPrev = () => { animate(); shift(-1); };
-  const goNext = () => { animate(); shift(1); };
   const goToday = () => {
     animate();
     const t = new Date();
     setMonth(startOfMonth(t));
     setSelectedDay(t);
+    springCollapse(view === "week");
   };
   const pickDay = (d: Date) => {
     setSelectedDay(d);
     if (d.getMonth() !== month.getMonth() || d.getFullYear() !== month.getFullYear()) setMonth(startOfMonth(d));
   };
-  const switchView = (v: ViewMode) => { animate(); setView(v); };
+  const switchView = (v: ViewMode) => {
+    setView(v);
+    if (v === "week") springCollapse(true);
+    else if (v === "month") springCollapse(false);
+    else animate();
+  };
   const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
     router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
 
-  // vertical drag on the handle → live finger-following expand / collapse / week
-  const expandPan = useMemo(() => {
-    let base = CELL_COLLAPSED;
-    const settle = (v: number) => {
-      const target = v > (CELL_COLLAPSED + CELL_EXPANDED) / 2 ? CELL_EXPANDED : CELL_COLLAPSED;
-      Animated.spring(cellH, { toValue: target, useNativeDriver: false, bounciness: 0, speed: 16 }).start();
-      setExpanded(target === CELL_EXPANDED);
-    };
+  // Vertical drag → finger-following month↔week collapse (pull up = week).
+  const collapsePan = useMemo(() => {
+    let base = 0;
+    const clamp = (g: { dy: number }) => Math.max(0, Math.min(1, base - g.dy / 220));
     return PanResponder.create({
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
-      onPanResponderGrant: () => { cellH.stopAnimation((v) => { base = v; }); },
-      onPanResponderMove: (_e, g) => {
-        if (view !== "month") return;
-        cellH.setValue(Math.max(CELL_COLLAPSED, Math.min(CELL_EXPANDED, base + g.dy)));
-      },
+      onPanResponderGrant: () => { collapseT.stopAnimation((v) => { base = v; }); },
+      onPanResponderMove: (_e, g) => collapseT.setValue(clamp(g)),
       onPanResponderRelease: (_e, g) => {
-        if (view === "week") { if (g.dy > 30) { animate(); setView("month"); } return; }
-        if (g.dy < -40 && base <= CELL_COLLAPSED + 4) { animate(); setView("week"); return; }
-        settle(Math.max(CELL_COLLAPSED, Math.min(CELL_EXPANDED, base + g.dy)));
+        const toWeek = clamp(g) > 0.4;
+        setView(toWeek ? "week" : "month");
+        springCollapse(toWeek);
       },
-      onPanResponderTerminate: () => settle(CELL_COLLAPSED),
+      onPanResponderTerminate: () => { setView("month"); springCollapse(false); },
     });
-  }, [cellH, view]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapseT]);
 
-  const toggleExpand = () => {
-    if (view === "week") { animate(); setView("month"); return; }
-    const next = !expanded;
-    setExpanded(next);
-    Animated.spring(cellH, { toValue: next ? CELL_EXPANDED : CELL_COLLAPSED, useNativeDriver: false, bounciness: 0, speed: 16 }).start();
-  };
+  const toggleExpand = () => switchView(view === "week" ? "month" : "week");
 
   const periodTitle = useMemo(() => {
     if (view === "year") return String(month.getFullYear());
@@ -471,16 +470,11 @@ export default function CalendarScreen() {
         ))}
       </View>
 
-      {/* Header: prev / title / next  + today + search */}
+      {/* Header: title + today + search (swipe/drag to navigate — no arrows) */}
       <View style={styles.header}>
-        <Pressable onPress={goPrev} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
-          <Ionicons name="chevron-back" size={18} color="#615DFA" />
-        </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{periodTitle}</Text>
-        <Pressable onPress={goNext} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
-          <Ionicons name="chevron-forward" size={18} color="#615DFA" />
-        </Pressable>
         <Pressable onPress={goToday} style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}>
+          <Ionicons name="today-outline" size={14} color="#615DFA" />
           <Text style={styles.todayText}>Today</Text>
         </Pressable>
         <Pressable onPress={() => setSearchOpen(true)} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
@@ -510,19 +504,17 @@ export default function CalendarScreen() {
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          {/* Vertical drags anywhere on the calendar expand/collapse (finger-following);
-              horizontal drags fall through to the SwipePager for month paging. */}
-          <View {...expandPan.panHandlers}>
+          {/* Vertical drags collapse month↔week (finger-following); horizontal
+              drags fall through to the SwipePager for paging. */}
+          <View {...collapsePan.panHandlers}>
             <SwipePager
               onShift={shift}
-              pageKey={view === "month" ? `m-${month.getFullYear()}-${month.getMonth()}` : `w-${ymd(startOfWeek(selectedDay))}`}
+              pageKey={view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`}
               renderPanel={(o) => (
                 <MonthOrWeekGrid
-                  view={view}
-                  periodDate={view === "month" ? addMonths(month, o) : addDays(selectedDay, o * 7)}
+                  periodDate={view === "week" ? addDays(selectedDay, o * 7) : addMonths(month, o)}
                   selectedDay={selectedDay}
-                  expanded={expanded}
-                  cellHeight={view === "week" ? 150 : cellH}
+                  collapseT={collapseT}
                   todayKey={todayKey}
                   buildDayItems={buildDayItems}
                   onPickDay={pickDay}
@@ -568,55 +560,62 @@ export default function CalendarScreen() {
 
 // ── Month / Week grid with pills ──
 function MonthOrWeekGrid({
-  view, periodDate, selectedDay, expanded, cellHeight, todayKey, buildDayItems, onPickDay,
+  periodDate, selectedDay, collapseT, todayKey, buildDayItems, onPickDay,
 }: {
-  view: ViewMode;
   periodDate: Date;
   selectedDay: Date;
-  expanded: boolean;
-  cellHeight: number | Animated.Value;
+  collapseT: Animated.Value; // 0 = full month, 1 = single week
   todayKey: string;
   buildDayItems: (k: string) => DayItem[];
   onPickDay: (d: Date) => void;
 }) {
-  const rows = view === "week"
-    ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(periodDate), i))]
-    : buildMonthGrid(periodDate.getFullYear(), periodDate.getMonth());
-  const maxPills = view === "week" ? 6 : expanded ? 4 : 2;
+  const rows = buildMonthGrid(periodDate.getFullYear(), periodDate.getMonth());
   const selKey = ymd(selectedDay);
+  // Which week row to keep visible when collapsed: the selected day's week if
+  // it falls in this month, else the period date's week.
+  const sameMonth = selectedDay.getMonth() === periodDate.getMonth() && selectedDay.getFullYear() === periodDate.getFullYear();
+  const focusKey = sameMonth ? selKey : ymd(periodDate);
+  let selWeekIdx = rows.findIndex((row) => row.some((d) => d && ymd(d) === focusKey));
+  if (selWeekIdx < 0) selWeekIdx = 0;
+  const monthH = rows.length * ROW_H;
+  const maxPills = 3;
 
   return (
-    <View style={styles.grid}>
-      {rows.map((row, ri) => (
-        <View key={ri} style={styles.gridRow}>
-          {row.map((d, ci) => {
-            if (!d) return <Animated.View key={ci} style={[styles.cell, { height: cellHeight }]} />;
-            const key = ymd(d);
-            const items = buildDayItems(key);
-            const isToday = key === todayKey;
-            const isSelected = key === selKey;
-            const dim = view === "month" && d.getMonth() !== periodDate.getMonth();
-            return (
-              <AnimatedPressable key={ci} style={[styles.cell, { height: cellHeight }, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
-                <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
-                  <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
-                    {d.getDate()}
-                  </Text>
-                </View>
-                <View style={styles.pills}>
-                  {items.slice(0, maxPills).map((it) => (
-                    <View key={it.id} style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }]}>
-                      <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
+    <Animated.View style={{ height: collapseT.interpolate({ inputRange: [0, 1], outputRange: [monthH, ROW_H] }), overflow: "hidden" }}>
+      <Animated.View style={{ transform: [{ translateY: collapseT.interpolate({ inputRange: [0, 1], outputRange: [0, -selWeekIdx * ROW_H] }) }] }}>
+        <View style={styles.grid}>
+          {rows.map((row, ri) => (
+            <View key={ri} style={[styles.gridRow, { height: ROW_H }]}>
+              {row.map((d, ci) => {
+                if (!d) return <View key={ci} style={styles.cell} />;
+                const key = ymd(d);
+                const items = buildDayItems(key);
+                const isToday = key === todayKey;
+                const isSelected = key === selKey;
+                const dim = d.getMonth() !== periodDate.getMonth();
+                return (
+                  <Pressable key={ci} style={[styles.cell, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
+                    <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
+                      <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
+                        {d.getDate()}
+                      </Text>
                     </View>
-                  ))}
-                  {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
-                </View>
-              </AnimatedPressable>
-            );
-          })}
+                    <View style={styles.pills}>
+                      {items.slice(0, maxPills).map((it) => (
+                        <View key={it.id} style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }]}>
+                          <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
+                        </View>
+                      ))}
+                      {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
         </View>
-      ))}
-    </View>
+      </Animated.View>
+    </Animated.View>
   );
 }
 
@@ -817,8 +816,8 @@ const styles = StyleSheet.create({
   tabTextActive: { color: "#615DFA" },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
   navButton: { width: 36, height: 36, borderRadius: 12, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", shadowColor: "#0F172A", shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  headerTitle: { flex: 1, textAlign: "center", fontSize: 16, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
-  todayButton: { paddingHorizontal: 12, height: 36, borderRadius: 12, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
+  headerTitle: { flex: 1, fontSize: 18, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
+  todayButton: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, height: 36, borderRadius: 12, backgroundColor: "#EEF2FF", justifyContent: "center" },
   todayText: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
   pressed: { opacity: 0.7 },
   errorCard: { marginHorizontal: 16, marginBottom: 8, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },

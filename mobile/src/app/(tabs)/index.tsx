@@ -13,10 +13,12 @@ type ParentRow = {
   name: string;
 };
 
-type ProgramSessions = {
+type ProgramInfo = {
   name: string;
-  remaining: number;
+  used: number;
   total: number;
+  nextClass: string | null; // yyyy-mm-dd
+  startTime: string | null; // HH:mm
 };
 
 type ChildSummary = {
@@ -24,9 +26,63 @@ type ChildSummary = {
   studentName: string;
   photo: string | null;
   level: number;
-  adcoinBalance: number;
-  programs: ProgramSessions[];
+  programs: ProgramInfo[];
 };
+
+const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+// Parse an enrollment's weekday schedule (schedule JSON or day_of_week JSON).
+function parseScheduleDays(scheduleRaw: string | null, dayOfWeekRaw: string | null): { days: string[]; time: string | null } {
+  let days: string[] = [];
+  let time: string | null = null;
+  if (scheduleRaw) {
+    try {
+      const parsed = JSON.parse(scheduleRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        days = parsed.map((p: { day: string }) => String(p.day || "").toLowerCase()).filter(Boolean);
+        if (parsed[0].time) time = parsed[0].time;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (days.length === 0 && dayOfWeekRaw) {
+    try {
+      const parsed = JSON.parse(dayOfWeekRaw);
+      if (Array.isArray(parsed)) days = parsed.map((d: string) => String(d).toLowerCase());
+    } catch {
+      /* ignore */
+    }
+  }
+  return { days, time };
+}
+
+// Next date (today or later) that matches one of the scheduled weekdays.
+function nextClassDate(days: string[]): string | null {
+  if (!days.length) return null;
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  for (let i = 0; i <= 7; i++) {
+    const d = new Date(t);
+    d.setDate(d.getDate() + i);
+    if (days.includes(WEEKDAYS_FULL[d.getDay()])) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${dd}`;
+    }
+  }
+  return null;
+}
+
+function fmtClassDate(ymd: string, time: string | null): string {
+  const d = new Date(ymd + "T00:00:00");
+  const dateStr = d.toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" });
+  if (!time) return dateStr;
+  const [h, m] = time.split(":").map((n) => parseInt(n, 10));
+  const period = h < 12 ? "AM" : "PM";
+  return `${dateStr} · ${h % 12 || 12}:${String(m).padStart(2, "0")} ${period}`;
+}
 
 type HomeData = {
   parent: ParentRow | null;
@@ -64,6 +120,9 @@ export default function HomeScreen() {
           enrollments(
             status,
             sessions_remaining,
+            day_of_week,
+            start_time,
+            schedule,
             package_id,
             created_at,
             deleted_at,
@@ -81,11 +140,13 @@ export default function HomeScreen() {
         name: string;
         photo: string | null;
         level: number;
-        adcoin_balance: number;
         deleted_at: string | null;
         enrollments: Array<{
           status: string;
           sessions_remaining: number;
+          day_of_week: string | null;
+          start_time: string | null;
+          schedule: string | null;
           package_id: string | null;
           created_at: string;
           deleted_at: string | null;
@@ -100,19 +161,27 @@ export default function HomeScreen() {
           .filter((e) => !e.deleted_at && e.status === "active")
           .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
         const seen = new Set<string>();
-        const programs: ProgramSessions[] = [];
+        const programs: ProgramInfo[] = [];
         for (const e of actives) {
           const name = e.course?.name ?? "Program";
           if (seen.has(name)) continue;
           seen.add(name);
-          programs.push({ name, remaining: Number(e.sessions_remaining ?? 0), total: e.package?.duration ?? 0 });
+          const total = e.package?.duration ?? 0;
+          const remaining = Number(e.sessions_remaining ?? 0);
+          const { days, time } = parseScheduleDays(e.schedule, e.day_of_week);
+          programs.push({
+            name,
+            used: Math.max(0, total - remaining),
+            total,
+            nextClass: nextClassDate(days),
+            startTime: e.start_time ?? time,
+          });
         }
         return {
           studentId: s.id,
           studentName: s.name,
           photo: s.photo,
           level: s.level,
-          adcoinBalance: s.adcoin_balance ?? 0,
           programs,
         };
       });
@@ -228,33 +297,29 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <View style={styles.adcoinBar}>
-              <View style={styles.metricIcon}>
-                <Ionicons name="diamond" size={14} color="#FFFFFF" />
-              </View>
-              <Text style={styles.adcoinBarLabel}>Adcoins</Text>
-              <Text style={styles.adcoinBarValue}>{c.adcoinBalance.toLocaleString()}</Text>
-            </View>
-
-            {c.programs.length > 0 ? (
+            {c.programs.length === 0 ? (
+              <Text style={styles.noProgram}>No active program</Text>
+            ) : (
               <View style={styles.programsList}>
-                <Text style={styles.programsHeader}>Sessions left per program</Text>
-                {c.programs.map((pr) => {
-                  const ok = pr.remaining > 0;
-                  return (
-                    <View key={pr.name} style={styles.progRow}>
+                {c.programs.map((pr) => (
+                  <View key={pr.name} style={styles.progBlock}>
+                    <View style={styles.progTopRow}>
+                      <View style={styles.progDot} />
                       <Text style={styles.progName} numberOfLines={1}>{pr.name}</Text>
-                      <View style={[styles.sessPill, ok ? styles.sessOk : styles.sessLow]}>
-                        <Ionicons name={ok ? "checkmark-circle" : "alert-circle"} size={12} color={ok ? "#065F46" : "#991B1B"} />
-                        <Text style={[styles.sessText, { color: ok ? "#065F46" : "#991B1B" }]}>
-                          {pr.remaining} left
-                        </Text>
+                      <View style={styles.usedPill}>
+                        <Text style={styles.usedText}>{pr.used} used</Text>
                       </View>
                     </View>
-                  );
-                })}
+                    <View style={styles.nextClassRow}>
+                      <Ionicons name="calendar-outline" size={13} color="#615DFA" />
+                      <Text style={styles.nextClassText}>
+                        {pr.nextClass ? `Next class ${fmtClassDate(pr.nextClass, pr.startTime)}` : "No upcoming class"}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
               </View>
-            ) : null}
+            )}
           </Pressable>
         ))}
 
@@ -338,25 +403,16 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   cardPressed: { opacity: 0.88, transform: [{ scale: 0.99 }] },
-  adcoinBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#615DFA",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  adcoinBarLabel: { flex: 1, fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.85)" },
-  adcoinBarValue: { fontSize: 16, fontWeight: "800", color: "#FFFFFF" },
-  programsList: { gap: 8, marginTop: 2 },
-  programsHeader: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6 },
-  progRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  progName: { flex: 1, fontSize: 14, fontWeight: "600", color: "#374151" },
-  sessPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
-  sessOk: { backgroundColor: "#D1FAE5" },
-  sessLow: { backgroundColor: "#FEE2E2" },
-  sessText: { fontSize: 12, fontWeight: "800" },
+  noProgram: { fontSize: 13, color: "#9CA3AF", fontStyle: "italic" },
+  programsList: { gap: 10, marginTop: 2 },
+  progBlock: { backgroundColor: "#F9FAFB", borderRadius: 12, padding: 12, gap: 6, borderWidth: 1, borderColor: "#F3F4F6" },
+  progTopRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  progDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#615DFA" },
+  progName: { flex: 1, fontSize: 14, fontWeight: "700", color: "#111827" },
+  usedPill: { backgroundColor: "#EEF2FF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  usedText: { fontSize: 12, fontWeight: "800", color: "#615DFA" },
+  nextClassRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 16 },
+  nextClassText: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
   childTop: { flexDirection: "row", alignItems: "center", gap: 14 },
   avatarStack: { position: "relative", width: 56, height: 56 },
   childAvatar: { width: 56, height: 56, borderRadius: 18, backgroundColor: "#F3F4F6" },
