@@ -29,7 +29,8 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const ROW_H = 70; // height of one calendar week row (month view)
+const ROW_H = 72; // one calendar week row (month view)
+const ROW_H_BIG = 122; // expanded row (pull down for more events)
 
 const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -194,9 +195,10 @@ export default function CalendarScreen() {
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
-  // 0 = full month, 1 = single (selected) week. Drives the finger-following
-  // month↔week collapse; the grid wrapper height + row offset interpolate on it.
-  const collapseT = useMemo(() => new Animated.Value(0), []);
+  // -1 = single (selected) week, 0 = full month, 1 = expanded month (taller
+  // cells, more events). Drives the finger-following vertical resize.
+  const vt = useMemo(() => new Animated.Value(0), []);
+  const [monthBig, setMonthBig] = useState(false);
 
   const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
   useFocusEffect(
@@ -380,8 +382,14 @@ export default function CalendarScreen() {
 
   // ── navigation ──
   const animate = () => LayoutAnimation.configureNext(LayoutAnimation.create(180, "easeInEaseOut", "opacity"));
-  const springCollapse = (toWeek: boolean) =>
-    Animated.spring(collapseT, { toValue: toWeek ? 1 : 0, useNativeDriver: false, bounciness: 0, speed: 16 }).start();
+  const springVt = (to: number) =>
+    Animated.spring(vt, { toValue: to, useNativeDriver: false, bounciness: 0, speed: 16 }).start();
+  // Settle the vertical resize to one of: week (-1) / month (0) / expanded (1).
+  const settleTo = (mode: "week" | "month" | "big") => {
+    setView(mode === "week" ? "week" : "month");
+    setMonthBig(mode === "big");
+    springVt(mode === "week" ? -1 : mode === "big" ? 1 : 0);
+  };
 
   // Shift the focused period by dir for the current view. Month/week stay scoped
   // so the agenda below never shows another month's day.
@@ -403,40 +411,40 @@ export default function CalendarScreen() {
     const t = new Date();
     setMonth(startOfMonth(t));
     setSelectedDay(t);
-    springCollapse(view === "week");
   };
   const pickDay = (d: Date) => {
     setSelectedDay(d);
     if (d.getMonth() !== month.getMonth() || d.getFullYear() !== month.getFullYear()) setMonth(startOfMonth(d));
   };
   const switchView = (v: ViewMode) => {
-    setView(v);
-    if (v === "week") springCollapse(true);
-    else if (v === "month") springCollapse(false);
-    else animate();
+    if (v === "week") settleTo("week");
+    else if (v === "month") settleTo(monthBig ? "big" : "month");
+    else { animate(); setView(v); }
   };
   const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
     router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
 
-  // Vertical drag → finger-following month↔week collapse (pull up = week).
-  const collapsePan = useMemo(() => {
+  // Vertical drag → finger-following resize: pull up → week, pull down → expand.
+  const vPan = useMemo(() => {
     let base = 0;
-    const clamp = (g: { dy: number }) => Math.max(0, Math.min(1, base - g.dy / 220));
+    const clamp = (g: { dy: number }) => Math.max(-1, Math.min(1, base + g.dy / 240));
     return PanResponder.create({
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
-      onPanResponderGrant: () => { collapseT.stopAnimation((v) => { base = v; }); },
-      onPanResponderMove: (_e, g) => collapseT.setValue(clamp(g)),
+      onPanResponderGrant: () => { vt.stopAnimation((v) => { base = v; }); },
+      onPanResponderMove: (_e, g) => vt.setValue(clamp(g)),
       onPanResponderRelease: (_e, g) => {
-        const toWeek = clamp(g) > 0.4;
-        setView(toWeek ? "week" : "month");
-        springCollapse(toWeek);
+        const v = clamp(g);
+        settleTo(v > 0.4 ? "big" : v < -0.4 ? "week" : "month");
       },
-      onPanResponderTerminate: () => { setView("month"); springCollapse(false); },
+      onPanResponderTerminate: () => settleTo("month"),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapseT]);
+  }, [vt, monthBig]);
 
-  const toggleExpand = () => switchView(view === "week" ? "month" : "week");
+  const toggleExpand = () => {
+    if (view === "week") settleTo("month");
+    else settleTo(monthBig ? "month" : "big");
+  };
 
   const periodTitle = useMemo(() => {
     if (view === "year") return String(month.getFullYear());
@@ -448,6 +456,22 @@ export default function CalendarScreen() {
     }
     return selectedDay.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" });
   }, [view, month, selectedDay]);
+
+  // Calendar area sizing is controlled HERE (by the current month only) so the
+  // pager's neighbour months never add phantom space. Interpolated on vt.
+  const currentGrid = useMemo(() => buildMonthGrid(month.getFullYear(), month.getMonth()), [month]);
+  const currentRows = currentGrid.length;
+  const selWeekIdx = useMemo(() => {
+    const k = ymd(selectedDay);
+    const i = currentGrid.findIndex((row) => row.some((d) => d && ymd(d) === k));
+    return i < 0 ? 0 : i;
+  }, [currentGrid, selectedDay]);
+  const rowHeight = vt.interpolate({ inputRange: [-1, 0, 1], outputRange: [ROW_H, ROW_H, ROW_H_BIG] });
+  const calHeight = vt.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: [ROW_H, currentRows * ROW_H, currentRows * ROW_H_BIG],
+  });
+  const calTranslateY = vt.interpolate({ inputRange: [-1, 0, 1], outputRange: [-selWeekIdx * ROW_H, 0, 0] });
 
   if (loading) {
     return (
@@ -504,23 +528,28 @@ export default function CalendarScreen() {
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          {/* Vertical drags collapse month↔week (finger-following); horizontal
-              drags fall through to the SwipePager for paging. */}
-          <View {...collapsePan.panHandlers}>
-            <SwipePager
-              onShift={shift}
-              pageKey={view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`}
-              renderPanel={(o) => (
-                <MonthOrWeekGrid
-                  periodDate={view === "week" ? addDays(selectedDay, o * 7) : addMonths(month, o)}
-                  selectedDay={selectedDay}
-                  collapseT={collapseT}
-                  todayKey={todayKey}
-                  buildDayItems={buildDayItems}
-                  onPickDay={pickDay}
+          {/* Vertical drags resize week↔month↔expanded (finger-following);
+              horizontal drags fall through to the SwipePager for paging. Height
+              is clipped to the CURRENT month so neighbour months add no space. */}
+          <View {...vPan.panHandlers}>
+            <Animated.View style={{ height: calHeight, overflow: "hidden" }}>
+              <Animated.View style={{ transform: [{ translateY: calTranslateY }] }}>
+                <SwipePager
+                  onShift={shift}
+                  pageKey={view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`}
+                  renderPanel={(o) => (
+                    <MonthOrWeekGrid
+                      periodDate={view === "week" ? addDays(selectedDay, o * 7) : addMonths(month, o)}
+                      selectedDay={selectedDay}
+                      rowHeight={rowHeight}
+                      todayKey={todayKey}
+                      buildDayItems={buildDayItems}
+                      onPickDay={pickDay}
+                    />
+                  )}
                 />
-              )}
-            />
+              </Animated.View>
+            </Animated.View>
             {/* visual grabber — tap to toggle, or drag the calendar up/down */}
             <View style={styles.handleWrap}>
               <Pressable onPress={toggleExpand} hitSlop={14}>
@@ -560,62 +589,52 @@ export default function CalendarScreen() {
 
 // ── Month / Week grid with pills ──
 function MonthOrWeekGrid({
-  periodDate, selectedDay, collapseT, todayKey, buildDayItems, onPickDay,
+  periodDate, selectedDay, rowHeight, todayKey, buildDayItems, onPickDay,
 }: {
   periodDate: Date;
   selectedDay: Date;
-  collapseT: Animated.Value; // 0 = full month, 1 = single week
+  rowHeight: Animated.AnimatedInterpolation<number>;
   todayKey: string;
   buildDayItems: (k: string) => DayItem[];
   onPickDay: (d: Date) => void;
 }) {
+  "use no memo"; // avoid React Compiler caching stale cells when the day changes
   const rows = buildMonthGrid(periodDate.getFullYear(), periodDate.getMonth());
   const selKey = ymd(selectedDay);
-  // Which week row to keep visible when collapsed: the selected day's week if
-  // it falls in this month, else the period date's week.
-  const sameMonth = selectedDay.getMonth() === periodDate.getMonth() && selectedDay.getFullYear() === periodDate.getFullYear();
-  const focusKey = sameMonth ? selKey : ymd(periodDate);
-  let selWeekIdx = rows.findIndex((row) => row.some((d) => d && ymd(d) === focusKey));
-  if (selWeekIdx < 0) selWeekIdx = 0;
-  const monthH = rows.length * ROW_H;
-  const maxPills = 3;
+  const maxPills = 6; // cells clip via overflow:hidden; more show when expanded
 
   return (
-    <Animated.View style={{ height: collapseT.interpolate({ inputRange: [0, 1], outputRange: [monthH, ROW_H] }), overflow: "hidden" }}>
-      <Animated.View style={{ transform: [{ translateY: collapseT.interpolate({ inputRange: [0, 1], outputRange: [0, -selWeekIdx * ROW_H] }) }] }}>
-        <View style={styles.grid}>
-          {rows.map((row, ri) => (
-            <View key={ri} style={[styles.gridRow, { height: ROW_H }]}>
-              {row.map((d, ci) => {
-                if (!d) return <View key={ci} style={styles.cell} />;
-                const key = ymd(d);
-                const items = buildDayItems(key);
-                const isToday = key === todayKey;
-                const isSelected = key === selKey;
-                const dim = d.getMonth() !== periodDate.getMonth();
-                return (
-                  <Pressable key={ci} style={[styles.cell, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
-                    <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
-                      <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
-                        {d.getDate()}
-                      </Text>
+    <View style={styles.grid}>
+      {rows.map((row, ri) => (
+        <Animated.View key={ri} style={[styles.gridRow, { height: rowHeight }]}>
+          {row.map((d, ci) => {
+            if (!d) return <View key={ci} style={styles.cell} />;
+            const key = ymd(d);
+            const items = buildDayItems(key);
+            const isToday = key === todayKey;
+            const isSelected = key === selKey;
+            const dim = d.getMonth() !== periodDate.getMonth();
+            return (
+              <Pressable key={ci} style={[styles.cell, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
+                <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
+                  <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
+                    {d.getDate()}
+                  </Text>
+                </View>
+                <View style={styles.pills}>
+                  {items.slice(0, maxPills).map((it) => (
+                    <View key={it.id} style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }]}>
+                      <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
                     </View>
-                    <View style={styles.pills}>
-                      {items.slice(0, maxPills).map((it) => (
-                        <View key={it.id} style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }]}>
-                          <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
-                        </View>
-                      ))}
-                      {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ))}
-        </View>
-      </Animated.View>
-    </Animated.View>
+                  ))}
+                  {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </Animated.View>
+      ))}
+    </View>
   );
 }
 

@@ -15,8 +15,7 @@ type ParentRow = {
 
 type ProgramInfo = {
   name: string;
-  used: number;
-  total: number;
+  remaining: number;
   nextClass: string | null; // yyyy-mm-dd
   startTime: string | null; // HH:mm
 };
@@ -166,13 +165,10 @@ export default function HomeScreen() {
           const name = e.course?.name ?? "Program";
           if (seen.has(name)) continue;
           seen.add(name);
-          const total = e.package?.duration ?? 0;
-          const remaining = Number(e.sessions_remaining ?? 0);
           const { days, time } = parseScheduleDays(e.schedule, e.day_of_week);
           programs.push({
             name,
-            used: Math.max(0, total - remaining),
-            total,
+            remaining: Number(e.sessions_remaining ?? 0),
             nextClass: nextClassDate(days),
             startTime: e.start_time ?? time,
           });
@@ -301,23 +297,27 @@ export default function HomeScreen() {
               <Text style={styles.noProgram}>No active program</Text>
             ) : (
               <View style={styles.programsList}>
-                {c.programs.map((pr) => (
-                  <View key={pr.name} style={styles.progBlock}>
-                    <View style={styles.progTopRow}>
-                      <View style={styles.progDot} />
-                      <Text style={styles.progName} numberOfLines={1}>{pr.name}</Text>
-                      <View style={styles.usedPill}>
-                        <Text style={styles.usedText}>{pr.used} used</Text>
+                {c.programs.map((pr) => {
+                  const ok = pr.remaining > 0;
+                  return (
+                    <View key={pr.name} style={styles.progBlock}>
+                      <View style={styles.progTopRow}>
+                        <View style={styles.progDot} />
+                        <Text style={styles.progName} numberOfLines={1}>{pr.name}</Text>
+                        <View style={[styles.usedPill, ok ? styles.sessOk : styles.sessLow]}>
+                          <Ionicons name={ok ? "checkmark-circle" : "alert-circle"} size={12} color={ok ? "#065F46" : "#991B1B"} />
+                          <Text style={[styles.usedText, { color: ok ? "#065F46" : "#991B1B" }]}>{pr.remaining} left</Text>
+                        </View>
+                      </View>
+                      <View style={styles.nextClassRow}>
+                        <Ionicons name="calendar-outline" size={13} color="#615DFA" />
+                        <Text style={styles.nextClassText}>
+                          {pr.nextClass ? `Next class ${fmtClassDate(pr.nextClass, pr.startTime)}` : "No upcoming class"}
+                        </Text>
                       </View>
                     </View>
-                    <View style={styles.nextClassRow}>
-                      <Ionicons name="calendar-outline" size={13} color="#615DFA" />
-                      <Text style={styles.nextClassText}>
-                        {pr.nextClass ? `Next class ${fmtClassDate(pr.nextClass, pr.startTime)}` : "No upcoming class"}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </Pressable>
@@ -409,8 +409,10 @@ const styles = StyleSheet.create({
   progTopRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   progDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#615DFA" },
   progName: { flex: 1, fontSize: 14, fontWeight: "700", color: "#111827" },
-  usedPill: { backgroundColor: "#EEF2FF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  usedText: { fontSize: 12, fontWeight: "800", color: "#615DFA" },
+  usedPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  usedText: { fontSize: 12, fontWeight: "800" },
+  sessOk: { backgroundColor: "#D1FAE5" },
+  sessLow: { backgroundColor: "#FEE2E2" },
   nextClassRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 16 },
   nextClassText: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
   childTop: { flexDirection: "row", alignItems: "center", gap: 14 },
