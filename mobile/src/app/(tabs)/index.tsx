@@ -86,7 +86,14 @@ function fmtClassDate(ymd: string, time: string | null): string {
 type HomeData = {
   parent: ParentRow | null;
   children: ChildSummary[];
+  totalSessions: number; // family-wide sessions_remaining (can be negative)
+  unpaidCount: number; // number of pending payment bills
+  unpaidAmount: number; // total RM outstanding
 };
+
+function formatRM(amount: number): string {
+  return `RM${amount.toFixed(2)}`;
+}
 
 export default function HomeScreen() {
   const { user } = useAuth();
@@ -103,7 +110,7 @@ export default function HomeScreen() {
     if (parentErr) throw parentErr;
 
     if (!parentRow) {
-      return { parent: null, children: [] };
+      return { parent: null, children: [], totalSessions: 0, unpaidCount: 0, unpaidAmount: 0 };
     }
 
     const { data: links, error: linksErr } = await supabase
@@ -182,7 +189,35 @@ export default function HomeScreen() {
         };
       });
 
-    return { parent: parentRow as ParentRow, children: rows };
+    // Family session balance = sum of every child's per-program remaining
+    // (already deduped per course above). Negative = over-used / owing.
+    const totalSessions = rows.reduce(
+      (sum, c) => sum + c.programs.reduce((s, p) => s + p.remaining, 0),
+      0,
+    );
+
+    // Outstanding bills → the "pay now" action. One row per bill already
+    // (pooled sibling bills carry one owning student_id), so no double-count.
+    const studentIds = rows.map((r) => r.studentId);
+    let unpaidCount = 0;
+    let unpaidAmount = 0;
+    if (studentIds.length) {
+      const { data: pays } = await supabase
+        .from("payments")
+        .select("id, amount, status, student_id")
+        .in("student_id", studentIds)
+        .eq("status", "pending");
+      const seen = new Set<string>();
+      for (const p of pays ?? []) {
+        const id = p.id as string;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        unpaidCount += 1;
+        unpaidAmount += Number(p.amount ?? 0);
+      }
+    }
+
+    return { parent: parentRow as ParentRow, children: rows, totalSessions, unpaidCount, unpaidAmount };
   };
 
   const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<HomeData>(
@@ -193,6 +228,10 @@ export default function HomeScreen() {
 
   const parent = data?.parent ?? null;
   const children = data?.children ?? [];
+  // Null-safe: pre-existing cached HomeData won't carry these fields yet.
+  const totalSessions = data?.totalSessions ?? 0;
+  const unpaidCount = data?.unpaidCount ?? 0;
+  const unpaidAmount = data?.unpaidAmount ?? 0;
   // Only a hard failure with nothing cached to fall back on.
   const errorMessage =
     error && !data ? "Couldn't load your dashboard. Check your connection and pull down to refresh." : null;
@@ -234,6 +273,50 @@ export default function HomeScreen() {
               : `Tracking ${children.length} ${children.length === 1 ? "child" : "children"} today`}
           </Text>
         </View>
+
+        {parent && children.length > 0 ? (
+          <View style={styles.summaryRow}>
+            {/* Sessions balance — info only. Red when used up / owing. */}
+            <View style={styles.sumTile}>
+              <Text style={styles.sumLabel}>Sessions left</Text>
+              <Text style={[styles.sumValue, totalSessions <= 0 && styles.sumValueNeg]}>{totalSessions}</Text>
+              <Text style={styles.sumSub}>
+                {totalSessions < 0
+                  ? "Owing sessions"
+                  : totalSessions === 0
+                    ? "None left"
+                    : `across ${children.length} ${children.length === 1 ? "child" : "children"}`}
+              </Text>
+            </View>
+
+            {/* Unpaid — the action. Tap to jump to Payments. */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.sumTile,
+                unpaidCount > 0 ? styles.sumTileAlert : styles.sumTilePaid,
+                pressed && styles.cardPressed,
+              ]}
+              onPress={() => router.push("/(tabs)/payment")}
+            >
+              <View style={styles.sumTileHead}>
+                <Text style={[styles.sumLabel, unpaidCount > 0 ? styles.sumLabelAlert : styles.sumLabelPaid]}>
+                  {unpaidCount > 0 ? "Unpaid" : "Payments"}
+                </Text>
+                <Ionicons
+                  name={unpaidCount > 0 ? "chevron-forward" : "checkmark-circle"}
+                  size={14}
+                  color={unpaidCount > 0 ? "#92400E" : "#065F46"}
+                />
+              </View>
+              <Text style={[styles.sumValue, unpaidCount > 0 ? styles.sumValueAlert : styles.sumValuePaid]}>
+                {unpaidCount > 0 ? formatRM(unpaidAmount) : "All paid"}
+              </Text>
+              <Text style={[styles.sumSub, unpaidCount > 0 ? styles.sumSubAlert : styles.sumSubPaid]}>
+                {unpaidCount > 0 ? `${unpaidCount} to pay · Tap to pay` : "You're up to date"}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {isStale ? <OfflineBanner updatedAt={updatedAt} /> : null}
 
@@ -373,6 +456,32 @@ const styles = StyleSheet.create({
   heroTitle: { fontSize: 28, fontWeight: "800", color: "#0F172A", marginTop: 6, letterSpacing: -0.6 },
   heroSub: { fontSize: 14, color: "#6B7280", marginTop: 4 },
   sectionLabel: { fontSize: 12, fontWeight: "700", color: "#6B7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 4, paddingHorizontal: 4 },
+  summaryRow: { flexDirection: "row", gap: 12 },
+  sumTile: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    gap: 3,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  sumTileAlert: { backgroundColor: "#FFFBEB", borderWidth: 1, borderColor: "#FDE68A" },
+  sumTilePaid: { backgroundColor: "#F0FDF4", borderWidth: 1, borderColor: "#BBF7D0" },
+  sumTileHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sumLabel: { fontSize: 10, fontWeight: "800", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.8 },
+  sumLabelAlert: { color: "#92400E" },
+  sumLabelPaid: { color: "#065F46" },
+  sumValue: { fontSize: 26, fontWeight: "800", color: "#0F172A", letterSpacing: -0.6, marginTop: 2 },
+  sumValueNeg: { color: "#DC2626" },
+  sumValueAlert: { color: "#B45309", fontSize: 22 },
+  sumValuePaid: { color: "#047857", fontSize: 22 },
+  sumSub: { fontSize: 11, color: "#9CA3AF", fontWeight: "600" },
+  sumSubAlert: { color: "#B45309" },
+  sumSubPaid: { color: "#059669" },
   errorCard: {
     flexDirection: "row",
     alignItems: "center",
