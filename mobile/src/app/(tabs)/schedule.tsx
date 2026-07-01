@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   LayoutAnimation,
@@ -189,7 +189,7 @@ export default function CalendarScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const router = useRouter();
-  const { height: winH } = useWindowDimensions();
+  const { width: winW, height: winH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
   const [view, setView] = useState<ViewMode>("month");
@@ -501,23 +501,24 @@ export default function CalendarScreen() {
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          {/* Single static grid (no pager) so Android always redraws cells.
-              Swipe left/right changes the period; up/down resizes. */}
+          {/* Horizontal = native paging ScrollView (real finger-follow, Android-safe).
+              Vertical = SwipeArea snap (resize). */}
           <SwipeArea
-            style={{ height: calcHeight, overflow: "hidden" }}
-            onLeft={() => shift(1)}
-            onRight={() => shift(-1)}
+            verticalOnly
             onUp={() => setMode(view === "week" ? "week" : expanded ? "month" : "week")}
             onDown={() => setMode(view === "week" ? "month" : "big")}
           >
-            <MonthOrWeekGrid
+            <MonthPager
               view={view}
-              periodDate={view === "week" ? selectedDay : month}
+              month={month}
               selectedDay={selectedDay}
               rowH={rowH}
+              width={winW}
+              height={calcHeight}
               todayKey={todayKey}
               buildDayItems={buildDayItems}
               onPickDay={pickDay}
+              onShift={shift}
             />
           </SwipeArea>
           {/* visual grabber — tap to toggle, or drag the calendar up/down */}
@@ -651,9 +652,10 @@ function YearView({
 // ── Swipe detector: static children, fires a direction on release. No animated
 // layout / no offscreen panels, so Android always redraws the grid cells. ──
 function SwipeArea({
-  horizontalOnly, style, onLeft, onRight, onUp, onDown, children,
+  horizontalOnly, verticalOnly, style, onLeft, onRight, onUp, onDown, children,
 }: {
   horizontalOnly?: boolean;
+  verticalOnly?: boolean;
   style?: object;
   onLeft?: () => void;
   onRight?: () => void;
@@ -668,9 +670,10 @@ function SwipeArea({
         // becomes a swipe. Taps don't move far enough to trigger, so they still
         // reach the cells. (Capture is why the previous version didn't swipe.)
         onMoveShouldSetPanResponderCapture: (_e, g) => {
+          const v = Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx);
+          if (verticalOnly) return v;
           const h = Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy);
           if (horizontalOnly) return h;
-          const v = Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx);
           return h || v;
         },
         onPanResponderRelease: (_e, g) => {
@@ -683,9 +686,67 @@ function SwipeArea({
           }
         },
       }),
-    [horizontalOnly, onLeft, onRight, onUp, onDown],
+    [horizontalOnly, verticalOnly, onLeft, onRight, onUp, onDown],
   );
   return <View style={style} {...responder.panHandlers}>{children}</View>;
+}
+
+// ── Native horizontal paging pager: real finger-following swipe that redraws
+// correctly on Android (unlike Animated transforms). 3 pages; recenter on commit. ──
+function MonthPager({
+  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift,
+}: {
+  view: ViewMode;
+  month: Date;
+  selectedDay: Date;
+  rowH: number;
+  width: number;
+  height: number;
+  todayKey: string;
+  buildDayItems: (k: string) => DayItem[];
+  onPickDay: (d: Date) => void;
+  onShift: (dir: -1 | 1) => void;
+}) {
+  const ref = useRef<ScrollView>(null);
+  const pageKey = view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`;
+  // Recenter to the middle page (before paint) whenever the period commits, so
+  // the swiped-to month becomes the centred one with no flash.
+  useLayoutEffect(() => {
+    ref.current?.scrollTo({ x: width, animated: false });
+  }, [pageKey, width]);
+  const periodFor = (o: number) => (view === "week" ? addDays(selectedDay, o * 7) : addMonths(month, o));
+
+  return (
+    <ScrollView
+      ref={ref}
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      disableIntervalMomentum
+      directionalLockEnabled
+      contentOffset={{ x: width, y: 0 }}
+      onMomentumScrollEnd={(e) => {
+        const page = Math.round(e.nativeEvent.contentOffset.x / width);
+        if (page === 0) onShift(-1);
+        else if (page === 2) onShift(1);
+      }}
+      style={{ width, height }}
+    >
+      {[-1, 0, 1].map((o) => (
+        <View key={o} style={{ width }}>
+          <MonthOrWeekGrid
+            view={view}
+            periodDate={periodFor(o)}
+            selectedDay={selectedDay}
+            rowH={rowH}
+            todayKey={todayKey}
+            buildDayItems={buildDayItems}
+            onPickDay={onPickDay}
+          />
+        </View>
+      ))}
+    </ScrollView>
+  );
 }
 
 // ── Day agenda list ──
