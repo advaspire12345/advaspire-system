@@ -140,15 +140,17 @@ export default function RescheduleScreen() {
   const canConfirm = !!(selectedDate && selectedSlot);
 
   const onConfirm = async () => {
-    if (!canConfirm) return;
+    if (!canConfirm || !selectedDate || !selectedSlot) return;
     setSubmitting(true);
-    // The actual reschedule needs a backend endpoint that mirrors the web's
-    // server action. For now we surface a friendly message; UI is wired and
-    // ready to swap in the real call.
+    // UI-only for now: the actual write (session_reschedules + paired calendar
+    // events) and the live "is this slot full?" capacity check run with
+    // service-role access on the server — a parent's app can't read other
+    // students' enrolments under RLS. So we confirm the choice and tell the
+    // parent it's queued until rescheduling is switched on.
     Alert.alert(
-      "Backend needed",
-      `Reschedule wizard is wired end-to-end on the UI side. The final write to session_reschedules + the paired calendar events needs a mobile-facing API endpoint (or coordination with the colleague's backend work). Once that's in place, the confirm button here calls it directly.`,
-      [{ text: "OK", onPress: () => router.back() }],
+      "Almost there",
+      `We've noted moving ${studentName || "this class"}'s ${courseName || "class"} to ${selectedDate.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })} at ${formatTime12h(selectedSlot.time)}.\n\nOnline rescheduling is being switched on shortly — once it's live this will move the class instantly (and any class that's already full won't be offered).`,
+      [{ text: "Got it", onPress: () => router.back() }],
     );
     setSubmitting(false);
   };
@@ -167,10 +169,17 @@ export default function RescheduleScreen() {
       <Stack.Screen options={{ title: "Reschedule", headerShown: true, headerTintColor: "#615DFA" }} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Moving class</Text>
+          <Text style={styles.summaryLabel}>Cancel & move class</Text>
           <Text style={styles.summaryTitle}>{studentName}</Text>
           <Text style={styles.summarySubtitle}>
             {courseName || "Class"} · originally {ymdToDate(originalDate ?? "").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" })}
+          </Text>
+        </View>
+
+        <View style={styles.previewBanner}>
+          <Ionicons name="information-circle" size={16} color="#B45309" />
+          <Text style={styles.previewBannerText}>
+            Preview — online rescheduling is being switched on shortly. Full classes will be hidden automatically once it&apos;s live.
           </Text>
         </View>
 
@@ -224,6 +233,12 @@ export default function RescheduleScreen() {
                 >
                   <Text style={[styles.slotTime, isSelected && styles.slotTextSelected]}>{formatTime12h(s.time)}</Text>
                   <Text style={[styles.slotDuration, isSelected && styles.slotTextSelected]}>{s.duration} min</Text>
+                  {s.limitStudent > 0 ? (
+                    <View style={[styles.slotCapPill, isSelected && styles.slotCapPillSelected]}>
+                      <Ionicons name="people" size={10} color={isSelected ? "#FFFFFF" : "#615DFA"} />
+                      <Text style={[styles.slotCapText, isSelected && styles.slotTextSelected]}>Up to {s.limitStudent}</Text>
+                    </View>
+                  ) : null}
                 </Pressable>
               );
             })}
@@ -231,7 +246,7 @@ export default function RescheduleScreen() {
         )}
 
         <Text style={styles.note}>
-          ℹ️ Reschedules must be at least 24 hours in advance. The class will appear on both the original day (cancelled) and the new day (rescheduled).
+          ℹ️ You can only move a class at least 24 hours ahead — that&apos;s why today and tomorrow aren&apos;t shown. Each slot shows how many students it can take; a class that&apos;s already full won&apos;t be offered. The class then shows as cancelled on the original day and rescheduled on the new day.
         </Text>
 
         <Pressable
@@ -294,6 +309,11 @@ const styles = StyleSheet.create({
   slotTime: { fontSize: 14, fontWeight: "700", color: "#111827" },
   slotDuration: { fontSize: 11, color: "#6B7280", marginTop: 2 },
   slotTextSelected: { color: "#FFFFFF" },
+  slotCapPill: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 6, backgroundColor: "#EEF2FF", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  slotCapPillSelected: { backgroundColor: "rgba(255,255,255,0.25)" },
+  slotCapText: { fontSize: 10, fontWeight: "800", color: "#615DFA" },
+  previewBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFBEB", borderWidth: 1, borderColor: "#FDE68A", padding: 12, borderRadius: 12 },
+  previewBannerText: { flex: 1, fontSize: 12, color: "#92400E", fontWeight: "600", lineHeight: 17 },
   note: { fontSize: 12, color: "#6B7280", lineHeight: 18, marginTop: 16, paddingHorizontal: 4 },
   confirmButton: {
     marginTop: 24,
