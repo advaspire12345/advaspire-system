@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   LayoutAnimation,
   Modal,
   PanResponder,
@@ -189,7 +190,7 @@ export default function CalendarScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const router = useRouter();
-  const { height: winH } = useWindowDimensions();
+  const { width: winW, height: winH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
   const [view, setView] = useState<ViewMode>("month");
@@ -427,6 +428,31 @@ export default function CalendarScreen() {
     else setMode(expanded ? "month" : "big");
   };
 
+  // Horizontal finger-following for the grid: translate a SINGLE grid (native
+  // driver, no offscreen panels) and commit the period shift on release. Vertical
+  // gestures fall through to the wrapping SwipeArea (snap) so nothing that clips
+  // gets a per-frame layout animation on Android.
+  const tx = useMemo(() => new Animated.Value(0), []);
+  const gridPan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+        onPanResponderMove: (_e, g) => tx.setValue(g.dx),
+        onPanResponderRelease: (_e, g) => {
+          const t = winW * 0.28;
+          if (g.dx < -t || g.vx < -0.5) {
+            Animated.timing(tx, { toValue: -winW, duration: 170, useNativeDriver: true }).start(() => { shift(1); tx.setValue(0); });
+          } else if (g.dx > t || g.vx > 0.5) {
+            Animated.timing(tx, { toValue: winW, duration: 170, useNativeDriver: true }).start(() => { shift(-1); tx.setValue(0); });
+          } else {
+            Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+          }
+        },
+        onPanResponderTerminate: () => Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start(),
+      }),
+    [tx, winW, shift],
+  );
+
   const periodTitle = useMemo(() => {
     if (view === "year") return String(month.getFullYear());
     if (view === "month") return `${month.toLocaleDateString("en-MY", { month: "long" })} ${month.getFullYear()}`;
@@ -501,24 +527,24 @@ export default function CalendarScreen() {
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          {/* Single static grid (no pager) so Android always redraws cells.
-              Swipe left/right changes the period; up/down resizes. */}
+          {/* Single static grid (no offscreen panels). Left/right follows the
+              finger via a native translateX; up/down snaps (SwipeArea). */}
           <SwipeArea
             style={{ height: calcHeight, overflow: "hidden" }}
-            onLeft={() => shift(1)}
-            onRight={() => shift(-1)}
             onUp={() => setMode(view === "week" ? "week" : expanded ? "month" : "week")}
             onDown={() => setMode(view === "week" ? "month" : "big")}
           >
-            <MonthOrWeekGrid
-              view={view}
-              periodDate={view === "week" ? selectedDay : month}
-              selectedDay={selectedDay}
-              rowH={rowH}
-              todayKey={todayKey}
-              buildDayItems={buildDayItems}
-              onPickDay={pickDay}
-            />
+            <Animated.View style={{ transform: [{ translateX: tx }] }} {...gridPan.panHandlers}>
+              <MonthOrWeekGrid
+                view={view}
+                periodDate={view === "week" ? selectedDay : month}
+                selectedDay={selectedDay}
+                rowH={rowH}
+                todayKey={todayKey}
+                buildDayItems={buildDayItems}
+                onPickDay={pickDay}
+              />
+            </Animated.View>
           </SwipeArea>
           {/* visual grabber — tap to toggle, or drag the calendar up/down */}
           <View style={styles.handleWrap}>
