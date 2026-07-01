@@ -546,25 +546,11 @@ export default function CalendarScreen() {
           <View {...vDragPan.panHandlers}>
             {dragging ? (
               <Animated.View style={{ height: dragH, overflow: "hidden" }}>
-                {/* Static month grid; scale it up (from the top) once the drag
-                    goes past monthH so cells grow with the finger. Below monthH
-                    scale is 1 and the wrapper simply clips rows. */}
-                <Animated.View
-                  style={{
-                    transformOrigin: "top",
-                    transform: [
-                      {
-                        scaleY: dragH.interpolate({
-                          inputRange: [weekH, monthH, Math.max(monthH + 1, bigH)],
-                          outputRange: [1, 1, Math.max(1, bigH / monthH)],
-                          extrapolate: "clamp",
-                        }),
-                      },
-                    ],
-                  }}
-                >
-                  <MonthPager view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
-                </Animated.View>
+                {/* Rows flex-grow (fill) to the dragged height: below monthH they
+                    stay ROW_H and clip (collapse); above monthH they grow so cells
+                    get taller with the finger — day numbers/pills keep their real
+                    size (no scale = no stretch). */}
+                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
               </Animated.View>
             ) : (
               <View style={{ height: calcHeight, overflow: "hidden" }}>
@@ -610,7 +596,7 @@ export default function CalendarScreen() {
 
 // ── Month / Week grid with pills (static heights — Android-safe) ──
 function MonthOrWeekGrid({
-  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay,
+  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay, fill,
 }: {
   view: ViewMode;
   periodDate: Date;
@@ -619,17 +605,18 @@ function MonthOrWeekGrid({
   todayKey: string;
   buildDayItems: (k: string) => DayItem[];
   onPickDay: (d: Date) => void;
+  fill?: boolean; // rows flex-grow to fill parent height (during a resize drag)
 }) {
   const rows = view === "week"
     ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(periodDate), i))]
     : buildMonthGrid(periodDate.getFullYear(), periodDate.getMonth());
   const selKey = ymd(selectedDay);
-  const maxPills = rowH > ROW_H ? 5 : 3;
+  const maxPills = fill || rowH > ROW_H ? 5 : 3;
 
   return (
-    <View style={styles.grid}>
+    <View style={fill ? styles.gridFill : styles.grid}>
       {rows.map((row, ri) => (
-        <View key={ri} style={[styles.gridRow, { height: rowH }]}>
+        <View key={ri} style={fill ? styles.gridRowFill : [styles.gridRow, { height: rowH }]}>
           {row.map((d, ci) => {
             if (!d) return <View key={ci} style={styles.cell} />;
             const key = ymd(d);
@@ -745,7 +732,7 @@ function SwipeArea({
 // ── Native horizontal paging pager: real finger-following swipe that redraws
 // correctly on Android (unlike Animated transforms). 3 pages; recenter on commit. ──
 function MonthPager({
-  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift,
+  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift, fill,
 }: {
   view: ViewMode;
   month: Date;
@@ -757,6 +744,7 @@ function MonthPager({
   buildDayItems: (k: string) => DayItem[];
   onPickDay: (d: Date) => void;
   onShift: (dir: -1 | 1) => void;
+  fill?: boolean; // fill parent height (grid rows flex-grow) instead of fixed height
 }) {
   const ref = useRef<ScrollView>(null);
   const pageKey = view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`;
@@ -781,10 +769,10 @@ function MonthPager({
         if (page === 0) onShift(-1);
         else if (page === 2) onShift(1);
       }}
-      style={{ width, height }}
+      style={fill ? { width, flex: 1 } : { width, height }}
     >
       {[-1, 0, 1].map((o) => (
-        <View key={o} style={{ width }}>
+        <View key={o} style={fill ? { width, alignSelf: "stretch" } : { width }}>
           <MonthOrWeekGrid
             view={view}
             periodDate={periodFor(o)}
@@ -793,6 +781,7 @@ function MonthPager({
             todayKey={todayKey}
             buildDayItems={buildDayItems}
             onPickDay={onPickDay}
+            fill={fill}
           />
         </View>
       ))}
@@ -915,7 +904,11 @@ const styles = StyleSheet.create({
   weekdays: { flexDirection: "row", paddingHorizontal: 8, marginBottom: 2 },
   weekdayLabel: { flex: 1, textAlign: "center", fontSize: 10, fontWeight: "800", color: "#9CA3AF", letterSpacing: 0.6, textTransform: "uppercase" },
   grid: { paddingHorizontal: 6 },
+  gridFill: { paddingHorizontal: 6, flex: 1 },
   gridRow: { flexDirection: "row" },
+  // rows grow (never shrink) from a ROW_H basis to fill the dragged height, so
+  // cells get taller while their contents keep natural size (no stretch)
+  gridRowFill: { flexDirection: "row", flexBasis: ROW_H, flexGrow: 1, flexShrink: 0 },
   cell: { flex: 1, margin: 1.5, borderRadius: 10, backgroundColor: "#FFFFFF", paddingTop: 4, paddingHorizontal: 3 },
   cellSelected: { borderWidth: 1.5, borderColor: "#615DFA" },
   cellDateWrap: { alignSelf: "flex-start", minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
