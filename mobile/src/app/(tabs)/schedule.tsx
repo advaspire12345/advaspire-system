@@ -454,23 +454,27 @@ export default function CalendarScreen() {
   const calcHeight = view === "week" ? ROW_H : currentRows * rowH;
   const weekH = ROW_H;
   const monthH = currentRows * ROW_H;
+  const bigH = currentRows * expandedRowH; // month with taller cells
 
-  // Vertical drag → finger-following height. The responder lives on a STABLE
-  // outer View so switching to the animated wrapper mid-gesture doesn't drop it.
+  // Vertical drag → finger-following height across week / month / big. The
+  // responder lives on a STABLE outer View so switching to the animated wrapper
+  // mid-gesture doesn't drop it. Collapsing (< monthH) clips rows; expanding
+  // (> monthH) scales the static grid up so cells grow with the finger.
   const vDragPan = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
         onPanResponderGrant: () => {
-          dragBase.current = Math.max(weekH, Math.min(monthH, calcHeight));
+          dragBase.current = Math.max(weekH, Math.min(bigH, calcHeight));
           dragH.setValue(dragBase.current);
           setDragging(true);
         },
-        onPanResponderMove: (_e, g) => { dragH.setValue(Math.max(weekH, Math.min(monthH, dragBase.current + g.dy))); },
+        onPanResponderMove: (_e, g) => { dragH.setValue(Math.max(weekH, Math.min(bigH, dragBase.current + g.dy))); },
         onPanResponderRelease: (_e, g) => {
-          const finalH = Math.max(weekH, Math.min(monthH, dragBase.current + g.dy));
-          const mode = finalH < (weekH + monthH) / 2 ? "week" : "month";
-          Animated.timing(dragH, { toValue: mode === "week" ? weekH : monthH, duration: 130, useNativeDriver: false }).start(() => {
+          const finalH = Math.max(weekH, Math.min(bigH, dragBase.current + g.dy));
+          const mode = finalH < (weekH + monthH) / 2 ? "week" : finalH > (monthH + bigH) / 2 ? "big" : "month";
+          const target = mode === "week" ? weekH : mode === "big" ? bigH : monthH;
+          Animated.timing(dragH, { toValue: target, duration: 130, useNativeDriver: false }).start(() => {
             setMode(mode);
             setDragging(false);
           });
@@ -478,7 +482,7 @@ export default function CalendarScreen() {
         onPanResponderTerminate: () => setDragging(false),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [calcHeight, weekH, monthH, dragH],
+    [calcHeight, weekH, monthH, bigH, dragH],
   );
 
   if (loading) {
@@ -542,7 +546,25 @@ export default function CalendarScreen() {
           <View {...vDragPan.panHandlers}>
             {dragging ? (
               <Animated.View style={{ height: dragH, overflow: "hidden" }}>
-                <MonthPager view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
+                {/* Static month grid; scale it up (from the top) once the drag
+                    goes past monthH so cells grow with the finger. Below monthH
+                    scale is 1 and the wrapper simply clips rows. */}
+                <Animated.View
+                  style={{
+                    transformOrigin: "top",
+                    transform: [
+                      {
+                        scaleY: dragH.interpolate({
+                          inputRange: [weekH, monthH, Math.max(monthH + 1, bigH)],
+                          outputRange: [1, 1, Math.max(1, bigH / monthH)],
+                          extrapolate: "clamp",
+                        }),
+                      },
+                    ],
+                  }}
+                >
+                  <MonthPager view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
+                </Animated.View>
               </Animated.View>
             ) : (
               <View style={{ height: calcHeight, overflow: "hidden" }}>
