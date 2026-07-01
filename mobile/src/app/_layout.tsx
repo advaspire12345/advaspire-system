@@ -50,6 +50,7 @@ export default function RootLayout() {
                 <Stack.Screen name="event/new" options={{ headerShown: true, title: "New event", headerTintColor: "#615DFA" }} />
                 <Stack.Screen name="transfers" options={{ headerShown: true, title: "Session transfers", headerTintColor: "#615DFA" }} />
                 <Stack.Screen name="reschedule" options={{ headerShown: true, title: "Reschedule class", headerTintColor: "#615DFA" }} />
+                <Stack.Screen name="schedule-demo" options={{ headerShown: true, title: "Drag to reschedule", headerTintColor: "#615DFA" }} />
                 <Stack.Screen name="payment/[id]" options={{ headerShown: true, title: "Payment", headerTintColor: "#615DFA" }} />
               </Stack>
             </AuthGate>

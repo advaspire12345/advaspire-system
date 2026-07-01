@@ -366,11 +366,10 @@ function AttendanceCard({ row, onPhoto }: { row: AttendanceRow; onPhoto: (uris: 
   const displayed = activities.length > 0 ? activities : fallback;
   const photos = row.projectPhotos ?? [];
   const hasPhoto = photos.length > 0;
-  // Whole card is tappable to view the teacher's work photo(s) when present.
-  const Wrapper: typeof Pressable | typeof View = hasPhoto ? Pressable : View;
+  // Every row is a button (press feedback); a row with photo(s) opens the viewer.
   return (
-    <Wrapper
-      style={({ pressed }: { pressed?: boolean }) => [styles.card, hasPhoto && pressed && styles.cardPressed]}
+    <Pressable
+      style={({ pressed }) => [styles.card, styles.cardButton, pressed && styles.cardPressed]}
       onPress={hasPhoto ? () => onPhoto(photos) : undefined}
     >
       {/* Date/course on the left · work done on the right (no status badge —
@@ -415,7 +414,7 @@ function AttendanceCard({ row, onPhoto }: { row: AttendanceRow; onPhoto: (uris: 
           ) : null}
         </View>
       ) : null}
-    </Wrapper>
+    </Pressable>
   );
 }
 
@@ -604,7 +603,8 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
   emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
   card: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, shadowColor: "#615DFA", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  cardPressed: { opacity: 0.85 },
+  cardButton: { borderWidth: 1, borderColor: "#EEF0F6" },
+  cardPressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   cardLeft: { flexShrink: 0, maxWidth: "45%" },
   cardDate: { fontSize: 14, fontWeight: "700", color: "#111827" },

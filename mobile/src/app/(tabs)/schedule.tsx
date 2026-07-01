@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
@@ -798,12 +798,18 @@ function DayAgenda({
   onReschedule: (enrollmentId: string, date: string, studentId: string, courseName: string | null) => void;
   big?: boolean;
 }) {
+  const router = useRouter();
   return (
     <View style={styles.agenda}>
       {!big ? (
         <Text style={styles.agendaDate}>{day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })}</Text>
       ) : null}
       <ScrollView style={styles.flex} contentContainerStyle={styles.agendaList} showsVerticalScrollIndicator={false}>
+        <Pressable style={({ pressed }) => [styles.demoChip, pressed && styles.pressed]} onPress={() => router.push("/schedule-demo" as Href)}>
+          <Ionicons name="hand-left" size={14} color="#615DFA" />
+          <Text style={styles.demoChipText}>Try: drag a class to reschedule (demo)</Text>
+          <Ionicons name="chevron-forward" size={14} color="#615DFA" />
+        </Pressable>
         {items.length === 0 ? (
           <Text style={styles.agendaEmpty}>Nothing scheduled on this day.</Text>
         ) : (
@@ -927,6 +933,8 @@ const styles = StyleSheet.create({
   agendaDate: { fontSize: 14, fontWeight: "800", color: "#0F172A", paddingHorizontal: 16, marginBottom: 8 },
   agendaList: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
   agendaEmpty: { fontSize: 13, color: "#9CA3AF", textAlign: "center", paddingVertical: 24 },
+  demoChip: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  demoChipText: { flex: 1, fontSize: 13, fontWeight: "700", color: "#615DFA" },
   agendaItem: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, shadowColor: "#0F172A", shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   agendaTime: { width: 64, fontSize: 11, fontWeight: "700", color: "#6B7280" },
   agendaBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
