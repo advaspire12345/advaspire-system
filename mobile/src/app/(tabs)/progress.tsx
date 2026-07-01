@@ -50,13 +50,6 @@ type ProgressData = {
   certifications: Certification[];
 };
 
-const STATUS = {
-  present: { bg: "#D1FAE5", fg: "#065F46", label: "Present", icon: "checkmark-circle" as const },
-  late: { bg: "#FEF3C7", fg: "#92400E", label: "Late", icon: "time" as const },
-  absent: { bg: "#FEE2E2", fg: "#991B1B", label: "Absent", icon: "close-circle" as const },
-  excused: { bg: "#E0E7FF", fg: "#3730A3", label: "Excused", icon: "remove-circle" as const },
-};
-
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
@@ -68,7 +61,7 @@ export default function ProgressScreen() {
   const { studentId: paramStudentId } = useLocalSearchParams<{ studentId?: string }>();
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [section, setSection] = useState<Section>("attendance");
-  const [photoViewer, setPhotoViewer] = useState<string | null>(null);
+  const [photoViewer, setPhotoViewer] = useState<string[] | null>(null);
   const [certPreview, setCertPreview] = useState<Certification | null>(null);
 
   // Stage 1: the parent's children (rarely changes, cached for offline).
@@ -355,7 +348,7 @@ export default function ProgressScreen() {
         />
       )}
 
-      {photoViewer ? <PhotoViewer uri={photoViewer} onClose={() => setPhotoViewer(null)} /> : null}
+      {photoViewer ? <PhotoViewer uris={photoViewer} onClose={() => setPhotoViewer(null)} /> : null}
       {certPreview ? (
         <CertPreview
           cert={certPreview}
@@ -367,52 +360,62 @@ export default function ProgressScreen() {
   );
 }
 
-function AttendanceCard({ row, onPhoto }: { row: AttendanceRow; onPhoto: (uri: string) => void }) {
-  const meta = STATUS[row.status];
+function AttendanceCard({ row, onPhoto }: { row: AttendanceRow; onPhoto: (uris: string[]) => void }) {
   const activities = row.activities ?? [];
   const fallback = row.lastActivity ? [{ lesson: row.lastActivity, mission: "" }] : [];
   const displayed = activities.length > 0 ? activities : fallback;
+  const photos = row.projectPhotos ?? [];
+  const hasPhoto = photos.length > 0;
+  // Whole card is tappable to view the teacher's work photo(s) when present.
+  const Wrapper: typeof Pressable | typeof View = hasPhoto ? Pressable : View;
   return (
-    <View style={styles.card}>
+    <Wrapper
+      style={({ pressed }: { pressed?: boolean }) => [styles.card, hasPhoto && pressed && styles.cardPressed]}
+      onPress={hasPhoto ? () => onPhoto(photos) : undefined}
+    >
+      {/* Date/course on the left · work done on the right (no status badge —
+          this list only shows present sessions). */}
       <View style={styles.cardTop}>
-        <View style={{ flex: 1 }}>
+        <View style={styles.cardLeft}>
           <Text style={styles.cardDate}>{formatDate(row.date)}</Text>
           {row.courseName ? <Text style={styles.cardSub}>{row.courseName}</Text> : null}
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
-          <Ionicons name={meta.icon} size={14} color={meta.fg} />
-          <Text style={[styles.statusText, { color: meta.fg }]}>{meta.label}</Text>
-        </View>
-      </View>
-      {displayed.length > 0 ? (
-        <View style={{ gap: 4, marginBottom: 8 }}>
-          {displayed.map((a, i) => (
-            <View key={i}>
-              {a.lesson ? <Text style={styles.activityText}>📘 {a.lesson}</Text> : null}
-              {a.mission ? <Text style={styles.activityText}>🎯 {a.mission}</Text> : null}
-            </View>
-          ))}
-        </View>
-      ) : null}
-      {row.projectPhotos && row.projectPhotos.length > 0 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-          {row.projectPhotos.map((url, idx) => (
-            <Pressable key={idx} onPress={() => onPhoto(url)}>
-              <Image source={{ uri: url }} style={styles.photo} />
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : null}
-      <View style={styles.cardFooter}>
-        {row.instructorName ? <Text style={styles.footerText}>By {row.instructorName}</Text> : <View />}
-        {row.adcoin > 0 ? (
-          <View style={styles.adcoinBadge}>
-            <Ionicons name="logo-bitcoin" size={12} color="#92400E" />
-            <Text style={styles.adcoinText}>+{row.adcoin}</Text>
+        {displayed.length > 0 ? (
+          <View style={styles.workCol}>
+            <Text style={styles.workLabel}>Work done</Text>
+            {displayed.map((a, i) => (
+              <View key={i} style={styles.workItem}>
+                {a.lesson ? <Text style={styles.workLesson} numberOfLines={2}>{a.lesson}</Text> : null}
+                {a.mission ? <Text style={styles.workMission} numberOfLines={2}>{a.mission}</Text> : null}
+              </View>
+            ))}
           </View>
         ) : null}
       </View>
-    </View>
+
+      {(hasPhoto || row.adcoin > 0 || row.instructorName) ? (
+        <View style={styles.cardFooter}>
+          {hasPhoto ? (
+            <View style={styles.photoNotice}>
+              <Ionicons name="image" size={14} color="#615DFA" />
+              <Text style={styles.photoNoticeText}>
+                {photos.length > 1 ? `${photos.length} photos · Tap to view` : "Photo · Tap to view"}
+              </Text>
+            </View>
+          ) : row.instructorName ? (
+            <Text style={styles.footerText}>By {row.instructorName}</Text>
+          ) : (
+            <View />
+          )}
+          {row.adcoin > 0 ? (
+            <View style={styles.adcoinBadge}>
+              <Ionicons name="logo-bitcoin" size={12} color="#92400E" />
+              <Text style={styles.adcoinText}>+{row.adcoin}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+    </Wrapper>
   );
 }
 
@@ -476,12 +479,28 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PhotoViewer({ uri, onClose }: { uri: string; onClose: () => void }) {
+function PhotoViewer({ uris, onClose }: { uris: string[]; onClose: () => void }) {
   const { width, height } = useWindowDimensions();
   return (
-    <Pressable style={[StyleSheet.absoluteFillObject, styles.photoModal]} onPress={onClose}>
-      <Image source={{ uri }} style={{ width, height: height * 0.8 }} resizeMode="contain" />
-    </Pressable>
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={[StyleSheet.absoluteFillObject, styles.photoModal]}>
+        {uris.length > 1 ? (
+          <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+            {uris.map((uri, i) => (
+              <View key={i} style={{ width, alignItems: "center", justifyContent: "center" }}>
+                <Image source={{ uri }} style={{ width, height: height * 0.8 }} resizeMode="contain" />
+              </View>
+            ))}
+          </ScrollView>
+        ) : (
+          <Image source={{ uri: uris[0] }} style={{ width, height: height * 0.8 }} resizeMode="contain" />
+        )}
+        <Pressable style={styles.photoClose} onPress={onClose} hitSlop={12}>
+          <Ionicons name="close" size={22} color="#FFFFFF" />
+        </Pressable>
+        {uris.length > 1 ? <Text style={styles.photoCount}>Swipe · {uris.length} photos</Text> : null}
+      </View>
+    </Modal>
   );
 }
 
@@ -586,14 +605,18 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
   card: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, shadowColor: "#615DFA", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   cardPressed: { opacity: 0.85 },
-  cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
+  cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  cardLeft: { flexShrink: 0, maxWidth: "45%" },
   cardDate: { fontSize: 14, fontWeight: "700", color: "#111827" },
   cardSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
-  statusBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  statusText: { fontSize: 12, fontWeight: "700" },
-  activityText: { fontSize: 13, color: "#374151", lineHeight: 18 },
-  photo: { width: 80, height: 80, borderRadius: 8, marginRight: 8, backgroundColor: "#F3F4F6" },
-  cardFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  workCol: { flex: 1, alignItems: "flex-end", gap: 2 },
+  workLabel: { fontSize: 9, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6 },
+  workItem: { alignItems: "flex-end" },
+  workLesson: { fontSize: 13, color: "#111827", fontWeight: "700", textAlign: "right", lineHeight: 18 },
+  workMission: { fontSize: 12, color: "#615DFA", fontWeight: "600", textAlign: "right", lineHeight: 16 },
+  photoNotice: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#EEF2FF", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  photoNoticeText: { fontSize: 12, fontWeight: "700", color: "#615DFA" },
+  cardFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12 },
   footerText: { fontSize: 12, color: "#9CA3AF" },
   adcoinBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FEF3C7", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
   adcoinText: { fontSize: 12, fontWeight: "700", color: "#92400E" },
@@ -632,4 +655,6 @@ const styles = StyleSheet.create({
   previewClose: { marginTop: 12, alignItems: "center", paddingVertical: 12 },
   previewCloseText: { color: "#6B7280", fontSize: 14, fontWeight: "700" },
   photoModal: { backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center", zIndex: 999 },
+  photoClose: { position: "absolute", top: 56, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  photoCount: { position: "absolute", bottom: 60, alignSelf: "center", color: "rgba(255,255,255,0.7)", fontSize: 12, fontWeight: "600" },
 });
