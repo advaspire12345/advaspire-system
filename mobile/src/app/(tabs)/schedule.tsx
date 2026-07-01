@@ -668,18 +668,18 @@ function SwipeArea({
         // becomes a swipe. Taps don't move far enough to trigger, so they still
         // reach the cells. (Capture is why the previous version didn't swipe.)
         onMoveShouldSetPanResponderCapture: (_e, g) => {
-          const h = Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy);
+          const h = Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy);
           if (horizontalOnly) return h;
-          const v = Math.abs(g.dy) > 10 && Math.abs(g.dy) > Math.abs(g.dx);
+          const v = Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx);
           return h || v;
         },
         onPanResponderRelease: (_e, g) => {
           if (Math.abs(g.dx) >= Math.abs(g.dy)) {
-            if (g.dx < -28 || g.vx < -0.25) onLeft?.();
-            else if (g.dx > 28 || g.vx > 0.25) onRight?.();
+            if (g.dx < -14 || g.vx < -0.12) onLeft?.();
+            else if (g.dx > 14 || g.vx > 0.12) onRight?.();
           } else {
-            if (g.dy < -28 || g.vy < -0.25) onUp?.();
-            else if (g.dy > 28 || g.vy > 0.25) onDown?.();
+            if (g.dy < -14 || g.vy < -0.12) onUp?.();
+            else if (g.dy > 14 || g.vy > 0.12) onDown?.();
           }
         },
       }),
