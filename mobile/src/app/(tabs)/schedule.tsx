@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   LayoutAnimation,
   Modal,
   PanResponder,
@@ -197,6 +198,11 @@ export default function CalendarScreen() {
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
   const [expanded, setExpanded] = useState(false); // month cells taller (more events)
+  // Finger-following vertical resize: an animated height that only exists DURING
+  // a drag (grid mounts fresh in it, never re-renders inside it → no Android blank).
+  const [dragging, setDragging] = useState(false);
+  const dragH = useMemo(() => new Animated.Value(0), []);
+  const dragBase = useRef(0);
 
   const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
   useFocusEffect(
@@ -446,6 +452,34 @@ export default function CalendarScreen() {
   const expandedRowH = Math.max(ROW_H, Math.min(ROW_H_BIG, Math.floor(maxCalH / Math.max(1, currentRows))));
   const rowH = view === "week" ? ROW_H : expanded ? expandedRowH : ROW_H;
   const calcHeight = view === "week" ? ROW_H : currentRows * rowH;
+  const weekH = ROW_H;
+  const monthH = currentRows * ROW_H;
+
+  // Vertical drag → finger-following height. The responder lives on a STABLE
+  // outer View so switching to the animated wrapper mid-gesture doesn't drop it.
+  const vDragPan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+        onPanResponderGrant: () => {
+          dragBase.current = Math.max(weekH, Math.min(monthH, calcHeight));
+          dragH.setValue(dragBase.current);
+          setDragging(true);
+        },
+        onPanResponderMove: (_e, g) => { dragH.setValue(Math.max(weekH, Math.min(monthH, dragBase.current + g.dy))); },
+        onPanResponderRelease: (_e, g) => {
+          const finalH = Math.max(weekH, Math.min(monthH, dragBase.current + g.dy));
+          const mode = finalH < (weekH + monthH) / 2 ? "week" : "month";
+          Animated.timing(dragH, { toValue: mode === "week" ? weekH : monthH, duration: 130, useNativeDriver: false }).start(() => {
+            setMode(mode);
+            setDragging(false);
+          });
+        },
+        onPanResponderTerminate: () => setDragging(false),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [calcHeight, weekH, monthH, dragH],
+  );
 
   if (loading) {
     return (
@@ -501,26 +535,21 @@ export default function CalendarScreen() {
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          {/* Horizontal = native paging ScrollView (real finger-follow, Android-safe).
-              Vertical = SwipeArea snap (resize). */}
-          <SwipeArea
-            verticalOnly
-            onUp={() => setMode(view === "week" ? "week" : expanded ? "month" : "week")}
-            onDown={() => setMode(view === "week" ? "month" : "big")}
-          >
-            <MonthPager
-              view={view}
-              month={month}
-              selectedDay={selectedDay}
-              rowH={rowH}
-              width={winW}
-              height={calcHeight}
-              todayKey={todayKey}
-              buildDayItems={buildDayItems}
-              onPickDay={pickDay}
-              onShift={shift}
-            />
-          </SwipeArea>
+          {/* Horizontal = native paging ScrollView (finger-follow). Vertical =
+              finger-follow height, but the animated wrapper only exists during the
+              drag; at rest it's a plain View so day-taps never re-render inside an
+              animated view (which is what blanked cells on Android). */}
+          <View {...vDragPan.panHandlers}>
+            {dragging ? (
+              <Animated.View style={{ height: dragH, overflow: "hidden" }}>
+                <MonthPager view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
+              </Animated.View>
+            ) : (
+              <View style={{ height: calcHeight, overflow: "hidden" }}>
+                <MonthPager view={view} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
+              </View>
+            )}
+          </View>
           {/* visual grabber — tap to toggle, or drag the calendar up/down */}
           <View style={styles.handleWrap}>
             <Pressable onPress={toggleExpand} hitSlop={14}>
