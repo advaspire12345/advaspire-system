@@ -166,7 +166,7 @@ export default function ProgressScreen() {
   };
 
   const dataQuery = useCachedQuery<ProgressData>(
-    `progress:data:${selectedChildId ?? "none"}`,
+    `progress:data:present:${selectedChildId ?? "none"}`,
     fetchProgress,
     { enabled: !!selectedChildId },
   );
