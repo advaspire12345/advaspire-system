@@ -664,19 +664,22 @@ function SwipeArea({
   const responder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => {
-          const h = Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4;
+        // Capture the swipe at the parent BEFORE the day cells so a drag reliably
+        // becomes a swipe. Taps don't move far enough to trigger, so they still
+        // reach the cells. (Capture is why the previous version didn't swipe.)
+        onMoveShouldSetPanResponderCapture: (_e, g) => {
+          const h = Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy);
           if (horizontalOnly) return h;
-          const v = Math.abs(g.dy) > 18 && Math.abs(g.dy) > Math.abs(g.dx) * 1.2;
+          const v = Math.abs(g.dy) > 10 && Math.abs(g.dy) > Math.abs(g.dx);
           return h || v;
         },
         onPanResponderRelease: (_e, g) => {
           if (Math.abs(g.dx) >= Math.abs(g.dy)) {
-            if (g.dx < -40) onLeft?.();
-            else if (g.dx > 40) onRight?.();
+            if (g.dx < -28 || g.vx < -0.25) onLeft?.();
+            else if (g.dx > 28 || g.vx > 0.25) onRight?.();
           } else {
-            if (g.dy < -40) onUp?.();
-            else if (g.dy > 40) onDown?.();
+            if (g.dy < -28 || g.vy < -0.25) onUp?.();
+            else if (g.dy > 28 || g.vy > 0.25) onDown?.();
           }
         },
       }),
