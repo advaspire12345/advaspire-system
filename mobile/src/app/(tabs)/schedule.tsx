@@ -1,7 +1,6 @@
-import { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
   LayoutAnimation,
   Modal,
   PanResponder,
@@ -423,19 +422,6 @@ export default function CalendarScreen() {
   const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
     router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
 
-  // Vertical drag → snap to week / month / expanded on release (LayoutAnimation
-  // tweens it). Not per-frame, so Android redraws cleanly.
-  const vPan = useMemo(() => {
-    return PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 14 && Math.abs(g.dy) > Math.abs(g.dx) * 1.3,
-      onPanResponderRelease: (_e, g) => {
-        if (g.dy < -25) setMode(view === "week" ? "week" : expanded ? "month" : "week");
-        else if (g.dy > 25) setMode(view === "week" ? "month" : expanded ? "big" : "big");
-      },
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, expanded]);
-
   const toggleExpand = () => {
     if (view === "week") setMode("month");
     else setMode(expanded ? "month" : "big");
@@ -502,47 +488,43 @@ export default function CalendarScreen() {
       ) : null}
 
       {view === "year" ? (
-        <SwipePager fill onShift={shift} pageKey={`y-${month.getFullYear()}`} renderPanel={(o) => (
-          <YearView year={month.getFullYear() + o} hasAnyItem={hasAnyItem} todayKey={todayKey}
-            onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear() + o, mi, 1)); setView("month"); }} />
-        )} />
+        <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
+          <YearView year={month.getFullYear()} hasAnyItem={hasAnyItem} todayKey={todayKey}
+            onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear(), mi, 1)); setView("month"); }} />
+        </SwipeArea>
       ) : view === "day" ? (
-        <SwipePager fill onShift={shift} pageKey={`d-${ymd(selectedDay)}`} renderPanel={(o) => {
-          const d = addDays(selectedDay, o);
-          return <DayAgenda day={d} items={buildDayItems(ymd(d))} onReschedule={onReschedule} big />;
-        }} />
+        <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
+          <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} big />
+        </SwipeArea>
       ) : (
         <View style={styles.flex}>
           <View style={styles.weekdays}>
             {WEEKDAY_LABELS.map((w) => <Text key={w} style={styles.weekdayLabel}>{w}</Text>)}
           </View>
-          {/* Vertical drags resize week↔month↔expanded (snap on release, tweened
-              by LayoutAnimation); horizontal drags fall through to the SwipePager.
-              Height is the CURRENT month so neighbour months add no space. */}
-          <View {...vPan.panHandlers}>
-            <View style={{ height: calcHeight, overflow: "hidden" }}>
-              <SwipePager
-                onShift={shift}
-                pageKey={view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`}
-                renderPanel={(o) => (
-                  <MonthOrWeekGrid
-                    view={view}
-                    periodDate={view === "week" ? addDays(selectedDay, o * 7) : addMonths(month, o)}
-                    selectedDay={selectedDay}
-                    rowH={rowH}
-                    todayKey={todayKey}
-                    buildDayItems={buildDayItems}
-                    onPickDay={pickDay}
-                  />
-                )}
-              />
-            </View>
-            {/* visual grabber — tap to toggle, or drag the calendar up/down */}
-            <View style={styles.handleWrap}>
-              <Pressable onPress={toggleExpand} hitSlop={14}>
-                <View style={styles.handleBar} />
-              </Pressable>
-            </View>
+          {/* Single static grid (no pager) so Android always redraws cells.
+              Swipe left/right changes the period; up/down resizes. */}
+          <SwipeArea
+            style={{ height: calcHeight, overflow: "hidden" }}
+            onLeft={() => shift(1)}
+            onRight={() => shift(-1)}
+            onUp={() => setMode(view === "week" ? "week" : expanded ? "month" : "week")}
+            onDown={() => setMode(view === "week" ? "month" : "big")}
+          >
+            <MonthOrWeekGrid
+              view={view}
+              periodDate={view === "week" ? selectedDay : month}
+              selectedDay={selectedDay}
+              rowH={rowH}
+              todayKey={todayKey}
+              buildDayItems={buildDayItems}
+              onPickDay={pickDay}
+            />
+          </SwipeArea>
+          {/* visual grabber — tap to toggle, or drag the calendar up/down */}
+          <View style={styles.handleWrap}>
+            <Pressable onPress={toggleExpand} hitSlop={14}>
+              <View style={styles.handleBar} />
+            </Pressable>
           </View>
           <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} />
         </View>
@@ -666,57 +648,41 @@ function YearView({
   );
 }
 
-// ── Interactive swipe pager: three panels (prev/current/next) that track the
-// finger and snap to the neighbour on release, then commit via onShift. ──
-function SwipePager({
-  fill, onShift, renderPanel, pageKey,
+// ── Swipe detector: static children, fires a direction on release. No animated
+// layout / no offscreen panels, so Android always redraws the grid cells. ──
+function SwipeArea({
+  horizontalOnly, style, onLeft, onRight, onUp, onDown, children,
 }: {
-  fill?: boolean;
-  onShift: (dir: -1 | 1) => void;
-  renderPanel: (offset: -1 | 0 | 1) => React.ReactNode;
-  pageKey: string;
+  horizontalOnly?: boolean;
+  style?: object;
+  onLeft?: () => void;
+  onRight?: () => void;
+  onUp?: () => void;
+  onDown?: () => void;
+  children: React.ReactNode;
 }) {
-  const { width } = useWindowDimensions();
-  // tx is the live drag delta (0 = current panel centred). Base offset that
-  // centres the middle panel is applied statically via marginLeft.
-  const tx = useMemo(() => new Animated.Value(0), []);
-
-  // After a commit the period (pageKey) changes and all panels re-render with
-  // shifted data; snap back to centre BEFORE paint so the day numbers never
-  // flash in the wrong place ("rearranging").
-  useLayoutEffect(() => { tx.setValue(0); }, [pageKey, tx]);
-
   const responder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
-        onPanResponderMove: (_e, g) => tx.setValue(g.dx),
+        onMoveShouldSetPanResponder: (_e, g) => {
+          const h = Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4;
+          if (horizontalOnly) return h;
+          const v = Math.abs(g.dy) > 18 && Math.abs(g.dy) > Math.abs(g.dx) * 1.2;
+          return h || v;
+        },
         onPanResponderRelease: (_e, g) => {
-          const threshold = width * 0.22;
-          if (g.dx > threshold || g.vx > 0.4) {
-            Animated.timing(tx, { toValue: width, duration: 160, useNativeDriver: true }).start(() => onShift(-1));
-          } else if (g.dx < -threshold || g.vx < -0.4) {
-            Animated.timing(tx, { toValue: -width, duration: 160, useNativeDriver: true }).start(() => onShift(1));
+          if (Math.abs(g.dx) >= Math.abs(g.dy)) {
+            if (g.dx < -40) onLeft?.();
+            else if (g.dx > 40) onRight?.();
           } else {
-            Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+            if (g.dy < -40) onUp?.();
+            else if (g.dy > 40) onDown?.();
           }
         },
-        onPanResponderTerminate: () => {
-          Animated.spring(tx, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
-        },
       }),
-    [tx, width, onShift],
+    [horizontalOnly, onLeft, onRight, onUp, onDown],
   );
-
-  return (
-    <View style={[{ width, overflow: "hidden" }, fill && styles.flex]} {...responder.panHandlers}>
-      <Animated.View style={[{ flexDirection: "row", width: width * 3, marginLeft: -width, transform: [{ translateX: tx }] }, fill && styles.flex]}>
-        <View style={[{ width }, fill && styles.flex]}>{renderPanel(-1)}</View>
-        <View style={[{ width }, fill && styles.flex]}>{renderPanel(0)}</View>
-        <View style={[{ width }, fill && styles.flex]}>{renderPanel(1)}</View>
-      </Animated.View>
-    </View>
-  );
+  return <View style={style} {...responder.panHandlers}>{children}</View>;
 }
 
 // ── Day agenda list ──
@@ -835,7 +801,7 @@ const styles = StyleSheet.create({
   weekdayLabel: { flex: 1, textAlign: "center", fontSize: 10, fontWeight: "800", color: "#9CA3AF", letterSpacing: 0.6, textTransform: "uppercase" },
   grid: { paddingHorizontal: 6 },
   gridRow: { flexDirection: "row" },
-  cell: { flex: 1, margin: 1.5, borderRadius: 10, backgroundColor: "#FFFFFF", paddingTop: 4, paddingHorizontal: 3, overflow: "hidden" },
+  cell: { flex: 1, margin: 1.5, borderRadius: 10, backgroundColor: "#FFFFFF", paddingTop: 4, paddingHorizontal: 3 },
   cellSelected: { borderWidth: 1.5, borderColor: "#615DFA" },
   cellDateWrap: { alignSelf: "flex-start", minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   cellTodayWrap: { backgroundColor: "#615DFA" },
@@ -843,7 +809,7 @@ const styles = StyleSheet.create({
   cellDateToday: { color: "#FFFFFF" },
   cellDateSel: { color: "#615DFA" },
   cellDim: { color: "#D1D5DB" },
-  pills: { marginTop: 2, gap: 2 },
+  pills: { marginTop: 2, gap: 2, flex: 1, overflow: "hidden" },
   pill: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1 },
   pillText: { fontSize: 9, fontWeight: "700" },
   pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
