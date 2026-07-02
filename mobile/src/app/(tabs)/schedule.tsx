@@ -565,6 +565,38 @@ export default function CalendarScreen() {
     });
   }, [userId, reloadLocal]);
 
+  // Week-grid drag: move a local event to a new day+start-time (keeps duration).
+  const onMoveEventTime = useCallback((item: DayItem, newDateKey: string, newStartMin: number) => {
+    if (item.kind !== "local" || !item.localId || !userId || item.time == null || item.dateKey == null) return;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const dur = (item.endMin != null && item.endMin > item.time ? item.endMin : item.time + 60) - item.time;
+    const endM = Math.min(24 * 60 - 1, newStartMin + dur);
+    const startTime = `${pad(Math.floor(newStartMin / 60))}:${pad(newStartMin % 60)}`;
+    const endTime = `${pad(Math.floor(endM / 60))}:${pad(endM % 60)}`;
+    if (newDateKey === item.dateKey && newStartMin === item.time) return; // no change
+    const origDate = item.dateKey;
+    listLocalEvents(userId).then((list) => {
+      const ev = list.find((e) => e.id === item.localId);
+      if (!ev) return;
+      if (ev.repeat !== "never") {
+        Alert.alert("Repeating event", `Move "${ev.title}" — change the whole series, or just this one?`, [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Just this one",
+            onPress: async () => {
+              await updateLocalEvent(userId, { ...ev, excludes: [...(ev.excludes ?? []), origDate] });
+              await addLocalEvent(userId, { id: `${Date.now()}-${Math.round(Math.random() * 1e9)}`, type: ev.type, title: ev.title, startDate: newDateKey, startTime, endDate: newDateKey, endTime, repeat: "never", custom: null, endRepeat: { mode: "never" }, reminder: ev.reminder, alarm: false, color: ev.color, createdAt: Date.now() });
+              reloadLocal();
+            },
+          },
+          { text: "Whole series", onPress: () => updateLocalEvent(userId, { ...ev, startDate: newDateKey, startTime, endDate: newDateKey, endTime }).then(reloadLocal) },
+        ]);
+      } else {
+        updateLocalEvent(userId, { ...ev, startDate: newDateKey, startTime, endDate: newDateKey, endTime }).then(reloadLocal);
+      }
+    });
+  }, [userId, reloadLocal]);
+
   // Hold-and-drag handlers (stable, so the RNGH gesture identity stays put). They
   // read live view state via dragCtx.current, which is refreshed each render below.
   const movingRef = useRef<DayItem | null>(null);
@@ -783,6 +815,7 @@ export default function CalendarScreen() {
             onAddSlot={onAddSlot}
             onOpenEvent={openDetail}
             onShift={shift}
+            onMoveEvent={onMoveEventTime}
           />
         </Animated.View>
       ) : (
@@ -1234,7 +1267,7 @@ function DayCard({ day, onPrev, onNext }: { day: Date; onPrev: () => void; onNex
 
 // ── Week pager: native horizontal paging (finger-follows), 3 weeks, recenters ──
 function WeekPager({
-  selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent, onShift,
+  selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent, onShift, onMoveEvent,
 }: {
   selectedDay: Date;
   width: number;
@@ -1243,6 +1276,7 @@ function WeekPager({
   onAddSlot: (dateKey: string, hour: number) => void;
   onOpenEvent: (it: DayItem) => void;
   onShift: (dir: -1 | 1) => void;
+  onMoveEvent: (item: DayItem, newDateKey: string, newStartMin: number) => void;
 }) {
   const ref = useRef<ScrollView>(null);
   const pageKey = ymd(startOfWeek(selectedDay));
@@ -1268,7 +1302,7 @@ function WeekPager({
     >
       {[-1, 0, 1].map((o) => (
         <View key={o} style={{ width, alignSelf: "stretch" }}>
-          <WeekTimeGrid selectedDay={weekFor(o)} width={width} todayKey={todayKey} buildDayItems={buildDayItems} onAddSlot={onAddSlot} onOpenEvent={onOpenEvent} />
+          <WeekTimeGrid selectedDay={weekFor(o)} width={width} todayKey={todayKey} buildDayItems={buildDayItems} onAddSlot={onAddSlot} onOpenEvent={onOpenEvent} onMoveEvent={onMoveEvent} />
         </View>
       ))}
     </ScrollView>
@@ -1307,7 +1341,7 @@ function layoutLanes(items: DayItem[]): { it: DayItem; lane: number; cols: numbe
 
 // ── Week time-grid (tap a slot → +, tap + → add; tap an event → detail) ──
 function WeekTimeGrid({
-  selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent,
+  selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent, onMoveEvent,
 }: {
   selectedDay: Date;
   width: number;
@@ -1315,6 +1349,7 @@ function WeekTimeGrid({
   buildDayItems: (k: string) => DayItem[];
   onAddSlot: (dateKey: string, hour: number) => void;
   onOpenEvent: (it: DayItem) => void;
+  onMoveEvent: (item: DayItem, newDateKey: string, newStartMin: number) => void;
 }) {
   const HOUR_H = 56;
   const GUTTER = 44;
@@ -1324,6 +1359,68 @@ function WeekTimeGrid({
   const dayKeys = days.map(ymd);
   const itemsByDay = dayKeys.map((k) => buildDayItems(k));
   const [addCell, setAddCell] = useState<{ dk: string; h: number } | null>(null);
+  // Press-hold-drag an event → ghost shows the target day+time; drop to move it.
+  const [ghost, setGhost] = useState<{ col: number; min: number; dur: number; color: string; id: string } | null>(null);
+  const ghostRef = useRef<{ col: number; min: number; dur: number; color: string; id: string } | null>(null);
+  const dragItemRef = useRef<DayItem | null>(null);
+  // Live layout context for the drag handlers (in a ref so the single grid
+  // gesture stays stable while the ghost re-renders during a drag).
+  const dctx = useRef({ colW, HOUR_H, minH: 7, maxH: 21, dayKeys, itemsByDay, onMoveEvent });
+  const GUTTER_W = GUTTER;
+  // Content-relative x,y (RNGH x/y on the grid content view are scroll-independent).
+  const weekDragStart = useCallback((x: number, y: number) => {
+    const c = dctx.current;
+    const col = Math.floor((x - GUTTER_W) / c.colW);
+    if (col < 0 || col > 6) return;
+    const items = c.itemsByDay[col].filter((it) => it.time != null);
+    const found = layoutLanes(items).find(({ it, lane, cols }) => {
+      if (it.kind !== "local" || !it.localId) return false;
+      const start = it.time as number;
+      const top = (start / 60 - c.minH) * c.HOUR_H;
+      const end = it.endMin != null && it.endMin > start ? it.endMin : start + 60;
+      const h = Math.max(20, ((end - start) / 60) * c.HOUR_H - 2);
+      const gap = 2;
+      const w = (c.colW - gap * (cols + 1)) / cols;
+      const bl = GUTTER_W + col * c.colW + gap + lane * (w + gap);
+      return x >= bl && x <= bl + w && y >= top && y <= top + h;
+    });
+    if (!found) return;
+    const it = found.it;
+    const start = it.time as number;
+    const dur = (it.endMin != null && it.endMin > start ? it.endMin : start + 60) - start;
+    dragItemRef.current = it;
+    const g = { col, min: start, dur, color: it.color, id: it.id };
+    ghostRef.current = g;
+    setGhost(g);
+  }, [GUTTER_W]);
+  const weekDragMove = useCallback((x: number, y: number) => {
+    const it = dragItemRef.current;
+    if (!it) return;
+    const c = dctx.current;
+    const start = it.time as number;
+    const dur = (it.endMin != null && it.endMin > start ? it.endMin : start + 60) - start;
+    const col = Math.max(0, Math.min(6, Math.floor((x - GUTTER_W) / c.colW)));
+    let min = Math.round((c.minH * 60 + (y / c.HOUR_H) * 60) / 15) * 15;
+    min = Math.max(c.minH * 60, Math.min(c.maxH * 60 - dur, min));
+    const g = { col, min, dur, color: it.color, id: it.id };
+    ghostRef.current = g;
+    setGhost(g);
+  }, [GUTTER_W]);
+  const weekDragEnd = useCallback(() => {
+    const it = dragItemRef.current;
+    const g = ghostRef.current;
+    dragItemRef.current = null;
+    ghostRef.current = null;
+    setGhost(null);
+    if (it && g) dctx.current.onMoveEvent(it, dctx.current.dayKeys[g.col], g.min);
+  }, []);
+  const gridGesture = useMemo(
+    () => Gesture.Pan().runOnJS(true).activateAfterLongPress(220)
+      .onStart((e) => weekDragStart(e.x, e.y))
+      .onUpdate((e) => weekDragMove(e.x, e.y))
+      .onEnd(() => weekDragEnd()),
+    [weekDragStart, weekDragMove, weekDragEnd],
+  );
 
   // Hour window: 7am–9pm by default, widened to include any earlier/later item.
   let minH = 7;
@@ -1340,6 +1437,7 @@ function WeekTimeGrid({
   }
   minH = Math.max(0, minH);
   maxH = Math.min(24, Math.max(maxH, minH + 1));
+  dctx.current = { colW, HOUR_H, minH, maxH, dayKeys, itemsByDay, onMoveEvent };
   const hours: number[] = [];
   for (let h = minH; h < maxH; h++) hours.push(h);
   const gridH = hours.length * HOUR_H;
@@ -1388,6 +1486,7 @@ function WeekTimeGrid({
       ) : null}
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        <GestureDetector gesture={gridGesture}>
         <View style={{ flexDirection: "row", height: gridH }}>
           <View style={{ width: GUTTER }}>
             {hours.map((h) => (
@@ -1425,7 +1524,7 @@ function WeekTimeGrid({
                   return (
                     <Pressable
                       key={it.id}
-                      style={[styles.wgEvent, { top, height, left, width: w, backgroundColor: it.color + "22", borderLeftColor: it.color }]}
+                      style={[styles.wgEvent, { top, height, left, width: w, backgroundColor: it.color + "22", borderLeftColor: it.color }, ghost?.id === it.id && { opacity: 0.25 }]}
                       onPress={() => onOpenEvent(it)}
                     >
                       <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={cols > 2 ? 1 : 2}>{it.title}</Text>
@@ -1433,10 +1532,22 @@ function WeekTimeGrid({
                     </Pressable>
                   );
                 })}
+                {/* ghost: where the dragged event will land (this day column) */}
+                {ghost && ghost.col === di ? (
+                  <View pointerEvents="none" style={[styles.wgGhost, {
+                    top: (ghost.min / 60 - minH) * HOUR_H,
+                    height: Math.max(20, (ghost.dur / 60) * HOUR_H - 2),
+                    borderColor: ghost.color,
+                    backgroundColor: ghost.color + "22",
+                  }]}>
+                    <Text style={[styles.wgEventTime, { color: ghost.color }]}>{`${String(Math.floor(ghost.min / 60) % 12 || 12)}:${String(ghost.min % 60).padStart(2, "0")} ${ghost.min < 720 ? "AM" : "PM"}`}</Text>
+                  </View>
+                ) : null}
               </View>
             );
           })}
         </View>
+        </GestureDetector>
       </ScrollView>
     </View>
   );
@@ -1748,6 +1859,7 @@ const styles = StyleSheet.create({
   wgCell: { borderBottomWidth: 1, borderBottomColor: "#F5F5F8", alignItems: "center", justifyContent: "center" },
   wgPlus: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", shadowColor: "#615DFA", shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
   wgEvent: { position: "absolute", borderLeftWidth: 3, borderRadius: 6, paddingHorizontal: 3, paddingTop: 2, overflow: "hidden" },
+  wgGhost: { position: "absolute", left: 2, right: 2, borderWidth: 2, borderStyle: "dashed", borderRadius: 6, paddingHorizontal: 3, paddingTop: 2, zIndex: 5 },
   wgEventTitle: { fontSize: 9, fontWeight: "800" },
   wgEventTime: { fontSize: 8, color: "#6B7280", marginTop: 1 },
   // event detail modal
