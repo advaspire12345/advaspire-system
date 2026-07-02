@@ -233,6 +233,9 @@ export default function CalendarScreen() {
   // day under the finger, dragPos = the floating pill position (window coords).
   const [movingItem, setMovingItem] = useState<DayItem | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  // When a day has several of your events, long-press opens this chooser so you
+  // pick which one to move.
+  const [chooserDay, setChooserDay] = useState<Date | null>(null);
   const dragPos = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const gridGeom = useRef({ x: 0, y: 0 });
   const gridWrapRef = useRef<View>(null);
@@ -543,8 +546,10 @@ export default function CalendarScreen() {
   const dragStart = useCallback((absX: number, absY: number) => {
     const day = cellFromXY(absX, absY);
     if (!day) return;
-    const ev = dragCtx.current.items(ymd(day)).find((i) => i.kind === "local" && i.localId);
-    if (!ev) return; // nothing draggable under the finger
+    const locals = dragCtx.current.items(ymd(day)).filter((i) => i.kind === "local" && i.localId);
+    if (locals.length === 0) return; // nothing draggable under the finger
+    if (locals.length > 1) { setChooserDay(day); return; } // several → let user choose
+    const ev = locals[0];
     movingRef.current = ev;
     hoverRef.current = null;
     setMovingItem(ev);
@@ -768,6 +773,15 @@ export default function CalendarScreen() {
           onClose={() => setDetailItem(null)}
           onEdit={onEditLocal}
           onDelete={onDeleteLocal}
+        />
+      ) : null}
+
+      {chooserDay ? (
+        <EventChooser
+          day={chooserDay}
+          items={buildDayItems(ymd(chooserDay)).filter((i) => i.kind === "local" && i.localId)}
+          onClose={() => setChooserDay(null)}
+          onPick={(it) => { setChooserDay(null); setHoverKey(null); setMovingItem(it); }}
         />
       ) : null}
 
@@ -1390,6 +1404,41 @@ function EventDetailModal({
   );
 }
 
+// ── Pick which event to move (a day with several of your events) ──
+function EventChooser({
+  day, items, onClose, onPick,
+}: {
+  day: Date;
+  items: DayItem[];
+  onClose: () => void;
+  onPick: (it: DayItem) => void;
+}) {
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.chooserBackdrop} onPress={onClose} />
+      <View style={styles.chooserSheet}>
+        <View style={styles.chooserHandle} />
+        <Text style={styles.chooserTitle}>Move which event?</Text>
+        <Text style={styles.chooserSub}>{day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })}</Text>
+        <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+          {items.map((it) => (
+            <Pressable key={it.id} style={({ pressed }) => [styles.chooserRow, pressed && styles.pressed]} onPress={() => onPick(it)}>
+              <View style={[styles.chooserBar, { backgroundColor: it.color }]} />
+              <View style={styles.flex}>
+                <Text style={styles.chooserRowTitle} numberOfLines={1}>{it.title}</Text>
+                <Text style={styles.chooserRowSub} numberOfLines={1}>{it.timeLabel ?? "All day"}{it.subtitle ? ` · ${it.subtitle}` : ""}</Text>
+              </View>
+              <Ionicons name="move" size={18} color="#615DFA" />
+            </Pressable>
+          ))}
+        </ScrollView>
+        <Text style={styles.chooserHint}>Then tap a day (change month first for another) to move it there.</Text>
+        <Pressable style={styles.chooserCancel} onPress={onClose}><Text style={styles.chooserCancelText}>Cancel</Text></Pressable>
+      </View>
+    </Modal>
+  );
+}
+
 // ── Search ──
 function SearchModal({
   localEvents, events, onClose, onPick,
@@ -1489,6 +1538,18 @@ const styles = StyleSheet.create({
   moveBannerCancel: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
   floatPill: { position: "absolute", top: 0, left: 0, minWidth: 90, maxWidth: 150, borderLeftWidth: 3, borderRadius: 8, backgroundColor: "#FFFFFF", paddingHorizontal: 8, paddingVertical: 6, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 10, zIndex: 100 },
   floatPillText: { fontSize: 11, fontWeight: "800", color: "#0F172A" },
+  chooserBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.5)" },
+  chooserSheet: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28 },
+  chooserHandle: { width: 40, height: 4, backgroundColor: "#E5E7EB", borderRadius: 2, alignSelf: "center", marginBottom: 12 },
+  chooserTitle: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
+  chooserSub: { fontSize: 13, color: "#6B7280", marginTop: 2, marginBottom: 8 },
+  chooserRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
+  chooserBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
+  chooserRowTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  chooserRowSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  chooserHint: { fontSize: 12, color: "#9CA3AF", fontWeight: "600", marginTop: 12, textAlign: "center" },
+  chooserCancel: { marginTop: 10, alignItems: "center", paddingVertical: 12 },
+  chooserCancelText: { fontSize: 15, fontWeight: "700", color: "#615DFA" },
   pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
   handleWrap: { alignItems: "center", paddingVertical: 8 },
   handleBar: { width: 44, height: 5, borderRadius: 3, backgroundColor: "#D1D5DB" },
