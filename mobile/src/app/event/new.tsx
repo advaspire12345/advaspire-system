@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Keyboard,
@@ -15,14 +15,16 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/auth";
 import {
   addLocalEvent,
   defaultCustom,
+  listLocalEvents,
   reminderLabel,
   repeatLabel,
+  updateLocalEvent,
   ymd,
   type CustomRecurrence,
   type EndRepeat,
@@ -78,16 +80,51 @@ export default function NewEventScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const userId = user?.id;
+  // Params: `id` → edit an existing event; otherwise start/end date+time can be
+  // pre-filled (e.g. tapped from the week time-grid).
+  const params = useLocalSearchParams<{
+    id?: string;
+    startDate?: string;
+    startTime?: string;
+    endDate?: string;
+    endTime?: string;
+  }>();
+  const editId = typeof params.id === "string" && params.id ? params.id : null;
 
   const today = ymd(new Date());
   const [type, setType] = useState<LocalEventType>("event");
   const [title, setTitle] = useState("");
   const [color, setColor] = useState(COLORS[0]);
 
-  const [startDate, setStartDate] = useState(today);
-  const [startTime, setStartTime] = useState<string | null>("09:00");
-  const [endDate, setEndDate] = useState(today);
-  const [endTime, setEndTime] = useState<string | null>("10:00");
+  const [startDate, setStartDate] = useState(params.startDate || today);
+  const [startTime, setStartTime] = useState<string | null>(params.startTime || "09:00");
+  const [endDate, setEndDate] = useState(params.endDate || params.startDate || today);
+  const [endTime, setEndTime] = useState<string | null>(params.endTime || "10:00");
+  const [createdAt, setCreatedAt] = useState<number>(Date.now());
+
+  // Edit mode: hydrate every field from the stored event once.
+  useEffect(() => {
+    if (!editId || !userId) return;
+    let active = true;
+    listLocalEvents(userId).then((list) => {
+      const ev = list.find((e) => e.id === editId);
+      if (!ev || !active) return;
+      setType(ev.type);
+      setTitle(ev.title);
+      setColor(ev.color);
+      setStartDate(ev.startDate);
+      setStartTime(ev.startTime);
+      setEndDate(ev.endDate);
+      setEndTime(ev.endTime);
+      setRepeat(ev.repeat);
+      setCustom(ev.custom);
+      setEndRepeat(ev.endRepeat);
+      setReminder(ev.reminder);
+      setAlarm(ev.alarm);
+      setCreatedAt(ev.createdAt);
+    });
+    return () => { active = false; };
+  }, [editId, userId]);
 
   const [repeat, setRepeat] = useState<RepeatFreq>("never");
   const [custom, setCustom] = useState<CustomRecurrence | null>(null);
@@ -123,7 +160,7 @@ export default function NewEventScreen() {
     setSaving(true);
     try {
       const ev: LocalEvent = {
-        id: `${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+        id: editId ?? `${Date.now()}-${Math.round(Math.random() * 1e9)}`,
         type,
         title: title.trim(),
         startDate,
@@ -136,9 +173,10 @@ export default function NewEventScreen() {
         reminder: type === "event" || type === "birthday" ? reminder : "none",
         alarm: type === "birthday" ? alarm : false,
         color,
-        createdAt: Date.now(),
+        createdAt,
       };
-      await addLocalEvent(userId, ev);
+      if (editId) await updateLocalEvent(userId, ev);
+      else await addLocalEvent(userId, ev);
       router.back();
     } catch {
       Alert.alert("Couldn't save", "Something went wrong saving the event.");
@@ -153,7 +191,7 @@ export default function NewEventScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
-      <Stack.Screen options={{ title: "New event", headerTintColor: "#615DFA" }} />
+      <Stack.Screen options={{ title: editId ? "Edit event" : "New event", headerTintColor: "#615DFA" }} />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.flex}

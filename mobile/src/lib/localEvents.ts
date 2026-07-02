@@ -85,6 +85,18 @@ export async function addLocalEvent(userId: string, ev: LocalEvent): Promise<voi
   }
 }
 
+export async function updateLocalEvent(userId: string, ev: LocalEvent): Promise<void> {
+  const all = await listLocalEvents(userId);
+  const idx = all.findIndex((e) => e.id === ev.id);
+  if (idx >= 0) all[idx] = ev;
+  else all.push(ev);
+  try {
+    await AsyncStorage.setItem(KEY(userId), JSON.stringify(all));
+  } catch {
+    // best-effort
+  }
+}
+
 export async function deleteLocalEvent(userId: string, id: string): Promise<void> {
   const all = (await listLocalEvents(userId)).filter((e) => e.id !== id);
   try {

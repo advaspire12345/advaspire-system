@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   LayoutAnimation,
   Modal,
@@ -22,7 +23,7 @@ import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
-import { listLocalEvents, localEventOccursOn, type LocalEvent } from "@/lib/localEvents";
+import { deleteLocalEvent, listLocalEvents, localEventOccursOn, type LocalEvent } from "@/lib/localEvents";
 import { supabase } from "@/lib/supabase";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -178,11 +179,15 @@ function cap(s: string): string {
 
 type DayItem = {
   id: string;
-  time: number | null;
+  time: number | null; // start minutes-of-day (null = all-day)
+  endMin?: number | null; // end minutes-of-day (for time-grid block height)
   timeLabel: string | null;
   title: string;
   subtitle: string;
   color: string;
+  kind?: "local" | "event" | "class"; // local = parent-created (editable)
+  localId?: string; // the LocalEvent id when kind === "local"
+  dateKey?: string; // the day this occurrence falls on
   reschedule?: { enrollmentId: string; studentId: string; courseName: string | null; date: string };
 };
 
@@ -205,6 +210,9 @@ export default function CalendarScreen() {
   const dragBase = useRef(0);
 
   const [localEvents, setLocalEvents] = useState<LocalEvent[]>([]);
+  const reloadLocal = useCallback(() => {
+    if (userId) listLocalEvents(userId).then(setLocalEvents);
+  }, [userId]);
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -212,6 +220,10 @@ export default function CalendarScreen() {
       return () => { active = false; };
     }, [userId]),
   );
+  // The Week tab shows a time grid; a drag-collapse from Month shows the compact
+  // week row instead. detailItem drives the tap-an-event full-screen card.
+  const [weekGrid, setWeekGrid] = useState(true);
+  const [detailItem, setDetailItem] = useState<DayItem | null>(null);
 
   const fetchCalendar = async (): Promise<CalendarData> => {
     const empty: CalendarData = { parentId: null, enrollments: [], attendance: [], events: [] };
@@ -353,12 +365,13 @@ export default function CalendarScreen() {
       const items: DayItem[] = [];
       for (const e of localEvents.filter((ev) => localEventOccursOn(ev, dateKey))) {
         const typeName = e.type === "birthday" ? "Birthday" : e.type === "holiday" ? "Holiday" : "Event";
-        items.push({ id: `le-${e.id}`, time: toMinutes(e.startTime), timeLabel: fmt12(e.startTime) ?? "All day", title: e.title, subtitle: typeName, color: e.color });
+        items.push({ id: `le-${e.id}`, time: toMinutes(e.startTime), endMin: toMinutes(e.endTime), timeLabel: fmt12(e.startTime) ?? "All day", title: e.title, subtitle: typeName, color: e.color, kind: "local", localId: e.id, dateKey });
       }
       for (const e of events.filter((ev) => eventOccursOn(ev, dateKey))) {
         const meta = EVENT_TYPE_META[e.eventType];
         const t = e.isRecurring ? e.recurringStartTime : e.startTime;
-        items.push({ id: `se-${e.id}`, time: toMinutes(t), timeLabel: fmt12(t) ?? "All day", title: e.title, subtitle: meta.label, color: e.color || meta.color });
+        const endT = e.isRecurring ? e.recurringEndTime : e.endTime;
+        items.push({ id: `se-${e.id}`, time: toMinutes(t), endMin: toMinutes(endT), timeLabel: fmt12(t) ?? "All day", title: e.title, subtitle: meta.label, color: e.color || meta.color, kind: "event", dateKey });
       }
       const attToday = attendance.filter((a) => a.date === dateKey);
       const isFuture = d.getTime() > new Date().setHours(0, 0, 0, 0);
@@ -367,10 +380,13 @@ export default function CalendarScreen() {
         items.push({
           id: `cl-${c.enrollmentId}-${dateKey}`,
           time: toMinutes(c.startTime),
+          endMin: null,
           timeLabel: fmt12(c.startTime) ?? "Class",
           title: c.studentName,
           subtitle: `${c.courseName ?? "Class"}${at ? ` · ${cap(at.status)}` : ""}`,
           color: at ? STATUS_COLORS[at.status] : "#23D2E2",
+          kind: "class",
+          dateKey,
           reschedule: isFuture && !at ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: dateKey } : undefined,
         });
       }
@@ -421,12 +437,46 @@ export default function CalendarScreen() {
     if (d.getMonth() !== month.getMonth() || d.getFullYear() !== month.getFullYear()) setMonth(startOfMonth(d));
   };
   const switchView = (v: ViewMode) => {
-    if (v === "week") setMode("week");
+    if (v === "week") { setWeekGrid(true); setMode("week"); }
     else if (v === "month") setMode("month");
     else { animate(); setView(v); }
   };
   const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
     router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
+
+  // Tapping the + in a week-grid slot opens the editor with that slot's
+  // date + time pre-filled.
+  const onAddSlot = (dateKey: string, hour: number) => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    router.push({
+      pathname: "/event/new",
+      params: {
+        ...(parentId ? { parentId } : {}),
+        startDate: dateKey,
+        startTime: `${pad(hour)}:00`,
+        endDate: dateKey,
+        endTime: hour < 23 ? `${pad(hour + 1)}:00` : "23:59",
+      },
+    });
+  };
+  const onEditLocal = (localId: string) => {
+    setDetailItem(null);
+    router.push({ pathname: "/event/new", params: { id: localId, ...(parentId ? { parentId } : {}) } });
+  };
+  const onDeleteLocal = (localId: string) => {
+    Alert.alert("Delete event", "Delete this event? This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          if (userId) await deleteLocalEvent(userId, localId);
+          reloadLocal();
+          setDetailItem(null);
+        },
+      },
+    ]);
+  };
 
   const toggleExpand = () => {
     if (view === "week") setMode("month");
@@ -475,6 +525,7 @@ export default function CalendarScreen() {
           const mode = finalH < (weekH + monthH) / 2 ? "week" : finalH > (monthH + bigH) / 2 ? "big" : "month";
           const target = mode === "week" ? weekH : mode === "big" ? bigH : monthH;
           Animated.timing(dragH, { toValue: target, duration: 130, useNativeDriver: false }).start(() => {
+            if (mode === "week") setWeekGrid(false); // collapse shows the compact row
             setMode(mode);
             setDragging(false);
           });
@@ -534,6 +585,17 @@ export default function CalendarScreen() {
         <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
           <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} big />
         </SwipeArea>
+      ) : view === "week" && weekGrid ? (
+        <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
+          <WeekTimeGrid
+            selectedDay={selectedDay}
+            width={winW}
+            todayKey={todayKey}
+            buildDayItems={buildDayItems}
+            onAddSlot={onAddSlot}
+            onOpenEvent={setDetailItem}
+          />
+        </SwipeArea>
       ) : (
         <View style={styles.flex}>
           <View style={styles.weekdays}>
@@ -574,6 +636,15 @@ export default function CalendarScreen() {
       >
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </Pressable>
+
+      {detailItem ? (
+        <EventDetailModal
+          item={detailItem}
+          onClose={() => setDetailItem(null)}
+          onEdit={onEditLocal}
+          onDelete={onDeleteLocal}
+        />
+      ) : null}
 
       {searchOpen ? (
         <SearchModal
@@ -835,6 +906,199 @@ function DayAgenda({
   );
 }
 
+// ── Week time-grid (tap a slot → +, tap + → add; tap an event → detail) ──
+function WeekTimeGrid({
+  selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent,
+}: {
+  selectedDay: Date;
+  width: number;
+  todayKey: string;
+  buildDayItems: (k: string) => DayItem[];
+  onAddSlot: (dateKey: string, hour: number) => void;
+  onOpenEvent: (it: DayItem) => void;
+}) {
+  const HOUR_H = 56;
+  const GUTTER = 44;
+  const colW = (width - GUTTER) / 7;
+  const weekStart = startOfWeek(selectedDay);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const dayKeys = days.map(ymd);
+  const itemsByDay = dayKeys.map((k) => buildDayItems(k));
+  const [addCell, setAddCell] = useState<{ dk: string; h: number } | null>(null);
+
+  // Hour window: 7am–9pm by default, widened to include any earlier/later item.
+  let minH = 7;
+  let maxH = 21;
+  for (const items of itemsByDay) {
+    for (const it of items) {
+      if (it.time == null) continue;
+      const sh = Math.floor(it.time / 60);
+      if (sh < minH) minH = sh;
+      const em = it.endMin != null && it.endMin > it.time ? it.endMin : it.time + 60;
+      const eh = Math.ceil(em / 60);
+      if (eh > maxH) maxH = eh;
+    }
+  }
+  minH = Math.max(0, minH);
+  maxH = Math.min(24, Math.max(maxH, minH + 1));
+  const hours: number[] = [];
+  for (let h = minH; h < maxH; h++) hours.push(h);
+  const gridH = hours.length * HOUR_H;
+  const fmtHour = (h: number) => {
+    const p = h < 12 ? "AM" : "PM";
+    return `${h % 12 === 0 ? 12 : h % 12}${p}`;
+  };
+
+  const allDay = itemsByDay.map((items) => items.filter((it) => it.time == null));
+  const hasAllDay = allDay.some((a) => a.length > 0);
+
+  return (
+    <View style={styles.flex}>
+      <View style={[styles.wgHeader, { paddingLeft: GUTTER }]}>
+        {days.map((d) => {
+          const k = ymd(d);
+          const isToday = k === todayKey;
+          return (
+            <View key={k} style={{ width: colW, alignItems: "center" }}>
+              <Text style={styles.wgHeaderWd}>{WEEKDAY_LABELS[d.getDay()]}</Text>
+              <View style={[styles.wgHeaderNumWrap, isToday && styles.wgHeaderTodayWrap]}>
+                <Text style={[styles.wgHeaderNum, isToday && styles.wgHeaderNumToday]}>{d.getDate()}</Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      {hasAllDay ? (
+        <View style={[styles.wgAllDay, { paddingLeft: GUTTER }]}>
+          {allDay.map((items, di) => (
+            <View key={dayKeys[di]} style={{ width: colW, gap: 2, paddingHorizontal: 1 }}>
+              {items.map((it) => (
+                <Pressable key={it.id} style={[styles.wgAllDayChip, { backgroundColor: it.color + "22", borderLeftColor: it.color }]} onPress={() => onOpenEvent(it)}>
+                  <Text style={[styles.wgAllDayText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        <View style={{ flexDirection: "row", height: gridH }}>
+          <View style={{ width: GUTTER }}>
+            {hours.map((h) => (
+              <View key={h} style={{ height: HOUR_H }}>
+                <Text style={styles.wgHourLabel}>{fmtHour(h)}</Text>
+              </View>
+            ))}
+          </View>
+          {days.map((d, di) => {
+            const dk = dayKeys[di];
+            const timed = itemsByDay[di].filter((it) => it.time != null);
+            return (
+              <View key={dk} style={{ width: colW, borderLeftWidth: 1, borderLeftColor: "#F1F1F6" }}>
+                {hours.map((h) => {
+                  const active = addCell?.dk === dk && addCell?.h === h;
+                  return (
+                    <Pressable key={h} style={[styles.wgCell, { height: HOUR_H }]} onPress={() => setAddCell(active ? null : { dk, h })}>
+                      {active ? (
+                        <Pressable style={styles.wgPlus} onPress={() => { onAddSlot(dk, h); setAddCell(null); }} hitSlop={6}>
+                          <Ionicons name="add" size={18} color="#FFFFFF" />
+                        </Pressable>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+                {timed.map((it) => {
+                  const start = it.time as number;
+                  const top = (start / 60 - minH) * HOUR_H;
+                  const end = it.endMin != null && it.endMin > start ? it.endMin : start + 60;
+                  const height = Math.max(22, ((end - start) / 60) * HOUR_H - 2);
+                  return (
+                    <Pressable
+                      key={it.id}
+                      style={[styles.wgEvent, { top, height, backgroundColor: it.color + "22", borderLeftColor: it.color }]}
+                      onPress={() => onOpenEvent(it)}
+                    >
+                      <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
+                      {height > 30 ? <Text style={styles.wgEventTime} numberOfLines={1}>{it.timeLabel}</Text> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+// ── Full-screen event detail card (Edit / Delete for parent-created events) ──
+function EventDetailModal({
+  item, onClose, onEdit, onDelete,
+}: {
+  item: DayItem;
+  onClose: () => void;
+  onEdit: (localId: string) => void;
+  onDelete: (localId: string) => void;
+}) {
+  const localId = item.localId;
+  const editable = item.kind === "local" && !!localId;
+  const dateLabel = item.dateKey
+    ? new Date(item.dateKey + "T00:00:00").toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+    : "";
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.detailRoot}>
+        <View style={[styles.detailHeader, { backgroundColor: item.color }]}>
+          <Pressable onPress={onClose} hitSlop={10} style={styles.detailCloseBtn}><Ionicons name="close" size={22} color="#FFFFFF" /></Pressable>
+          <Text style={styles.detailKind}>{item.subtitle}</Text>
+          <Text style={styles.detailTitle}>{item.title}</Text>
+        </View>
+        <View style={styles.detailBody}>
+          <View style={styles.detailRow}>
+            <Ionicons name="calendar-outline" size={18} color="#615DFA" />
+            <Text style={styles.detailRowLabel}>Date</Text>
+            <Text style={styles.detailRowValue}>{dateLabel}</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Ionicons name="time-outline" size={18} color="#615DFA" />
+            <Text style={styles.detailRowLabel}>Time</Text>
+            <Text style={styles.detailRowValue}>{item.time == null ? "All day" : item.timeLabel ?? ""}</Text>
+          </View>
+          {!editable ? (
+            <View style={styles.detailNote}>
+              <Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" />
+              <Text style={styles.detailNoteText}>
+                {item.kind === "class" ? "This is a scheduled class — use the Move option to reschedule it." : "Added by your school — view only."}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        {editable ? (
+          <View style={styles.detailActions}>
+            <Pressable style={[styles.detailBtn, styles.detailEdit]} onPress={() => localId && onEdit(localId)}>
+              <Ionicons name="create-outline" size={18} color="#615DFA" />
+              <Text style={styles.detailEditText}>Edit</Text>
+            </Pressable>
+            <Pressable style={[styles.detailBtn, styles.detailDelete]} onPress={() => localId && onDelete(localId)}>
+              <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.detailDeleteText}>Delete</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.detailActions}>
+            <Pressable style={[styles.detailBtn, styles.detailEdit, styles.flex]} onPress={onClose}>
+              <Text style={styles.detailEditText}>Close</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
 // ── Search ──
 function SearchModal({
   localEvents, events, onClose, onPick,
@@ -935,6 +1199,40 @@ const styles = StyleSheet.create({
   agendaEmpty: { fontSize: 13, color: "#9CA3AF", textAlign: "center", paddingVertical: 24 },
   demoChip: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
   demoChipText: { flex: 1, fontSize: 13, fontWeight: "700", color: "#615DFA" },
+  // week time-grid
+  wgHeader: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: "#EEF0F6" },
+  wgHeaderWd: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase" },
+  wgHeaderNumWrap: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", marginTop: 2 },
+  wgHeaderTodayWrap: { backgroundColor: "#615DFA" },
+  wgHeaderNum: { fontSize: 13, fontWeight: "800", color: "#0F172A" },
+  wgHeaderNumToday: { color: "#FFFFFF" },
+  wgAllDay: { flexDirection: "row", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: "#EEF0F6", backgroundColor: "#FBFBFE" },
+  wgAllDayChip: { borderLeftWidth: 3, borderRadius: 5, paddingHorizontal: 4, paddingVertical: 3 },
+  wgAllDayText: { fontSize: 9, fontWeight: "800" },
+  wgHourLabel: { fontSize: 9, fontWeight: "700", color: "#9CA3AF", textAlign: "right", paddingRight: 6, marginTop: -6 },
+  wgCell: { borderBottomWidth: 1, borderBottomColor: "#F5F5F8", alignItems: "center", justifyContent: "center" },
+  wgPlus: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", shadowColor: "#615DFA", shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+  wgEvent: { position: "absolute", left: 2, right: 2, borderLeftWidth: 3, borderRadius: 6, paddingHorizontal: 4, paddingTop: 2, overflow: "hidden" },
+  wgEventTitle: { fontSize: 9, fontWeight: "800" },
+  wgEventTime: { fontSize: 8, color: "#6B7280", marginTop: 1 },
+  // event detail modal
+  detailRoot: { flex: 1, backgroundColor: "#F6F6FB" },
+  detailHeader: { paddingTop: 64, paddingBottom: 28, paddingHorizontal: 24 },
+  detailCloseBtn: { position: "absolute", top: 56, right: 16, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  detailKind: { fontSize: 12, fontWeight: "800", color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: 1 },
+  detailTitle: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", marginTop: 6, letterSpacing: -0.4 },
+  detailBody: { padding: 20, gap: 4 },
+  detailRow: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFFFFF", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 8 },
+  detailRowLabel: { fontSize: 13, color: "#6B7280", fontWeight: "700", width: 44 },
+  detailRowValue: { flex: 1, fontSize: 14, color: "#111827", fontWeight: "700", textAlign: "right" },
+  detailNote: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4, paddingVertical: 8 },
+  detailNoteText: { flex: 1, fontSize: 12, color: "#9CA3AF", fontWeight: "600", lineHeight: 17 },
+  detailActions: { flexDirection: "row", gap: 12, padding: 20, marginTop: "auto" },
+  detailBtn: { height: 52, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  detailEdit: { flex: 1, backgroundColor: "#EEF2FF" },
+  detailEditText: { fontSize: 15, fontWeight: "800", color: "#615DFA" },
+  detailDelete: { flex: 1, backgroundColor: "#EF4444" },
+  detailDeleteText: { fontSize: 15, fontWeight: "800", color: "#FFFFFF" },
   agendaItem: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, shadowColor: "#0F172A", shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   agendaTime: { width: 64, fontSize: 11, fontWeight: "700", color: "#6B7280" },
   agendaBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
