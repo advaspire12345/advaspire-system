@@ -237,12 +237,13 @@ function withinEndRepeat(ev: LocalEvent, dateKey: string): boolean {
 }
 
 export function localEventOccursOn(ev: LocalEvent, dateKey: string): boolean {
-  // Per-occurrence moves (recurring only). A moved-away origin never shows on its
-  // original date; the moved date shows instead.
+  // Per-occurrence moves (recurring only). Check "moved TO this date" FIRST — a
+  // day that something was dropped onto must show, even if that same day had
+  // previously been vacated by another move (otherwise the drop disappears).
   const ov = ev.overrides;
   if (ev.repeat !== "never" && ov) {
-    if (ov[dateKey]) return false; // this occurrence was moved elsewhere
-    for (const k in ov) if (ov[k] === dateKey) return true; // moved to here
+    for (const k in ov) if (ov[k] === dateKey) return true; // moved to here → show
+    if (ov[dateKey] !== undefined) return false; // this occurrence was moved away
   }
   if (!matchesPattern(ev, dateKey)) return false;
   if (ev.repeat === "never") return true; // span already handled
