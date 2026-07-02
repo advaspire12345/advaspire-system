@@ -521,8 +521,7 @@ export default function CalendarScreen() {
   // read live view state via dragCtx.current, which is refreshed each render below.
   const movingRef = useRef<DayItem | null>(null);
   const hoverRef = useRef<string | null>(null);
-  const edgeRef = useRef(false); // throttle edge-of-screen month changes while dragging
-  const dragCtx = useRef({ rowH: ROW_H, gridView: "month" as ViewMode, month, selectedDay, winW, insetTop: insets.top, shift: (_d: -1 | 1) => {} });
+  const dragCtx = useRef({ rowH: ROW_H, gridView: "month" as ViewMode, month, selectedDay, winW, insetTop: insets.top });
   const dragStart = useCallback((it: DayItem, absX: number, absY: number) => {
     gridWrapRef.current?.measureInWindow((x, y) => { gridGeom.current = { x, y }; });
     movingRef.current = it;
@@ -534,16 +533,6 @@ export default function CalendarScreen() {
   const dragMove = useCallback((absX: number, absY: number) => {
     const c = dragCtx.current;
     dragPos.setValue({ x: absX, y: absY - c.insetTop });
-    // Drag to the left/right screen edge → flip the month (throttled), so an event
-    // can be dropped into another month.
-    if (!edgeRef.current) {
-      const dir: -1 | 1 | 0 = absX < 36 ? -1 : absX > c.winW - 36 ? 1 : 0;
-      if (dir !== 0) {
-        edgeRef.current = true;
-        c.shift(dir);
-        setTimeout(() => { edgeRef.current = false; }, 650);
-      }
-    }
     // DRAG_NUDGE lifts the detected cell to the fingertip (touch point sits ~0.5cm
     // below where the finger visually points).
     const DRAG_NUDGE = 24;
@@ -561,13 +550,18 @@ export default function CalendarScreen() {
   const dragEnd = useCallback(() => {
     const it = movingRef.current;
     const target = hoverRef.current;
-    movingRef.current = null;
     hoverRef.current = null;
     setHoverKey(null);
-    if (it && target) applyMove(it, target);
-    else setMovingItem(null);
+    if (it && target) { movingRef.current = null; applyMove(it, target); }
+    // Released without a day under the finger → keep it "picked up" so you can
+    // change month (swipe/tabs) and TAP the day to place it (reliable cross-month).
   }, [applyMove]);
   const dragProps = useMemo(() => ({ onStart: dragStart, onMove: dragMove, onEnd: dragEnd }), [dragStart, dragMove, dragEnd]);
+  // Tap a day while an event is picked up → place it there (also covers cross-month).
+  const onCellPress = (d: Date) => {
+    if (movingItem) applyMove(movingItem, ymd(d));
+    else pickDay(d);
+  };
   const onDeleteLocal = (localId: string) => {
     Alert.alert("Delete event", "Delete this event? This can't be undone.", [
       { text: "Cancel", style: "cancel" },
@@ -608,7 +602,7 @@ export default function CalendarScreen() {
   const rowH = monthZoom === "big" ? expandedRowH : ROW_H;
   const calcHeight = monthZoom === "row" ? weekH : monthZoom === "big" ? bigH : monthH;
   const gridView: ViewMode = monthZoom === "row" ? "week" : "month"; // row = one week
-  dragCtx.current = { rowH, gridView, month, selectedDay, winW, insetTop: insets.top, shift: monthShift };
+  dragCtx.current = { rowH, gridView, month, selectedDay, winW, insetTop: insets.top };
 
   // Vertical drag → finger-following height across week / month / big. The
   // responder lives on a STABLE outer View so switching to the animated wrapper
@@ -681,12 +675,6 @@ export default function CalendarScreen() {
         <View style={styles.bannerWrap}><OfflineBanner updatedAt={updatedAt} /></View>
       ) : null}
 
-      {movingItem ? (
-        <View style={styles.moveBanner}>
-          <Ionicons name="move" size={16} color="#615DFA" />
-          <Text style={styles.moveBannerText} numberOfLines={1}>Moving “{movingItem.title}” — drag onto a day, then release</Text>
-        </View>
-      ) : null}
 
       {view === "year" ? (
         <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
@@ -723,11 +711,11 @@ export default function CalendarScreen() {
                     stay ROW_H and clip (collapse); above monthH they grow so cells
                     get taller with the finger — day numbers/pills keep their real
                     size (no scale = no stretch). */}
-                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
+                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
               </Animated.View>
             ) : (
               <View style={{ height: calcHeight, overflow: "hidden" }}>
-                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
+                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
               </View>
             )}
           </View>
@@ -771,6 +759,16 @@ export default function CalendarScreen() {
             setSearchOpen(false);
           }}
         />
+      ) : null}
+
+      {/* Move banner — absolute so it never shifts the calendar (which would throw
+          off the drop-target hit-testing). */}
+      {movingItem ? (
+        <View style={styles.moveBanner}>
+          <Ionicons name="move" size={15} color="#615DFA" />
+          <Text style={styles.moveBannerText} numberOfLines={2}>Moving “{movingItem.title}” — drop on a day, or tap a day (change month first for another month)</Text>
+          <Pressable onPress={() => { setMovingItem(null); setHoverKey(null); }} hitSlop={8}><Text style={styles.moveBannerCancel}>Cancel</Text></Pressable>
+        </View>
       ) : null}
 
       {/* Floating pill that follows the finger while dragging an event. */}
@@ -1478,8 +1476,8 @@ const styles = StyleSheet.create({
   pill: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1 },
   pillPicked: { borderWidth: 1.5, borderColor: "#615DFA", opacity: 0.6 },
   pillText: { fontSize: 9, fontWeight: "700" },
-  moveBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 8, backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
-  moveBannerText: { flex: 1, fontSize: 12.5, fontWeight: "700", color: "#4338CA" },
+  moveBanner: { position: "absolute", left: 12, right: 12, bottom: 24, zIndex: 50, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, shadowColor: "#0F172A", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  moveBannerText: { flex: 1, fontSize: 12, fontWeight: "700", color: "#4338CA", lineHeight: 16 },
   moveBannerCancel: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
   floatPill: { position: "absolute", top: 0, left: 0, minWidth: 90, maxWidth: 150, borderLeftWidth: 3, borderRadius: 8, backgroundColor: "#FFFFFF", paddingHorizontal: 8, paddingVertical: 6, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 10, zIndex: 100 },
   floatPillText: { fontSize: 11, fontWeight: "800", color: "#0F172A" },
