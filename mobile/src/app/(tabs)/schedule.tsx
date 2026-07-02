@@ -220,9 +220,8 @@ export default function CalendarScreen() {
       return () => { active = false; };
     }, [userId]),
   );
-  // The Week tab shows a time grid; a drag-collapse from Month shows the compact
-  // week row instead. detailItem drives the tap-an-event full-screen card.
-  const [weekGrid, setWeekGrid] = useState(true);
+  // Week (reached by the tab OR by pulling the month up) is always the time grid.
+  // detailItem drives the tap-an-event full-screen card.
   const [detailItem, setDetailItem] = useState<DayItem | null>(null);
 
   const fetchCalendar = async (): Promise<CalendarData> => {
@@ -437,7 +436,7 @@ export default function CalendarScreen() {
     if (d.getMonth() !== month.getMonth() || d.getFullYear() !== month.getFullYear()) setMonth(startOfMonth(d));
   };
   const switchView = (v: ViewMode) => {
-    if (v === "week") { setWeekGrid(true); setMode("week"); }
+    if (v === "week") setMode("week");
     else if (v === "month") setMode("month");
     else { animate(); setView(v); }
   };
@@ -525,8 +524,7 @@ export default function CalendarScreen() {
           const mode = finalH < (weekH + monthH) / 2 ? "week" : finalH > (monthH + bigH) / 2 ? "big" : "month";
           const target = mode === "week" ? weekH : mode === "big" ? bigH : monthH;
           Animated.timing(dragH, { toValue: target, duration: 130, useNativeDriver: false }).start(() => {
-            if (mode === "week") setWeekGrid(false); // collapse shows the compact row
-            setMode(mode);
+            setMode(mode); // collapsing to "week" lands on the time grid
             setDragging(false);
           });
         },
@@ -585,7 +583,7 @@ export default function CalendarScreen() {
         <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
           <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} big />
         </SwipeArea>
-      ) : view === "week" && weekGrid ? (
+      ) : view === "week" ? (
         <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
           <WeekTimeGrid
             selectedDay={selectedDay}
