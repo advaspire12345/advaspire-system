@@ -16,6 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter, type Href } from "expo-router";
@@ -227,8 +228,13 @@ export default function CalendarScreen() {
   // Week (reached by the tab OR by pulling the month up) is always the time grid.
   // detailItem drives the tap-an-event full-screen card.
   const [detailItem, setDetailItem] = useState<DayItem | null>(null);
-  // The event currently "picked up" for moving (press-and-hold → tap a day).
+  // Hold-and-drag to move an event: movingItem = the picked event, hoverKey = the
+  // day under the finger, dragPos = the floating pill position (window coords).
   const [movingItem, setMovingItem] = useState<DayItem | null>(null);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const dragPos = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const gridGeom = useRef({ x: 0, y: 0 });
+  const gridWrapRef = useRef<View>(null);
   // Gentle fade-in for the week grid so pull-up→week reads as a smooth change.
   const weekFade = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -487,16 +493,11 @@ export default function CalendarScreen() {
     router.push({ pathname: "/event/new", params: { id: localId, ...(parentId ? { parentId } : {}) } });
   };
 
-  // Move-an-event (press an event to pick it up, then tap a day to place it).
-  const onPickUp = (it: DayItem) => {
-    if (it.kind === "local" && it.localId) setMovingItem(it);
-    else setDetailItem(it); // long-press a class/school event → just show its card
-  };
-  const applyMove = (targetKey: string) => {
-    const it = movingItem;
-    setMovingItem(null);
-    if (!it || !it.localId || !userId || !it.dateKey || it.dateKey === targetKey) return;
+  // Commit a move of local event `it` to targetKey (day). Recurring → prompt.
+  const applyMove = useCallback((it: DayItem, targetKey: string) => {
+    if (!it.localId || !userId || !it.dateKey || it.dateKey === targetKey) { setMovingItem(null); return; }
     const origDate = it.dateKey;
+    setMovingItem(null);
     listLocalEvents(userId).then((list) => {
       const ev = list.find((e) => e.id === it.localId);
       if (!ev) return;
@@ -514,11 +515,45 @@ export default function CalendarScreen() {
         updateLocalEvent(userId, { ...ev, startDate: targetKey, endDate: ymd(end) }).then(reloadLocal);
       }
     });
-  };
-  const onCellPress = (d: Date) => {
-    if (movingItem) applyMove(ymd(d));
-    else pickDay(d);
-  };
+  }, [userId, reloadLocal]);
+
+  // Hold-and-drag handlers (stable, so the RNGH gesture identity stays put). They
+  // read live view state via dragCtx.current, which is refreshed each render below.
+  const movingRef = useRef<DayItem | null>(null);
+  const hoverRef = useRef<string | null>(null);
+  const dragCtx = useRef({ rowH: ROW_H, gridView: "month" as ViewMode, month, selectedDay, winW, insetTop: insets.top });
+  const dragStart = useCallback((it: DayItem, absX: number, absY: number) => {
+    gridWrapRef.current?.measureInWindow((x, y) => { gridGeom.current = { x, y }; });
+    movingRef.current = it;
+    hoverRef.current = null;
+    setMovingItem(it);
+    setHoverKey(null);
+    dragPos.setValue({ x: absX, y: absY - dragCtx.current.insetTop });
+  }, [dragPos]);
+  const dragMove = useCallback((absX: number, absY: number) => {
+    const c = dragCtx.current;
+    dragPos.setValue({ x: absX, y: absY - c.insetTop });
+    const cellW = (c.winW - 12) / 7;
+    const col = Math.floor((absX - gridGeom.current.x - 6) / cellW);
+    const row = Math.floor((absY - gridGeom.current.y) / c.rowH);
+    const grid = c.gridView === "week"
+      ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(c.selectedDay), i))]
+      : buildMonthGrid(c.month.getFullYear(), c.month.getMonth());
+    const target = col >= 0 && col < 7 && row >= 0 && row < grid.length ? grid[row][col] : null;
+    const key = target ? ymd(target) : null;
+    hoverRef.current = key;
+    setHoverKey(key);
+  }, [dragPos]);
+  const dragEnd = useCallback(() => {
+    const it = movingRef.current;
+    const target = hoverRef.current;
+    movingRef.current = null;
+    hoverRef.current = null;
+    setHoverKey(null);
+    if (it && target) applyMove(it, target);
+    else setMovingItem(null);
+  }, [applyMove]);
+  const dragProps = useMemo(() => ({ onStart: dragStart, onMove: dragMove, onEnd: dragEnd }), [dragStart, dragMove, dragEnd]);
   const onDeleteLocal = (localId: string) => {
     Alert.alert("Delete event", "Delete this event? This can't be undone.", [
       { text: "Cancel", style: "cancel" },
@@ -559,6 +594,7 @@ export default function CalendarScreen() {
   const rowH = monthZoom === "big" ? expandedRowH : ROW_H;
   const calcHeight = monthZoom === "row" ? weekH : monthZoom === "big" ? bigH : monthH;
   const gridView: ViewMode = monthZoom === "row" ? "week" : "month"; // row = one week
+  dragCtx.current = { rowH, gridView, month, selectedDay, winW, insetTop: insets.top };
 
   // Vertical drag → finger-following height across week / month / big. The
   // responder lives on a STABLE outer View so switching to the animated wrapper
@@ -634,8 +670,7 @@ export default function CalendarScreen() {
       {movingItem ? (
         <View style={styles.moveBanner}>
           <Ionicons name="move" size={16} color="#615DFA" />
-          <Text style={styles.moveBannerText} numberOfLines={1}>Moving “{movingItem.title}” — tap a day to place it</Text>
-          <Pressable onPress={() => setMovingItem(null)} hitSlop={8}><Text style={styles.moveBannerCancel}>Cancel</Text></Pressable>
+          <Text style={styles.moveBannerText} numberOfLines={1}>Moving “{movingItem.title}” — drag onto a day, then release</Text>
         </View>
       ) : null}
 
@@ -645,12 +680,7 @@ export default function CalendarScreen() {
             onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear(), mi, 1)); setView("month"); }} />
         </SwipeArea>
       ) : view === "day" ? (
-        <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(-1)} onRight={() => shift(1)}>
-          <View style={styles.flex}>
-            <DayCard day={selectedDay} onPrev={() => shift(-1)} onNext={() => shift(1)} />
-            <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} onOpenEvent={setDetailItem} big />
-          </View>
-        </SwipeArea>
+        <DayPager selectedDay={selectedDay} width={winW} buildDayItems={buildDayItems} onReschedule={onReschedule} onOpenEvent={setDetailItem} onShift={shift} />
       ) : view === "week" ? (
         <Animated.View style={[styles.flex, { opacity: weekFade }]}>
           <WeekPager
@@ -672,18 +702,18 @@ export default function CalendarScreen() {
               finger-follow height, but the animated wrapper only exists during the
               drag; at rest it's a plain View so day-taps never re-render inside an
               animated view (which is what blanked cells on Android). */}
-          <View {...vDragPan.panHandlers}>
+          <View ref={gridWrapRef} {...vDragPan.panHandlers}>
             {dragging ? (
               <Animated.View style={{ height: dragH, overflow: "hidden" }}>
                 {/* Rows flex-grow (fill) to the dragged height: below monthH they
                     stay ROW_H and clip (collapse); above monthH they grow so cells
                     get taller with the finger — day numbers/pills keep their real
                     size (no scale = no stretch). */}
-                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} onPickUp={onPickUp} />
+                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
               </Animated.View>
             ) : (
               <View style={{ height: calcHeight, overflow: "hidden" }}>
-                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} onPickUp={onPickUp} />
+                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
               </View>
             )}
           </View>
@@ -728,13 +758,26 @@ export default function CalendarScreen() {
           }}
         />
       ) : null}
+
+      {/* Floating pill that follows the finger while dragging an event. */}
+      {movingItem ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.floatPill,
+            { borderLeftColor: movingItem.color, transform: [{ translateX: Animated.subtract(dragPos.x, 54) }, { translateY: Animated.subtract(dragPos.y, 13) }] },
+          ]}
+        >
+          <Text style={styles.floatPillText} numberOfLines={1}>{movingItem.title}</Text>
+        </Animated.View>
+      ) : null}
     </SafeAreaView>
   );
 }
 
 // ── Month / Week grid with pills (static heights — Android-safe) ──
 function MonthOrWeekGrid({
-  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay, fill, movingItem, onPickUp,
+  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay, fill, movingItem, hoverKey, dragProps,
 }: {
   view: ViewMode;
   periodDate: Date;
@@ -745,7 +788,8 @@ function MonthOrWeekGrid({
   onPickDay: (d: Date) => void;
   fill?: boolean; // rows flex-grow to fill parent height (during a resize drag)
   movingItem?: DayItem | null;
-  onPickUp?: (it: DayItem) => void;
+  hoverKey?: string | null;
+  dragProps?: DragProps;
 }) {
   const rows = view === "week"
     ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(periodDate), i))]
@@ -764,30 +808,28 @@ function MonthOrWeekGrid({
             const isToday = key === todayKey;
             const isSelected = key === selKey;
             const dim = view === "month" && d.getMonth() !== periodDate.getMonth();
-            // While moving an event, every day except its origin is a green target.
+            // While moving an event, every day except its origin is a green target;
+            // the day under the finger is the strong drop-target.
             const isTarget = !!movingItem && key !== movingItem.dateKey;
+            const isHover = !!movingItem && key === hoverKey;
             return (
-              <Pressable key={ci} style={[styles.cell, isSelected && styles.cellSelected, isTarget && styles.cellTarget]} onPress={() => onPickDay(d)}>
+              <Pressable key={ci} style={[styles.cell, isSelected && styles.cellSelected, isTarget && styles.cellTarget, isHover && styles.cellHover]} onPress={() => onPickDay(d)}>
                 <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
                   <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
                     {d.getDate()}
                   </Text>
                 </View>
                 <View style={styles.pills}>
-                  {items.slice(0, maxPills).map((it) => {
-                    const picked = movingItem?.id === it.id;
-                    return (
-                      <Pressable
-                        key={it.id}
-                        onPress={() => onPickDay(d)}
-                        onLongPress={() => onPickUp?.(it)}
-                        delayLongPress={280}
-                        style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }, picked && styles.pillPicked]}
-                      >
-                        <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
-                      </Pressable>
-                    );
-                  })}
+                  {items.slice(0, maxPills).map((it) => (
+                    <GridPill
+                      key={it.id}
+                      item={it}
+                      day={d}
+                      picked={movingItem?.id === it.id}
+                      onPickDay={onPickDay}
+                      dragProps={it.kind === "local" && !fill ? dragProps : undefined}
+                    />
+                  ))}
                   {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
                 </View>
               </Pressable>
@@ -797,6 +839,35 @@ function MonthOrWeekGrid({
       ))}
     </View>
   );
+}
+
+// One event pill. Local events (drag enabled) hold-and-drag via RNGH; a quick
+// tap still selects the day. Non-local pills are plain (tap → select day).
+function GridPill({
+  item, day, picked, onPickDay, dragProps,
+}: {
+  item: DayItem;
+  day: Date;
+  picked: boolean;
+  onPickDay: (d: Date) => void;
+  dragProps?: DragProps;
+}) {
+  const content = (
+    <Pressable onPress={() => onPickDay(day)} style={[styles.pill, { backgroundColor: item.color + "22", borderLeftColor: item.color }, picked && styles.pillPicked]}>
+      <Text style={[styles.pillText, { color: item.color }]} numberOfLines={1}>{item.title}</Text>
+    </Pressable>
+  );
+  const gesture = useMemo(() => {
+    if (!dragProps) return null;
+    return Gesture.Pan()
+      .runOnJS(true)
+      .activateAfterLongPress(260)
+      .onStart((e) => dragProps.onStart(item, e.absoluteX, e.absoluteY))
+      .onUpdate((e) => dragProps.onMove(e.absoluteX, e.absoluteY))
+      .onEnd(() => dragProps.onEnd());
+  }, [dragProps, item]);
+  if (!gesture) return content;
+  return <GestureDetector gesture={gesture}>{content}</GestureDetector>;
 }
 
 // ── Year view: 12 mini months ──
@@ -882,8 +953,10 @@ function SwipeArea({
 
 // ── Native horizontal paging pager: real finger-following swipe that redraws
 // correctly on Android (unlike Animated transforms). 3 pages; recenter on commit. ──
+type DragProps = { onStart: (it: DayItem, absX: number, absY: number) => void; onMove: (absX: number, absY: number) => void; onEnd: () => void };
+
 function MonthPager({
-  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift, fill, movingItem, onPickUp,
+  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift, fill, movingItem, hoverKey, dragProps,
 }: {
   view: ViewMode;
   month: Date;
@@ -897,7 +970,8 @@ function MonthPager({
   onShift: (dir: -1 | 1) => void;
   fill?: boolean; // fill parent height (grid rows flex-grow) instead of fixed height
   movingItem?: DayItem | null;
-  onPickUp?: (it: DayItem) => void;
+  hoverKey?: string | null;
+  dragProps?: DragProps;
 }) {
   const ref = useRef<ScrollView>(null);
   const pageKey = view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`;
@@ -936,7 +1010,8 @@ function MonthPager({
             onPickDay={onPickDay}
             fill={fill}
             movingItem={movingItem}
-            onPickUp={onPickUp}
+            hoverKey={hoverKey}
+            dragProps={dragProps}
           />
         </View>
       ))}
@@ -991,7 +1066,52 @@ function DayAgenda({
   );
 }
 
-// Day-view header card: shows the day, swipe/tap arrows to move day to day.
+// Day pager: native horizontal paging (finger-follows), prev/cur/next day.
+function DayPager({
+  selectedDay, width, buildDayItems, onReschedule, onOpenEvent, onShift,
+}: {
+  selectedDay: Date;
+  width: number;
+  buildDayItems: (k: string) => DayItem[];
+  onReschedule: (enrollmentId: string, date: string, studentId: string, courseName: string | null) => void;
+  onOpenEvent: (it: DayItem) => void;
+  onShift: (dir: -1 | 1) => void;
+}) {
+  const ref = useRef<ScrollView>(null);
+  const pageKey = ymd(selectedDay);
+  useLayoutEffect(() => {
+    ref.current?.scrollTo({ x: width, animated: false });
+  }, [pageKey, width]);
+  return (
+    <ScrollView
+      ref={ref}
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      disableIntervalMomentum
+      directionalLockEnabled
+      contentOffset={{ x: width, y: 0 }}
+      onMomentumScrollEnd={(e) => {
+        const p = Math.round(e.nativeEvent.contentOffset.x / width);
+        if (p === 0) onShift(-1);
+        else if (p === 2) onShift(1);
+      }}
+      style={styles.flex}
+    >
+      {[-1, 0, 1].map((o) => {
+        const day = addDays(selectedDay, o);
+        return (
+          <View key={o} style={{ width, alignSelf: "stretch" }}>
+            <DayCard day={day} onPrev={() => onShift(-1)} onNext={() => onShift(1)} />
+            <DayAgenda day={day} items={buildDayItems(ymd(day))} onReschedule={onReschedule} onOpenEvent={onOpenEvent} big />
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+// Day-view header card: shows the day, tap arrows to move day to day.
 function DayCard({ day, onPrev, onNext }: { day: Date; onPrev: () => void; onNext: () => void }) {
   return (
     <View style={styles.dayCard}>
@@ -1333,6 +1453,7 @@ const styles = StyleSheet.create({
   cell: { flex: 1, margin: 1.5, borderRadius: 10, backgroundColor: "#FFFFFF", paddingTop: 4, paddingHorizontal: 3 },
   cellSelected: { borderWidth: 1.5, borderColor: "#615DFA" },
   cellTarget: { backgroundColor: "#DCFCE7", borderWidth: 1, borderColor: "#86EFAC" },
+  cellHover: { backgroundColor: "#86EFAC", borderWidth: 1.5, borderColor: "#16A34A" },
   cellDateWrap: { alignSelf: "flex-start", minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   cellTodayWrap: { backgroundColor: "#615DFA" },
   cellDate: { fontSize: 12, fontWeight: "700", color: "#374151" },
@@ -1346,6 +1467,8 @@ const styles = StyleSheet.create({
   moveBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 8, backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   moveBannerText: { flex: 1, fontSize: 12.5, fontWeight: "700", color: "#4338CA" },
   moveBannerCancel: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
+  floatPill: { position: "absolute", top: 0, left: 0, minWidth: 90, maxWidth: 150, borderLeftWidth: 3, borderRadius: 8, backgroundColor: "#FFFFFF", paddingHorizontal: 8, paddingVertical: 6, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 10, zIndex: 100 },
+  floatPillText: { fontSize: 11, fontWeight: "800", color: "#0F172A" },
   pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
   handleWrap: { alignItems: "center", paddingVertical: 8 },
   handleBar: { width: 44, height: 5, borderRadius: 3, backgroundColor: "#D1D5DB" },
