@@ -33,6 +33,7 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 
 const ROW_H = 72; // one calendar week row (month view)
 const ROW_H_BIG = 122; // expanded row (pull down for more events)
+const DRAG_NUDGE = 24; // lift the drag hit-test to the fingertip (touch lands lower)
 
 const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -521,42 +522,66 @@ export default function CalendarScreen() {
   // read live view state via dragCtx.current, which is refreshed each render below.
   const movingRef = useRef<DayItem | null>(null);
   const hoverRef = useRef<string | null>(null);
-  const dragCtx = useRef({ rowH: ROW_H, gridView: "month" as ViewMode, month, selectedDay, winW, insetTop: insets.top });
-  const dragStart = useCallback((it: DayItem, absX: number, absY: number) => {
-    gridWrapRef.current?.measureInWindow((x, y) => { gridGeom.current = { x, y }; });
-    movingRef.current = it;
-    hoverRef.current = null;
-    setMovingItem(it);
-    setHoverKey(null);
-    dragPos.setValue({ x: absX, y: absY - dragCtx.current.insetTop });
-  }, [dragPos]);
-  const dragMove = useCallback((absX: number, absY: number) => {
+  const edgeRef = useRef(false); // throttle edge-of-screen month paging while dragging
+  const dragCtx = useRef({
+    rowH: ROW_H, gridView: "month" as ViewMode, month, selectedDay, winW, insetTop: insets.top,
+    shift: (_d: -1 | 1) => {}, items: (_k: string) => [] as DayItem[],
+  });
+  // Which day is under the finger (window coords → grid cell).
+  const cellFromXY = useCallback((absX: number, absY: number): Date | null => {
     const c = dragCtx.current;
-    dragPos.setValue({ x: absX, y: absY - c.insetTop });
-    // DRAG_NUDGE lifts the detected cell to the fingertip (touch point sits ~0.5cm
-    // below where the finger visually points).
-    const DRAG_NUDGE = 24;
     const cellW = (c.winW - 12) / 7;
     const col = Math.floor((absX - gridGeom.current.x - 6) / cellW);
     const row = Math.floor((absY - DRAG_NUDGE - gridGeom.current.y) / c.rowH);
     const grid = c.gridView === "week"
       ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(c.selectedDay), i))]
       : buildMonthGrid(c.month.getFullYear(), c.month.getMonth());
-    const target = col >= 0 && col < 7 && row >= 0 && row < grid.length ? grid[row][col] : null;
-    const key = target ? ymd(target) : null;
+    return col >= 0 && col < 7 && row >= 0 && row < grid.length ? grid[row][col] : null;
+  }, []);
+  // The drag gesture lives on the STABLE grid container (not the pill), so it
+  // survives month paging. On start we hit-test which of your events you grabbed.
+  const dragStart = useCallback((absX: number, absY: number) => {
+    const day = cellFromXY(absX, absY);
+    if (!day) return;
+    const ev = dragCtx.current.items(ymd(day)).find((i) => i.kind === "local" && i.localId);
+    if (!ev) return; // nothing draggable under the finger
+    movingRef.current = ev;
+    hoverRef.current = null;
+    setMovingItem(ev);
+    setHoverKey(null);
+    dragPos.setValue({ x: absX, y: absY - dragCtx.current.insetTop });
+  }, [cellFromXY, dragPos]);
+  const dragMove = useCallback((absX: number, absY: number) => {
+    if (!movingRef.current) return; // long-pressed empty space → ignore
+    const c = dragCtx.current;
+    dragPos.setValue({ x: absX, y: absY - c.insetTop });
+    // Hold near the left/right edge → page prev/next month (like dragging an app
+    // icon across home-screen pages). Safe now because the gesture is on the
+    // stable container, not the event that gets unmounted on the month change.
+    if (!edgeRef.current) {
+      const dir: -1 | 1 | 0 = absX < 34 ? -1 : absX > c.winW - 34 ? 1 : 0;
+      if (dir !== 0) { edgeRef.current = true; c.shift(dir); setTimeout(() => { edgeRef.current = false; }, 480); }
+    }
+    const day = cellFromXY(absX, absY);
+    const key = day ? ymd(day) : null;
     hoverRef.current = key;
     setHoverKey(key);
-  }, [dragPos]);
+  }, [cellFromXY, dragPos]);
   const dragEnd = useCallback(() => {
     const it = movingRef.current;
     const target = hoverRef.current;
     hoverRef.current = null;
     setHoverKey(null);
     if (it && target) { movingRef.current = null; applyMove(it, target); }
-    // Released without a day under the finger → keep it "picked up" so you can
-    // change month (swipe/tabs) and TAP the day to place it (reliable cross-month).
+    // Released off any day → keep it picked up (tap a day to place; also cross-month).
   }, [applyMove]);
-  const dragProps = useMemo(() => ({ onStart: dragStart, onMove: dragMove, onEnd: dragEnd }), [dragStart, dragMove, dragEnd]);
+  const eventDragGesture = useMemo(
+    () => Gesture.Pan().runOnJS(true).activateAfterLongPress(260)
+      .onStart((e) => dragStart(e.absoluteX, e.absoluteY))
+      .onUpdate((e) => dragMove(e.absoluteX, e.absoluteY))
+      .onEnd(() => dragEnd()),
+    [dragStart, dragMove, dragEnd],
+  );
   // Tap a day while an event is picked up → place it there (also covers cross-month).
   const onCellPress = (d: Date) => {
     if (movingItem) applyMove(movingItem, ymd(d));
@@ -602,7 +627,7 @@ export default function CalendarScreen() {
   const rowH = monthZoom === "big" ? expandedRowH : ROW_H;
   const calcHeight = monthZoom === "row" ? weekH : monthZoom === "big" ? bigH : monthH;
   const gridView: ViewMode = monthZoom === "row" ? "week" : "month"; // row = one week
-  dragCtx.current = { rowH, gridView, month, selectedDay, winW, insetTop: insets.top };
+  dragCtx.current = { rowH, gridView, month, selectedDay, winW, insetTop: insets.top, shift: monthShift, items: buildDayItems };
 
   // Vertical drag → finger-following height across week / month / big. The
   // responder lives on a STABLE outer View so switching to the animated wrapper
@@ -631,7 +656,6 @@ export default function CalendarScreen() {
         },
         onPanResponderTerminate: () => setDragging(false),
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [calcHeight, weekH, monthH, bigH, dragH],
   );
 
@@ -704,21 +728,23 @@ export default function CalendarScreen() {
               finger-follow height, but the animated wrapper only exists during the
               drag; at rest it's a plain View so day-taps never re-render inside an
               animated view (which is what blanked cells on Android). */}
-          <View ref={gridWrapRef} {...vDragPan.panHandlers}>
-            {dragging ? (
-              <Animated.View style={{ height: dragH, overflow: "hidden" }}>
-                {/* Rows flex-grow (fill) to the dragged height: below monthH they
-                    stay ROW_H and clip (collapse); above monthH they grow so cells
-                    get taller with the finger — day numbers/pills keep their real
-                    size (no scale = no stretch). */}
-                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
-              </Animated.View>
-            ) : (
-              <View style={{ height: calcHeight, overflow: "hidden" }}>
-                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} dragProps={dragProps} />
-              </View>
-            )}
-          </View>
+          <GestureDetector gesture={eventDragGesture}>
+            <View ref={gridWrapRef} onLayout={() => gridWrapRef.current?.measureInWindow((x, y) => { gridGeom.current = { x, y }; })} {...vDragPan.panHandlers}>
+              {dragging ? (
+                <Animated.View style={{ height: dragH, overflow: "hidden" }}>
+                  {/* Rows flex-grow (fill) to the dragged height: below monthH they
+                      stay ROW_H and clip (collapse); above monthH they grow so cells
+                      get taller with the finger — day numbers/pills keep their real
+                      size (no scale = no stretch). */}
+                  <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} />
+                </Animated.View>
+              ) : (
+                <View style={{ height: calcHeight, overflow: "hidden" }}>
+                  <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} hoverKey={hoverKey} />
+                </View>
+              )}
+            </View>
+          </GestureDetector>
           {/* visual grabber — tap to toggle, or drag the calendar up/down */}
           <View style={styles.handleWrap}>
             <Pressable onPress={toggleExpand} hitSlop={14}>
@@ -789,7 +815,7 @@ export default function CalendarScreen() {
 
 // ── Month / Week grid with pills (static heights — Android-safe) ──
 function MonthOrWeekGrid({
-  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay, fill, movingItem, hoverKey, dragProps,
+  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay, fill, movingItem, hoverKey,
 }: {
   view: ViewMode;
   periodDate: Date;
@@ -801,7 +827,6 @@ function MonthOrWeekGrid({
   fill?: boolean; // rows flex-grow to fill parent height (during a resize drag)
   movingItem?: DayItem | null;
   hoverKey?: string | null;
-  dragProps?: DragProps;
 }) {
   const rows = view === "week"
     ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(periodDate), i))]
@@ -839,7 +864,6 @@ function MonthOrWeekGrid({
                       day={d}
                       picked={movingItem?.id === it.id}
                       onPickDay={onPickDay}
-                      dragProps={it.kind === "local" && !fill ? dragProps : undefined}
                     />
                   ))}
                   {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
@@ -853,33 +877,21 @@ function MonthOrWeekGrid({
   );
 }
 
-// One event pill. Local events (drag enabled) hold-and-drag via RNGH; a quick
-// tap still selects the day. Non-local pills are plain (tap → select day).
+// One event pill. Tap selects/places the day; the hold-and-drag to move is a
+// single gesture on the whole grid container (survives month paging).
 function GridPill({
-  item, day, picked, onPickDay, dragProps,
+  item, day, picked, onPickDay,
 }: {
   item: DayItem;
   day: Date;
   picked: boolean;
   onPickDay: (d: Date) => void;
-  dragProps?: DragProps;
 }) {
-  const content = (
+  return (
     <Pressable onPress={() => onPickDay(day)} style={[styles.pill, { backgroundColor: item.color + "22", borderLeftColor: item.color }, picked && styles.pillPicked]}>
       <Text style={[styles.pillText, { color: item.color }]} numberOfLines={1}>{item.title}</Text>
     </Pressable>
   );
-  const gesture = useMemo(() => {
-    if (!dragProps) return null;
-    return Gesture.Pan()
-      .runOnJS(true)
-      .activateAfterLongPress(260)
-      .onStart((e) => dragProps.onStart(item, e.absoluteX, e.absoluteY))
-      .onUpdate((e) => dragProps.onMove(e.absoluteX, e.absoluteY))
-      .onEnd(() => dragProps.onEnd());
-  }, [dragProps, item]);
-  if (!gesture) return content;
-  return <GestureDetector gesture={gesture}>{content}</GestureDetector>;
 }
 
 // ── Year view: 12 mini months ──
@@ -965,10 +977,8 @@ function SwipeArea({
 
 // ── Native horizontal paging pager: real finger-following swipe that redraws
 // correctly on Android (unlike Animated transforms). 3 pages; recenter on commit. ──
-type DragProps = { onStart: (it: DayItem, absX: number, absY: number) => void; onMove: (absX: number, absY: number) => void; onEnd: () => void };
-
 function MonthPager({
-  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift, fill, movingItem, hoverKey, dragProps,
+  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift, fill, movingItem, hoverKey,
 }: {
   view: ViewMode;
   month: Date;
@@ -983,7 +993,6 @@ function MonthPager({
   fill?: boolean; // fill parent height (grid rows flex-grow) instead of fixed height
   movingItem?: DayItem | null;
   hoverKey?: string | null;
-  dragProps?: DragProps;
 }) {
   const ref = useRef<ScrollView>(null);
   const pageKey = view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`;
@@ -1023,7 +1032,6 @@ function MonthPager({
             fill={fill}
             movingItem={movingItem}
             hoverKey={hoverKey}
-            dragProps={dragProps}
           />
         </View>
       ))}
