@@ -793,9 +793,10 @@ export default function CalendarScreen() {
               )}
             </View>
           </GestureDetector>
-          {/* visual grabber — tap to toggle, or drag the calendar up/down */}
-          <View style={styles.handleWrap}>
-            <Pressable onPress={toggleExpand} hitSlop={14}>
+          {/* grabber — tap to toggle, OR press-drag up/down to resize (same as
+              dragging the calendar; shares the vertical-resize pan responder). */}
+          <View style={styles.handleWrap} {...vDragPan.panHandlers}>
+            <Pressable onPress={toggleExpand} hitSlop={20}>
               <View style={styles.handleBar} />
             </Pressable>
           </View>
@@ -1618,8 +1619,8 @@ const styles = StyleSheet.create({
   menuItemTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
   menuItemSub: { fontSize: 11, color: "#6B7280", marginTop: 1 },
   pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
-  handleWrap: { alignItems: "center", paddingVertical: 8 },
-  handleBar: { width: 44, height: 5, borderRadius: 3, backgroundColor: "#D1D5DB" },
+  handleWrap: { alignItems: "center", paddingVertical: 14 },
+  handleBar: { width: 56, height: 6, borderRadius: 3, backgroundColor: "#D1D5DB" },
   agenda: { flex: 1 },
   agendaDate: { fontSize: 14, fontWeight: "800", color: "#0F172A", paddingHorizontal: 16, marginBottom: 8 },
   agendaList: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
