@@ -579,9 +579,12 @@ export default function CalendarScreen() {
     const target = hoverRef.current;
     hoverRef.current = null;
     setHoverKey(null);
+    // If nothing was picked up, this release just OPENED the cascade menu — leave
+    // it on screen so the parent can then grab an event from it.
+    if (!it) return;
     setMenuState(null);
     setMenuHidden(false);
-    if (it && target) { movingRef.current = null; applyMove(it, target); }
+    if (target) { movingRef.current = null; applyMove(it, target); }
     // Released off any day → keep it picked up (tap a day to place; also cross-month).
   }, [applyMove]);
   // Grabbing an item out of the cascade menu → start dragging it (keep the menu
