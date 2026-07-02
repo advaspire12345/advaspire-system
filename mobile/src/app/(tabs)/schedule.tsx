@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -223,6 +223,14 @@ export default function CalendarScreen() {
   // Week (reached by the tab OR by pulling the month up) is always the time grid.
   // detailItem drives the tap-an-event full-screen card.
   const [detailItem, setDetailItem] = useState<DayItem | null>(null);
+  // Gentle fade-in for the week grid so pull-up→week reads as a smooth change.
+  const weekFade = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (view === "week") {
+      weekFade.setValue(0);
+      Animated.timing(weekFade, { toValue: 1, duration: 240, useNativeDriver: true }).start();
+    }
+  }, [view, weekFade]);
 
   const fetchCalendar = async (): Promise<CalendarData> => {
     const empty: CalendarData = { parentId: null, enrollments: [], attendance: [], events: [] };
@@ -522,9 +530,16 @@ export default function CalendarScreen() {
         onPanResponderRelease: (_e, g) => {
           const finalH = Math.max(weekH, Math.min(bigH, dragBase.current + g.dy));
           const mode = finalH < (weekH + monthH) / 2 ? "week" : finalH > (monthH + bigH) / 2 ? "big" : "month";
-          const target = mode === "week" ? weekH : mode === "big" ? bigH : monthH;
+          if (mode === "week") {
+            // Pull-up to week: don't collapse to a thin strip first — switch to the
+            // time grid immediately; it fades in (weekFade) for a smooth change.
+            setMode("week");
+            setDragging(false);
+            return;
+          }
+          const target = mode === "big" ? bigH : monthH;
           Animated.timing(dragH, { toValue: target, duration: 130, useNativeDriver: false }).start(() => {
-            setMode(mode); // collapsing to "week" lands on the time grid
+            setMode(mode);
             setDragging(false);
           });
         },
@@ -584,16 +599,17 @@ export default function CalendarScreen() {
           <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} big />
         </SwipeArea>
       ) : view === "week" ? (
-        <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
-          <WeekTimeGrid
+        <Animated.View style={[styles.flex, { opacity: weekFade }]}>
+          <WeekPager
             selectedDay={selectedDay}
             width={winW}
             todayKey={todayKey}
             buildDayItems={buildDayItems}
             onAddSlot={onAddSlot}
             onOpenEvent={setDetailItem}
+            onShift={shift}
           />
-        </SwipeArea>
+        </Animated.View>
       ) : (
         <View style={styles.flex}>
           <View style={styles.weekdays}>
@@ -904,6 +920,49 @@ function DayAgenda({
   );
 }
 
+// ── Week pager: native horizontal paging (finger-follows), 3 weeks, recenters ──
+function WeekPager({
+  selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent, onShift,
+}: {
+  selectedDay: Date;
+  width: number;
+  todayKey: string;
+  buildDayItems: (k: string) => DayItem[];
+  onAddSlot: (dateKey: string, hour: number) => void;
+  onOpenEvent: (it: DayItem) => void;
+  onShift: (dir: -1 | 1) => void;
+}) {
+  const ref = useRef<ScrollView>(null);
+  const pageKey = ymd(startOfWeek(selectedDay));
+  useLayoutEffect(() => {
+    ref.current?.scrollTo({ x: width, animated: false });
+  }, [pageKey, width]);
+  const weekFor = (o: number) => addDays(selectedDay, o * 7);
+  return (
+    <ScrollView
+      ref={ref}
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      disableIntervalMomentum
+      directionalLockEnabled
+      contentOffset={{ x: width, y: 0 }}
+      onMomentumScrollEnd={(e) => {
+        const p = Math.round(e.nativeEvent.contentOffset.x / width);
+        if (p === 0) onShift(-1);
+        else if (p === 2) onShift(1);
+      }}
+      style={styles.flex}
+    >
+      {[-1, 0, 1].map((o) => (
+        <View key={o} style={{ width, alignSelf: "stretch" }}>
+          <WeekTimeGrid selectedDay={weekFor(o)} width={width} todayKey={todayKey} buildDayItems={buildDayItems} onAddSlot={onAddSlot} onOpenEvent={onOpenEvent} />
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
 // ── Week time-grid (tap a slot → +, tap + → add; tap an event → detail) ──
 function WeekTimeGrid({
   selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent,
@@ -951,7 +1010,7 @@ function WeekTimeGrid({
   const hasAllDay = allDay.some((a) => a.length > 0);
 
   return (
-    <View style={styles.flex}>
+    <View style={[styles.flex, styles.wgRoot]}>
       <View style={[styles.wgHeader, { paddingLeft: GUTTER }]}>
         {days.map((d) => {
           const k = ymd(d);
@@ -967,8 +1026,13 @@ function WeekTimeGrid({
         })}
       </View>
 
+      {/* All-day / holiday row — only shown when a day this week has an all-day
+          item (holiday/birthday). No all-day items → not rendered at all. */}
       {hasAllDay ? (
-        <View style={[styles.wgAllDay, { paddingLeft: GUTTER }]}>
+        <View style={styles.wgAllDay}>
+          <View style={{ width: GUTTER, justifyContent: "center" }}>
+            <Text style={styles.wgAllDayLabel}>all-day</Text>
+          </View>
           {allDay.map((items, di) => (
             <View key={dayKeys[di]} style={{ width: colW, gap: 2, paddingHorizontal: 1 }}>
               {items.map((it) => (
@@ -1198,6 +1262,8 @@ const styles = StyleSheet.create({
   demoChip: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
   demoChipText: { flex: 1, fontSize: 13, fontWeight: "700", color: "#615DFA" },
   // week time-grid
+  wgRoot: { backgroundColor: "#FFFFFF" },
+  wgAllDayLabel: { fontSize: 8, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", textAlign: "right", paddingRight: 6 },
   wgHeader: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: "#EEF0F6" },
   wgHeaderWd: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase" },
   wgHeaderNumWrap: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", marginTop: 2 },
