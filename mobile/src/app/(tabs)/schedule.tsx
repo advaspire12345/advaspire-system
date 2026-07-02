@@ -24,7 +24,7 @@ import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
-import { deleteLocalEvent, listLocalEvents, localEventOccursOn, updateLocalEvent, type LocalEvent } from "@/lib/localEvents";
+import { addLocalEvent, deleteLocalEvent, listLocalEvents, localEventOccursOn, updateLocalEvent, type LocalEvent } from "@/lib/localEvents";
 import { supabase } from "@/lib/supabase";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -510,7 +510,30 @@ export default function CalendarScreen() {
       if (ev.repeat !== "never") {
         Alert.alert("Repeating event", `Move "${ev.title}" — change the whole series, or just this one?`, [
           { text: "Cancel", style: "cancel" },
-          { text: "Just this one", onPress: () => updateLocalEvent(userId, { ...ev, overrides: { ...(ev.overrides ?? {}), [origDate]: targetKey } }).then(reloadLocal) },
+          {
+            text: "Just this one",
+            onPress: async () => {
+              // Detach: the series skips origDate; a new single event lands on targetKey.
+              await updateLocalEvent(userId, { ...ev, excludes: [...(ev.excludes ?? []), origDate] });
+              await addLocalEvent(userId, {
+                id: `${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+                type: ev.type,
+                title: ev.title,
+                startDate: targetKey,
+                startTime: ev.startTime,
+                endDate: targetKey,
+                endTime: ev.endTime,
+                repeat: "never",
+                custom: null,
+                endRepeat: { mode: "never" },
+                reminder: ev.reminder,
+                alarm: false,
+                color: ev.color,
+                createdAt: Date.now(),
+              });
+              reloadLocal();
+            },
+          },
           { text: "Whole series", onPress: () => updateLocalEvent(userId, { ...ev, startDate: targetKey, endDate: targetKey }).then(reloadLocal) },
         ]);
       } else {

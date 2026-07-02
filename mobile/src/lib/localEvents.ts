@@ -60,8 +60,12 @@ export type LocalEvent = {
   alarm: boolean; // birthday alarm toggle
   color: string;
   createdAt: number;
-  // "Move just this occurrence" of a recurring event: original occurrence date
-  // (yyyy-mm-dd) → new date. The origin is suppressed and the new date shown.
+  // "Move just this occurrence": the series SKIPS these dates (the moved
+  // occurrence becomes a separate single event on the target date). Standard
+  // detached-instance model — each move is self-contained.
+  excludes?: string[];
+  // Legacy per-occurrence moves (origDate → newDate). Still read for events made
+  // before the detached model; new moves use `excludes` + a new single event.
   overrides?: Record<string, string>;
 };
 
@@ -237,9 +241,9 @@ function withinEndRepeat(ev: LocalEvent, dateKey: string): boolean {
 }
 
 export function localEventOccursOn(ev: LocalEvent, dateKey: string): boolean {
-  // Per-occurrence moves (recurring only). Check "moved TO this date" FIRST — a
-  // day that something was dropped onto must show, even if that same day had
-  // previously been vacated by another move (otherwise the drop disappears).
+  // Detached "just this one" moves: the series simply skips these dates.
+  if (ev.repeat !== "never" && ev.excludes && ev.excludes.includes(dateKey)) return false;
+  // Legacy per-occurrence overrides (older events). "moved TO" wins over "moved away".
   const ov = ev.overrides;
   if (ev.repeat !== "never" && ov) {
     for (const k in ov) if (ov[k] === dateKey) return true; // moved to here → show
