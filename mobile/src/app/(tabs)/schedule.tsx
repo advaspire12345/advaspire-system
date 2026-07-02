@@ -33,7 +33,8 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
 
 const ROW_H = 72; // one calendar week row (month view)
 const ROW_H_BIG = 122; // expanded row (pull down for more events)
-const DRAG_NUDGE = 24; // lift the drag hit-test to the fingertip (touch lands lower)
+const DRAG_NUDGE = 24; // drop-aim: lift the hit-test to the fingertip (touch lands lower)
+const GRAB_NUDGE = 46; // pick-up: bigger lift so pressing a pill low in a cell picks THAT cell, not the one below
 
 const WEEKDAYS_FULL = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -556,11 +557,11 @@ export default function CalendarScreen() {
     shift: (_d: -1 | 1) => {}, items: (_k: string) => [] as DayItem[],
   });
   // Which day is under the finger (window coords → grid cell).
-  const cellFromXY = useCallback((absX: number, absY: number): Date | null => {
+  const cellFromXY = useCallback((absX: number, absY: number, nudge = DRAG_NUDGE): Date | null => {
     const c = dragCtx.current;
     const cellW = (c.winW - 12) / 7;
     const col = Math.floor((absX - gridGeom.current.x - 6) / cellW);
-    const row = Math.floor((absY - DRAG_NUDGE - gridGeom.current.y) / c.rowH);
+    const row = Math.floor((absY - nudge - gridGeom.current.y) / c.rowH);
     const grid = c.gridView === "week"
       ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(c.selectedDay), i))]
       : buildMonthGrid(c.month.getFullYear(), c.month.getMonth());
@@ -569,7 +570,7 @@ export default function CalendarScreen() {
   // The drag gesture lives on the STABLE grid container (not the pill), so it
   // survives month paging. On start we hit-test which of your events you grabbed.
   const dragStart = useCallback((absX: number, absY: number) => {
-    const day = cellFromXY(absX, absY);
+    const day = cellFromXY(absX, absY, GRAB_NUDGE); // grab: pick the pressed cell
     if (!day) return;
     const locals = dragCtx.current.items(ymd(day)).filter((i) => i.kind === "local" && i.localId);
     if (locals.length === 0) return; // nothing draggable under the finger
