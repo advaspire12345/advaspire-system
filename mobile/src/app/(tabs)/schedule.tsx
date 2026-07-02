@@ -228,8 +228,10 @@ export default function CalendarScreen() {
     }, [userId]),
   );
   // Week (reached by the tab OR by pulling the month up) is always the time grid.
-  // detailItem drives the tap-an-event full-screen card.
-  const [detailItem, setDetailItem] = useState<DayItem | null>(null);
+  // The tap-an-event card is a pager over a day+time-sorted list: detailList is
+  // the sorted items, detailIndex the current one (swipe left/right = prev/next).
+  const [detailList, setDetailList] = useState<DayItem[] | null>(null);
+  const [detailIndex, setDetailIndex] = useState(0);
   // Hold-and-drag to move an event: movingItem = the picked event, hoverKey = the
   // day under the finger, dragPos = the floating pill position (window coords).
   const [movingItem, setMovingItem] = useState<DayItem | null>(null);
@@ -495,8 +497,24 @@ export default function CalendarScreen() {
       },
     });
   };
+  const closeDetail = () => setDetailList(null);
+  // Open the detail card on `it`, building a ±45-day, day+time-sorted list so the
+  // card can swipe to the next/previous event.
+  const openDetail = (it: DayItem) => {
+    const center = it.dateKey ?? todayKey;
+    const base = new Date(center + "T00:00:00");
+    const list: DayItem[] = [];
+    for (let i = -45; i <= 45; i++) {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      list.push(...buildDayItems(ymd(d)));
+    }
+    const idx = list.findIndex((x) => x.id === it.id && x.dateKey === it.dateKey);
+    setDetailIndex(idx >= 0 ? idx : 0);
+    setDetailList(list.length ? list : [it]);
+  };
   const onEditLocal = (localId: string) => {
-    setDetailItem(null);
+    closeDetail();
     router.push({ pathname: "/event/new", params: { id: localId, ...(parentId ? { parentId } : {}) } });
   };
 
@@ -644,7 +662,7 @@ export default function CalendarScreen() {
         onPress: async () => {
           if (userId) await deleteLocalEvent(userId, localId);
           reloadLocal();
-          setDetailItem(null);
+          closeDetail();
         },
       },
     ]);
@@ -754,7 +772,7 @@ export default function CalendarScreen() {
             onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear(), mi, 1)); setView("month"); }} />
         </SwipeArea>
       ) : view === "day" ? (
-        <DayPager selectedDay={selectedDay} width={winW} buildDayItems={buildDayItems} onReschedule={onReschedule} onOpenEvent={setDetailItem} onShift={shift} />
+        <DayPager selectedDay={selectedDay} width={winW} buildDayItems={buildDayItems} onReschedule={onReschedule} onOpenEvent={openDetail} onShift={shift} />
       ) : view === "week" ? (
         <Animated.View style={[styles.flex, { opacity: weekFade }]}>
           <WeekPager
@@ -763,7 +781,7 @@ export default function CalendarScreen() {
             todayKey={todayKey}
             buildDayItems={buildDayItems}
             onAddSlot={onAddSlot}
-            onOpenEvent={setDetailItem}
+            onOpenEvent={openDetail}
             onShift={shift}
           />
         </Animated.View>
@@ -800,7 +818,7 @@ export default function CalendarScreen() {
               <View style={styles.handleBar} />
             </Pressable>
           </View>
-          <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} onOpenEvent={setDetailItem} />
+          <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} onOpenEvent={openDetail} />
         </View>
       )}
 
@@ -811,10 +829,13 @@ export default function CalendarScreen() {
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </Pressable>
 
-      {detailItem ? (
-        <EventDetailModal
-          item={detailItem}
-          onClose={() => setDetailItem(null)}
+      {detailList ? (
+        <DetailPager
+          list={detailList}
+          index={detailIndex}
+          width={winW}
+          onIndex={setDetailIndex}
+          onClose={closeDetail}
           onEdit={onEditLocal}
           onDelete={onDeleteLocal}
         />
@@ -1254,6 +1275,36 @@ function WeekPager({
   );
 }
 
+// Lay timed events into side-by-side lanes so overlapping ones don't stack.
+// Returns each item with its lane index and the column count of its overlap cluster.
+function layoutLanes(items: DayItem[]): { it: DayItem; lane: number; cols: number }[] {
+  const endOf = (it: DayItem) => (it.endMin != null && it.endMin > (it.time as number) ? it.endMin : (it.time as number) + 60);
+  const sorted = [...items].sort((a, b) => (a.time as number) - (b.time as number) || endOf(a) - endOf(b));
+  const out: { it: DayItem; lane: number; cols: number }[] = [];
+  let cluster: { it: DayItem; lane: number }[] = [];
+  let clusterEnd = -1;
+  let laneEnds: number[] = [];
+  const flush = () => {
+    const cols = cluster.reduce((m, x) => Math.max(m, x.lane + 1), 1);
+    for (const x of cluster) out.push({ it: x.it, lane: x.lane, cols });
+    cluster = [];
+    laneEnds = [];
+    clusterEnd = -1;
+  };
+  for (const it of sorted) {
+    const s = it.time as number;
+    const e = endOf(it);
+    if (cluster.length && s >= clusterEnd) flush();
+    let lane = laneEnds.findIndex((le) => le <= s);
+    if (lane === -1) lane = laneEnds.length;
+    laneEnds[lane] = e;
+    cluster.push({ it, lane });
+    clusterEnd = Math.max(clusterEnd, e);
+  }
+  flush();
+  return out;
+}
+
 // ── Week time-grid (tap a slot → +, tap + → add; tap an event → detail) ──
 function WeekTimeGrid({
   selectedDay, width, todayKey, buildDayItems, onAddSlot, onOpenEvent,
@@ -1362,19 +1413,23 @@ function WeekTimeGrid({
                     </Pressable>
                   );
                 })}
-                {timed.map((it) => {
+                {layoutLanes(timed).map(({ it, lane, cols }) => {
                   const start = it.time as number;
                   const top = (start / 60 - minH) * HOUR_H;
                   const end = it.endMin != null && it.endMin > start ? it.endMin : start + 60;
-                  const height = Math.max(22, ((end - start) / 60) * HOUR_H - 2);
+                  const height = Math.max(20, ((end - start) / 60) * HOUR_H - 2);
+                  // Overlapping events split the column into even vertical strips.
+                  const gap = 2;
+                  const w = (colW - gap * (cols + 1)) / cols;
+                  const left = gap + lane * (w + gap);
                   return (
                     <Pressable
                       key={it.id}
-                      style={[styles.wgEvent, { top, height, backgroundColor: it.color + "22", borderLeftColor: it.color }]}
+                      style={[styles.wgEvent, { top, height, left, width: w, backgroundColor: it.color + "22", borderLeftColor: it.color }]}
                       onPress={() => onOpenEvent(it)}
                     >
-                      <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
-                      {height > 30 ? <Text style={styles.wgEventTime} numberOfLines={1}>{it.timeLabel}</Text> : null}
+                      <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={cols > 2 ? 1 : 2}>{it.title}</Text>
+                      {height > 30 && cols < 3 ? <Text style={styles.wgEventTime} numberOfLines={1}>{it.timeLabel}</Text> : null}
                     </Pressable>
                   );
                 })}
@@ -1388,9 +1443,7 @@ function WeekTimeGrid({
 }
 
 // ── Full-screen event detail card (Edit / Delete for parent-created events) ──
-function EventDetailModal({
-  item, onClose, onEdit, onDelete,
-}: {
+function DetailCard({ item, onClose, onEdit, onDelete }: {
   item: DayItem;
   onClose: () => void;
   onEdit: (localId: string) => void;
@@ -1402,52 +1455,99 @@ function EventDetailModal({
     ? new Date(item.dateKey + "T00:00:00").toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
     : "";
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.detailRoot}>
-        <View style={[styles.detailHeader, { backgroundColor: item.color }]}>
-          <Pressable onPress={onClose} hitSlop={10} style={styles.detailCloseBtn}><Ionicons name="close" size={22} color="#FFFFFF" /></Pressable>
-          <Text style={styles.detailKind}>{item.subtitle}</Text>
-          <Text style={styles.detailTitle}>{item.title}</Text>
-        </View>
-        <View style={styles.detailBody}>
-          <View style={styles.detailRow}>
-            <Ionicons name="calendar-outline" size={18} color="#615DFA" />
-            <Text style={styles.detailRowLabel}>Date</Text>
-            <Text style={styles.detailRowValue}>{dateLabel}</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Ionicons name="time-outline" size={18} color="#615DFA" />
-            <Text style={styles.detailRowLabel}>Time</Text>
-            <Text style={styles.detailRowValue}>{item.time == null ? "All day" : item.timeLabel ?? ""}</Text>
-          </View>
-          {!editable ? (
-            <View style={styles.detailNote}>
-              <Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" />
-              <Text style={styles.detailNoteText}>
-                {item.kind === "class" ? "This is a scheduled class — use the Move option to reschedule it." : "Added by your school — view only."}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-        {editable ? (
-          <View style={styles.detailActions}>
-            <Pressable style={[styles.detailBtn, styles.detailEdit]} onPress={() => localId && onEdit(localId)}>
-              <Ionicons name="create-outline" size={18} color="#615DFA" />
-              <Text style={styles.detailEditText}>Edit</Text>
-            </Pressable>
-            <Pressable style={[styles.detailBtn, styles.detailDelete]} onPress={() => localId && onDelete(localId)}>
-              <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.detailDeleteText}>Delete</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={styles.detailActions}>
-            <Pressable style={[styles.detailBtn, styles.detailEdit, styles.flex]} onPress={onClose}>
-              <Text style={styles.detailEditText}>Close</Text>
-            </Pressable>
-          </View>
-        )}
+    <View style={styles.detailRoot}>
+      <View style={[styles.detailHeader, { backgroundColor: item.color }]}>
+        <Pressable onPress={onClose} hitSlop={10} style={styles.detailCloseBtn}><Ionicons name="close" size={22} color="#FFFFFF" /></Pressable>
+        <Text style={styles.detailKind}>{item.subtitle}</Text>
+        <Text style={styles.detailTitle}>{item.title}</Text>
       </View>
+      <View style={styles.detailBody}>
+        <View style={styles.detailRow}>
+          <Ionicons name="calendar-outline" size={18} color="#615DFA" />
+          <Text style={styles.detailRowLabel}>Date</Text>
+          <Text style={styles.detailRowValue}>{dateLabel}</Text>
+        </View>
+        <View style={styles.detailRow}>
+          <Ionicons name="time-outline" size={18} color="#615DFA" />
+          <Text style={styles.detailRowLabel}>Time</Text>
+          <Text style={styles.detailRowValue}>{item.time == null ? "All day" : item.timeLabel ?? ""}</Text>
+        </View>
+        {!editable ? (
+          <View style={styles.detailNote}>
+            <Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" />
+            <Text style={styles.detailNoteText}>
+              {item.kind === "class" ? "This is a scheduled class — use the Move option to reschedule it." : "Added by your school — view only."}
+            </Text>
+          </View>
+        ) : null}
+        <View style={styles.detailSwipe}>
+          <Ionicons name="chevron-back" size={14} color="#9CA3AF" />
+          <Text style={styles.detailSwipeText}>swipe for other events</Text>
+          <Ionicons name="chevron-forward" size={14} color="#9CA3AF" />
+        </View>
+      </View>
+      {editable ? (
+        <View style={styles.detailActions}>
+          <Pressable style={[styles.detailBtn, styles.detailEdit]} onPress={() => localId && onEdit(localId)}>
+            <Ionicons name="create-outline" size={18} color="#615DFA" />
+            <Text style={styles.detailEditText}>Edit</Text>
+          </Pressable>
+          <Pressable style={[styles.detailBtn, styles.detailDelete]} onPress={() => localId && onDelete(localId)}>
+            <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.detailDeleteText}>Delete</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.detailActions}>
+          <Pressable style={[styles.detailBtn, styles.detailEdit, styles.flex]} onPress={onClose}>
+            <Text style={styles.detailEditText}>Close</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// Swipeable detail: a native paging ScrollView over the sorted list (finger-
+// follows), stepping to the prev/next event on commit.
+function DetailPager({ list, index, width, onIndex, onClose, onEdit, onDelete }: {
+  list: DayItem[];
+  index: number;
+  width: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+  onEdit: (localId: string) => void;
+  onDelete: (localId: string) => void;
+}) {
+  const ref = useRef<ScrollView>(null);
+  useLayoutEffect(() => {
+    ref.current?.scrollTo({ x: width, animated: false });
+  }, [index, width]);
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <ScrollView
+        ref={ref}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        disableIntervalMomentum
+        directionalLockEnabled
+        contentOffset={{ x: width, y: 0 }}
+        onMomentumScrollEnd={(e) => {
+          const p = Math.round(e.nativeEvent.contentOffset.x / width);
+          if (p === 1) return;
+          const ni = p === 0 ? index - 1 : index + 1;
+          if (ni < 0 || ni >= list.length) { ref.current?.scrollTo({ x: width, animated: true }); return; }
+          onIndex(ni);
+        }}
+        style={styles.flex}
+      >
+        {[index - 1, index, index + 1].map((pi, o) => (
+          <View key={o} style={{ width, alignSelf: "stretch" }}>
+            {list[pi] ? <DetailCard item={list[pi]} onClose={onClose} onEdit={onEdit} onDelete={onDelete} /> : <View style={styles.flex} />}
+          </View>
+        ))}
+      </ScrollView>
     </Modal>
   );
 }
@@ -1647,7 +1747,7 @@ const styles = StyleSheet.create({
   wgHourLabel: { fontSize: 9, fontWeight: "700", color: "#9CA3AF", textAlign: "right", paddingRight: 6, marginTop: -6 },
   wgCell: { borderBottomWidth: 1, borderBottomColor: "#F5F5F8", alignItems: "center", justifyContent: "center" },
   wgPlus: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", shadowColor: "#615DFA", shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
-  wgEvent: { position: "absolute", left: 2, right: 2, borderLeftWidth: 3, borderRadius: 6, paddingHorizontal: 4, paddingTop: 2, overflow: "hidden" },
+  wgEvent: { position: "absolute", borderLeftWidth: 3, borderRadius: 6, paddingHorizontal: 3, paddingTop: 2, overflow: "hidden" },
   wgEventTitle: { fontSize: 9, fontWeight: "800" },
   wgEventTime: { fontSize: 8, color: "#6B7280", marginTop: 1 },
   // event detail modal
@@ -1662,6 +1762,8 @@ const styles = StyleSheet.create({
   detailRowValue: { flex: 1, fontSize: 14, color: "#111827", fontWeight: "700", textAlign: "right" },
   detailNote: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4, paddingVertical: 8 },
   detailNoteText: { flex: 1, fontSize: 12, color: "#9CA3AF", fontWeight: "600", lineHeight: 17 },
+  detailSwipe: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 12 },
+  detailSwipeText: { fontSize: 11, color: "#9CA3AF", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
   detailActions: { flexDirection: "row", gap: 12, padding: 20, marginTop: "auto" },
   detailBtn: { height: 52, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   detailEdit: { flex: 1, backgroundColor: "#EEF2FF" },
