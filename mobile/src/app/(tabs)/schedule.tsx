@@ -602,8 +602,11 @@ export default function CalendarScreen() {
             onPickMonth={(mi) => { animate(); setMonth(new Date(month.getFullYear(), mi, 1)); setView("month"); }} />
         </SwipeArea>
       ) : view === "day" ? (
-        <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
-          <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} big />
+        <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(-1)} onRight={() => shift(1)}>
+          <View style={styles.flex}>
+            <DayCard day={selectedDay} onPrev={() => shift(-1)} onNext={() => shift(1)} />
+            <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} onOpenEvent={setDetailItem} big />
+          </View>
         </SwipeArea>
       ) : view === "week" ? (
         <Animated.View style={[styles.flex, { opacity: weekFade }]}>
@@ -647,7 +650,7 @@ export default function CalendarScreen() {
               <View style={styles.handleBar} />
             </Pressable>
           </View>
-          <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} />
+          <DayAgenda day={selectedDay} items={buildDayItems(ymd(selectedDay))} onReschedule={onReschedule} onOpenEvent={setDetailItem} />
         </View>
       )}
 
@@ -883,11 +886,12 @@ function MonthPager({
 
 // ── Day agenda list ──
 function DayAgenda({
-  day, items, onReschedule, big,
+  day, items, onReschedule, onOpenEvent, big,
 }: {
   day: Date;
   items: DayItem[];
   onReschedule: (enrollmentId: string, date: string, studentId: string, courseName: string | null) => void;
+  onOpenEvent: (it: DayItem) => void;
   big?: boolean;
 }) {
   const router = useRouter();
@@ -906,7 +910,7 @@ function DayAgenda({
           <Text style={styles.agendaEmpty}>Nothing scheduled on this day.</Text>
         ) : (
           items.map((it) => (
-            <View key={it.id} style={styles.agendaItem}>
+            <Pressable key={it.id} style={({ pressed }) => [styles.agendaItem, pressed && styles.pressed]} onPress={() => onOpenEvent(it)}>
               <Text style={styles.agendaTime}>{it.timeLabel}</Text>
               <View style={[styles.agendaBar, { backgroundColor: it.color }]} />
               <View style={styles.flex}>
@@ -919,10 +923,28 @@ function DayAgenda({
                   <Text style={styles.moveText}>Move</Text>
                 </Pressable>
               ) : null}
-            </View>
+            </Pressable>
           ))
         )}
       </ScrollView>
+    </View>
+  );
+}
+
+// Day-view header card: shows the day, swipe/tap arrows to move day to day.
+function DayCard({ day, onPrev, onNext }: { day: Date; onPrev: () => void; onNext: () => void }) {
+  return (
+    <View style={styles.dayCard}>
+      <Pressable onPress={onPrev} hitSlop={10} style={({ pressed }) => [styles.dayCardNav, pressed && styles.pressed]}>
+        <Ionicons name="chevron-back" size={20} color="#615DFA" />
+      </Pressable>
+      <View style={styles.dayCardCenter}>
+        <Text style={styles.dayCardWd}>{day.toLocaleDateString("en-MY", { weekday: "long" })}</Text>
+        <Text style={styles.dayCardDate}>{day.toLocaleDateString("en-MY", { day: "numeric", month: "long", year: "numeric" })}</Text>
+      </View>
+      <Pressable onPress={onNext} hitSlop={10} style={({ pressed }) => [styles.dayCardNav, pressed && styles.pressed]}>
+        <Ionicons name="chevron-forward" size={20} color="#615DFA" />
+      </Pressable>
     </View>
   );
 }
@@ -1266,6 +1288,11 @@ const styles = StyleSheet.create({
   agendaDate: { fontSize: 14, fontWeight: "800", color: "#0F172A", paddingHorizontal: 16, marginBottom: 8 },
   agendaList: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
   agendaEmpty: { fontSize: 13, color: "#9CA3AF", textAlign: "center", paddingVertical: 24 },
+  dayCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 4, marginBottom: 8, backgroundColor: "#FFFFFF", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 8, shadowColor: "#0F172A", shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  dayCardNav: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
+  dayCardCenter: { flex: 1, alignItems: "center" },
+  dayCardWd: { fontSize: 12, fontWeight: "800", color: "#615DFA", textTransform: "uppercase", letterSpacing: 0.8 },
+  dayCardDate: { fontSize: 18, fontWeight: "800", color: "#0F172A", marginTop: 2 },
   demoChip: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
   demoChipText: { flex: 1, fontSize: 13, fontWeight: "700", color: "#615DFA" },
   // week time-grid
