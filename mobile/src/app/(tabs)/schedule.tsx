@@ -233,9 +233,11 @@ export default function CalendarScreen() {
   // day under the finger, dragPos = the floating pill position (window coords).
   const [movingItem, setMovingItem] = useState<DayItem | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
-  // When a day has several of your events, long-press opens this chooser so you
-  // pick which one to move.
-  const [chooserDay, setChooserDay] = useState<Date | null>(null);
+  // When a day has several of your events, long-press fans them out (cascade menu)
+  // at the finger. menuHidden keeps the menu mounted-but-invisible while one of its
+  // items is being dragged, so that drag gesture survives onto the calendar.
+  const [menuState, setMenuState] = useState<{ items: DayItem[]; x: number; y: number } | null>(null);
+  const [menuHidden, setMenuHidden] = useState(false);
   const dragPos = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const gridGeom = useRef({ x: 0, y: 0 });
   const gridWrapRef = useRef<View>(null);
@@ -548,7 +550,7 @@ export default function CalendarScreen() {
     if (!day) return;
     const locals = dragCtx.current.items(ymd(day)).filter((i) => i.kind === "local" && i.localId);
     if (locals.length === 0) return; // nothing draggable under the finger
-    if (locals.length > 1) { setChooserDay(day); return; } // several → let user choose
+    if (locals.length > 1) { setMenuState({ items: locals, x: absX, y: absY }); return; } // fan out → choose
     const ev = locals[0];
     movingRef.current = ev;
     hoverRef.current = null;
@@ -577,9 +579,23 @@ export default function CalendarScreen() {
     const target = hoverRef.current;
     hoverRef.current = null;
     setHoverKey(null);
+    setMenuState(null);
+    setMenuHidden(false);
     if (it && target) { movingRef.current = null; applyMove(it, target); }
     // Released off any day → keep it picked up (tap a day to place; also cross-month).
   }, [applyMove]);
+  // Grabbing an item out of the cascade menu → start dragging it (keep the menu
+  // mounted-but-hidden so this gesture survives), or tap it to pick up for tapping.
+  const menuItemDragStart = useCallback((it: DayItem, absX: number, absY: number) => {
+    setMenuHidden(true);
+    movingRef.current = it;
+    hoverRef.current = null;
+    setMovingItem(it);
+    setHoverKey(null);
+    dragPos.setValue({ x: absX, y: absY - dragCtx.current.insetTop });
+  }, [dragPos]);
+  const menuTapPick = (it: DayItem) => { setMenuState(null); setHoverKey(null); setMovingItem(it); };
+  const menuDragProps = useMemo(() => ({ onStart: menuItemDragStart, onMove: dragMove, onEnd: dragEnd }), [menuItemDragStart, dragMove, dragEnd]);
   const eventDragGesture = useMemo(
     () => Gesture.Pan().runOnJS(true).activateAfterLongPress(260)
       .onStart((e) => dragStart(e.absoluteX, e.absoluteY))
@@ -776,12 +792,16 @@ export default function CalendarScreen() {
         />
       ) : null}
 
-      {chooserDay ? (
-        <EventChooser
-          day={chooserDay}
-          items={buildDayItems(ymd(chooserDay)).filter((i) => i.kind === "local" && i.localId)}
-          onClose={() => setChooserDay(null)}
-          onPick={(it) => { setChooserDay(null); setHoverKey(null); setMovingItem(it); }}
+      {menuState ? (
+        <CascadeMenu
+          state={menuState}
+          hidden={menuHidden}
+          winW={winW}
+          winH={winH}
+          insetTop={insets.top}
+          onClose={() => setMenuState(null)}
+          onTapPick={menuTapPick}
+          dragProps={menuDragProps}
         />
       ) : null}
 
@@ -1404,38 +1424,63 @@ function EventDetailModal({
   );
 }
 
-// ── Pick which event to move (a day with several of your events) ──
-function EventChooser({
-  day, items, onClose, onPick,
-}: {
-  day: Date;
-  items: DayItem[];
-  onClose: () => void;
-  onPick: (it: DayItem) => void;
-}) {
+// ── Cascade menu: a day's events fan out at the finger; grab one and drag it ──
+type ItemDragProps = { onStart: (it: DayItem, absX: number, absY: number) => void; onMove: (absX: number, absY: number) => void; onEnd: () => void };
+
+function CascadeItem({ item, index, onTapPick, dragProps }: { item: DayItem; index: number; onTapPick: (it: DayItem) => void; dragProps: ItemDragProps }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: 1, duration: 200, delay: index * 55, useNativeDriver: true }).start();
+  }, [anim, index]);
+  const gesture = useMemo(
+    () => Gesture.Pan().runOnJS(true).activateAfterLongPress(140)
+      .onStart((e) => dragProps.onStart(item, e.absoluteX, e.absoluteY))
+      .onUpdate((e) => dragProps.onMove(e.absoluteX, e.absoluteY))
+      .onEnd(() => dragProps.onEnd()),
+    [item, dragProps],
+  );
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.chooserBackdrop} onPress={onClose} />
-      <View style={styles.chooserSheet}>
-        <View style={styles.chooserHandle} />
-        <Text style={styles.chooserTitle}>Move which event?</Text>
-        <Text style={styles.chooserSub}>{day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })}</Text>
-        <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
-          {items.map((it) => (
-            <Pressable key={it.id} style={({ pressed }) => [styles.chooserRow, pressed && styles.pressed]} onPress={() => onPick(it)}>
-              <View style={[styles.chooserBar, { backgroundColor: it.color }]} />
-              <View style={styles.flex}>
-                <Text style={styles.chooserRowTitle} numberOfLines={1}>{it.title}</Text>
-                <Text style={styles.chooserRowSub} numberOfLines={1}>{it.timeLabel ?? "All day"}{it.subtitle ? ` · ${it.subtitle}` : ""}</Text>
-              </View>
-              <Ionicons name="move" size={18} color="#615DFA" />
-            </Pressable>
-          ))}
-        </ScrollView>
-        <Text style={styles.chooserHint}>Then tap a day (change month first for another) to move it there.</Text>
-        <Pressable style={styles.chooserCancel} onPress={onClose}><Text style={styles.chooserCancelText}>Cancel</Text></Pressable>
+    <Animated.View style={{ opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-14, 0] }) }] }}>
+      <GestureDetector gesture={gesture}>
+        <Pressable style={({ pressed }) => [styles.menuItem, pressed && styles.pressed]} onPress={() => onTapPick(item)}>
+          <View style={[styles.menuBar, { backgroundColor: item.color }]} />
+          <View style={styles.flex}>
+            <Text style={styles.menuItemTitle} numberOfLines={1}>{item.title}</Text>
+            <Text style={styles.menuItemSub} numberOfLines={1}>{item.timeLabel ?? "All day"}{item.subtitle ? ` · ${item.subtitle}` : ""}</Text>
+          </View>
+          <Ionicons name="reorder-three" size={18} color="#9CA3AF" />
+        </Pressable>
+      </GestureDetector>
+    </Animated.View>
+  );
+}
+
+function CascadeMenu({
+  state, hidden, winW, winH, insetTop, onClose, onTapPick, dragProps,
+}: {
+  state: { items: DayItem[]; x: number; y: number };
+  hidden: boolean;
+  winW: number;
+  winH: number;
+  insetTop: number;
+  onClose: () => void;
+  onTapPick: (it: DayItem) => void;
+  dragProps: ItemDragProps;
+}) {
+  const CARD_W = 200;
+  const estH = 44 + state.items.length * 52;
+  const left = Math.max(10, Math.min(state.x - CARD_W / 2, winW - CARD_W - 10));
+  const top = Math.max(70, Math.min(state.y - insetTop - 30, winH - insetTop - estH - 30));
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {!hidden ? <Pressable style={styles.menuBackdrop} onPress={onClose} /> : null}
+      <View style={[styles.menuCard, { left, top, width: CARD_W, opacity: hidden ? 0 : 1 }]}>
+        <Text style={styles.menuCardTitle}>Grab one to move</Text>
+        {state.items.map((it, i) => (
+          <CascadeItem key={it.id} item={it} index={i} onTapPick={onTapPick} dragProps={dragProps} />
+        ))}
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -1538,18 +1583,13 @@ const styles = StyleSheet.create({
   moveBannerCancel: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
   floatPill: { position: "absolute", top: 0, left: 0, minWidth: 90, maxWidth: 150, borderLeftWidth: 3, borderRadius: 8, backgroundColor: "#FFFFFF", paddingHorizontal: 8, paddingVertical: 6, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 10, zIndex: 100 },
   floatPillText: { fontSize: 11, fontWeight: "800", color: "#0F172A" },
-  chooserBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.5)" },
-  chooserSheet: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28 },
-  chooserHandle: { width: 40, height: 4, backgroundColor: "#E5E7EB", borderRadius: 2, alignSelf: "center", marginBottom: 12 },
-  chooserTitle: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
-  chooserSub: { fontSize: 13, color: "#6B7280", marginTop: 2, marginBottom: 8 },
-  chooserRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  chooserBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
-  chooserRowTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  chooserRowSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
-  chooserHint: { fontSize: 12, color: "#9CA3AF", fontWeight: "600", marginTop: 12, textAlign: "center" },
-  chooserCancel: { marginTop: 10, alignItems: "center", paddingVertical: 12 },
-  chooserCancelText: { fontSize: 15, fontWeight: "700", color: "#615DFA" },
+  menuBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.28)" },
+  menuCard: { position: "absolute", backgroundColor: "#FFFFFF", borderRadius: 16, padding: 8, shadowColor: "#0F172A", shadowOpacity: 0.22, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 14 },
+  menuCardTitle: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6, paddingHorizontal: 6, paddingTop: 2, paddingBottom: 6 },
+  menuItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, paddingHorizontal: 6, borderRadius: 10 },
+  menuBar: { width: 4, height: 30, borderRadius: 2 },
+  menuItemTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  menuItemSub: { fontSize: 11, color: "#6B7280", marginTop: 1 },
   pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
   handleWrap: { alignItems: "center", paddingVertical: 8 },
   handleBar: { width: 44, height: 5, borderRadius: 3, backgroundColor: "#D1D5DB" },
