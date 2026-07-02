@@ -202,7 +202,11 @@ export default function CalendarScreen() {
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false); // month cells taller (more events)
+  // Month view's own vertical zoom, independent of the Week tab:
+  //   row   = collapsed to the selected week (more room for the event list below)
+  //   month = normal
+  //   big   = taller cells (more events per day)
+  const [monthZoom, setMonthZoom] = useState<"row" | "month" | "big">("month");
   // Finger-following vertical resize: an animated height that only exists DURING
   // a drag (grid mounts fresh in it, never re-renders inside it → no Android blank).
   const [dragging, setDragging] = useState(false);
@@ -413,10 +417,10 @@ export default function CalendarScreen() {
   // (blank) on Android.
   const animate = () => LayoutAnimation.configureNext(LayoutAnimation.create(180, "easeInEaseOut", "opacity"));
   const resize = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-  const setMode = (mode: "week" | "month" | "big") => {
+  const setZoom = (z: "row" | "month" | "big") => {
     resize();
-    setView(mode === "week" ? "week" : "month");
-    setExpanded(mode === "big");
+    setView("month");
+    setMonthZoom(z);
   };
 
   // Shift the focused period by dir for the current view. Month/week stay scoped
@@ -444,9 +448,19 @@ export default function CalendarScreen() {
     if (d.getMonth() !== month.getMonth() || d.getFullYear() !== month.getFullYear()) setMonth(startOfMonth(d));
   };
   const switchView = (v: ViewMode) => {
-    if (v === "week") setMode("week");
-    else if (v === "month") setMode("month");
+    if (v === "month") setZoom("month");
     else { animate(); setView(v); }
+  };
+  // Month view swipes by month (or by week when collapsed to the week row).
+  const monthShift = (dir: -1 | 1) => {
+    if (monthZoom === "row") {
+      setSelectedDay((d) => { const nd = addDays(d, dir * 7); setMonth(startOfMonth(nd)); return nd; });
+    } else {
+      const nm = addMonths(month, dir);
+      setMonth(nm);
+      const t = new Date();
+      setSelectedDay(t.getMonth() === nm.getMonth() && t.getFullYear() === nm.getFullYear() ? t : new Date(nm.getFullYear(), nm.getMonth(), 1));
+    }
   };
   const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
     router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
@@ -485,10 +499,7 @@ export default function CalendarScreen() {
     ]);
   };
 
-  const toggleExpand = () => {
-    if (view === "week") setMode("month");
-    else setMode(expanded ? "month" : "big");
-  };
+  const toggleExpand = () => setZoom(monthZoom === "big" ? "month" : "big");
 
   const periodTitle = useMemo(() => {
     if (view === "year") return String(month.getFullYear());
@@ -507,11 +518,12 @@ export default function CalendarScreen() {
   const currentRows = buildMonthGrid(month.getFullYear(), month.getMonth()).length;
   const maxCalH = Math.max(ROW_H * 4, winH - insets.top - insets.bottom - 300);
   const expandedRowH = Math.max(ROW_H, Math.min(ROW_H_BIG, Math.floor(maxCalH / Math.max(1, currentRows))));
-  const rowH = view === "week" ? ROW_H : expanded ? expandedRowH : ROW_H;
-  const calcHeight = view === "week" ? ROW_H : currentRows * rowH;
   const weekH = ROW_H;
   const monthH = currentRows * ROW_H;
   const bigH = currentRows * expandedRowH; // month with taller cells
+  const rowH = monthZoom === "big" ? expandedRowH : ROW_H;
+  const calcHeight = monthZoom === "row" ? weekH : monthZoom === "big" ? bigH : monthH;
+  const gridView: ViewMode = monthZoom === "row" ? "week" : "month"; // row = one week
 
   // Vertical drag → finger-following height across week / month / big. The
   // responder lives on a STABLE outer View so switching to the animated wrapper
@@ -529,17 +541,12 @@ export default function CalendarScreen() {
         onPanResponderMove: (_e, g) => { dragH.setValue(Math.max(weekH, Math.min(bigH, dragBase.current + g.dy))); },
         onPanResponderRelease: (_e, g) => {
           const finalH = Math.max(weekH, Math.min(bigH, dragBase.current + g.dy));
-          const mode = finalH < (weekH + monthH) / 2 ? "week" : finalH > (monthH + bigH) / 2 ? "big" : "month";
-          if (mode === "week") {
-            // Pull-up to week: don't collapse to a thin strip first — switch to the
-            // time grid immediately; it fades in (weekFade) for a smooth change.
-            setMode("week");
-            setDragging(false);
-            return;
-          }
-          const target = mode === "big" ? bigH : monthH;
+          // Stay on the Month tab; pull-up collapses to the week row (more room for
+          // the event list), pull-down expands the cells.
+          const level = finalH < (weekH + monthH) / 2 ? "row" : finalH > (monthH + bigH) / 2 ? "big" : "month";
+          const target = level === "row" ? weekH : level === "big" ? bigH : monthH;
           Animated.timing(dragH, { toValue: target, duration: 130, useNativeDriver: false }).start(() => {
-            setMode(mode);
+            setMonthZoom(level);
             setDragging(false);
           });
         },
@@ -626,11 +633,11 @@ export default function CalendarScreen() {
                     stay ROW_H and clip (collapse); above monthH they grow so cells
                     get taller with the finger — day numbers/pills keep their real
                     size (no scale = no stretch). */}
-                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
+                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} />
               </Animated.View>
             ) : (
               <View style={{ height: calcHeight, overflow: "hidden" }}>
-                <MonthPager view={view} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={shift} />
+                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} />
               </View>
             )}
           </View>
