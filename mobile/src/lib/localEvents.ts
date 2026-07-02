@@ -60,6 +60,9 @@ export type LocalEvent = {
   alarm: boolean; // birthday alarm toggle
   color: string;
   createdAt: number;
+  // "Move just this occurrence" of a recurring event: original occurrence date
+  // (yyyy-mm-dd) → new date. The origin is suppressed and the new date shown.
+  overrides?: Record<string, string>;
 };
 
 const KEY = (userId: string) => `localEvents:v1:${userId}`;
@@ -234,6 +237,13 @@ function withinEndRepeat(ev: LocalEvent, dateKey: string): boolean {
 }
 
 export function localEventOccursOn(ev: LocalEvent, dateKey: string): boolean {
+  // Per-occurrence moves (recurring only). A moved-away origin never shows on its
+  // original date; the moved date shows instead.
+  const ov = ev.overrides;
+  if (ev.repeat !== "never" && ov) {
+    if (ov[dateKey]) return false; // this occurrence was moved elsewhere
+    for (const k in ov) if (ov[k] === dateKey) return true; // moved to here
+  }
   if (!matchesPattern(ev, dateKey)) return false;
   if (ev.repeat === "never") return true; // span already handled
   return withinEndRepeat(ev, dateKey);

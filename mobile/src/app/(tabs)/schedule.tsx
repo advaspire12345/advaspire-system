@@ -23,7 +23,7 @@ import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
-import { deleteLocalEvent, listLocalEvents, localEventOccursOn, type LocalEvent } from "@/lib/localEvents";
+import { deleteLocalEvent, listLocalEvents, localEventOccursOn, updateLocalEvent, type LocalEvent } from "@/lib/localEvents";
 import { supabase } from "@/lib/supabase";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -227,6 +227,8 @@ export default function CalendarScreen() {
   // Week (reached by the tab OR by pulling the month up) is always the time grid.
   // detailItem drives the tap-an-event full-screen card.
   const [detailItem, setDetailItem] = useState<DayItem | null>(null);
+  // The event currently "picked up" for moving (press-and-hold → tap a day).
+  const [movingItem, setMovingItem] = useState<DayItem | null>(null);
   // Gentle fade-in for the week grid so pull-up→week reads as a smooth change.
   const weekFade = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -484,6 +486,39 @@ export default function CalendarScreen() {
     setDetailItem(null);
     router.push({ pathname: "/event/new", params: { id: localId, ...(parentId ? { parentId } : {}) } });
   };
+
+  // Move-an-event (press an event to pick it up, then tap a day to place it).
+  const onPickUp = (it: DayItem) => {
+    if (it.kind === "local" && it.localId) setMovingItem(it);
+    else setDetailItem(it); // long-press a class/school event → just show its card
+  };
+  const applyMove = (targetKey: string) => {
+    const it = movingItem;
+    setMovingItem(null);
+    if (!it || !it.localId || !userId || !it.dateKey || it.dateKey === targetKey) return;
+    const origDate = it.dateKey;
+    listLocalEvents(userId).then((list) => {
+      const ev = list.find((e) => e.id === it.localId);
+      if (!ev) return;
+      if (ev.repeat !== "never") {
+        Alert.alert("Repeating event", `Move "${ev.title}" — change the whole series, or just this one?`, [
+          { text: "Cancel", style: "cancel" },
+          { text: "Just this one", onPress: () => updateLocalEvent(userId, { ...ev, overrides: { ...(ev.overrides ?? {}), [origDate]: targetKey } }).then(reloadLocal) },
+          { text: "Whole series", onPress: () => updateLocalEvent(userId, { ...ev, startDate: targetKey, endDate: targetKey }).then(reloadLocal) },
+        ]);
+      } else {
+        // Non-recurring: move the whole event, keeping its day-count (span).
+        const span = Math.round((new Date(ev.endDate + "T00:00:00").getTime() - new Date(ev.startDate + "T00:00:00").getTime()) / 86_400_000);
+        const end = new Date(targetKey + "T00:00:00");
+        end.setDate(end.getDate() + Math.max(0, span));
+        updateLocalEvent(userId, { ...ev, startDate: targetKey, endDate: ymd(end) }).then(reloadLocal);
+      }
+    });
+  };
+  const onCellPress = (d: Date) => {
+    if (movingItem) applyMove(ymd(d));
+    else pickDay(d);
+  };
   const onDeleteLocal = (localId: string) => {
     Alert.alert("Delete event", "Delete this event? This can't be undone.", [
       { text: "Cancel", style: "cancel" },
@@ -596,6 +631,14 @@ export default function CalendarScreen() {
         <View style={styles.bannerWrap}><OfflineBanner updatedAt={updatedAt} /></View>
       ) : null}
 
+      {movingItem ? (
+        <View style={styles.moveBanner}>
+          <Ionicons name="move" size={16} color="#615DFA" />
+          <Text style={styles.moveBannerText} numberOfLines={1}>Moving “{movingItem.title}” — tap a day to place it</Text>
+          <Pressable onPress={() => setMovingItem(null)} hitSlop={8}><Text style={styles.moveBannerCancel}>Cancel</Text></Pressable>
+        </View>
+      ) : null}
+
       {view === "year" ? (
         <SwipeArea horizontalOnly style={styles.flex} onLeft={() => shift(1)} onRight={() => shift(-1)}>
           <YearView year={month.getFullYear()} hasAnyItem={hasAnyItem} todayKey={todayKey}
@@ -636,11 +679,11 @@ export default function CalendarScreen() {
                     stay ROW_H and clip (collapse); above monthH they grow so cells
                     get taller with the finger — day numbers/pills keep their real
                     size (no scale = no stretch). */}
-                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} />
+                <MonthPager fill view="month" month={month} selectedDay={selectedDay} rowH={ROW_H} width={winW} height={monthH} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} onPickUp={onPickUp} />
               </Animated.View>
             ) : (
               <View style={{ height: calcHeight, overflow: "hidden" }}>
-                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={pickDay} onShift={monthShift} />
+                <MonthPager view={gridView} month={month} selectedDay={selectedDay} rowH={rowH} width={winW} height={calcHeight} todayKey={todayKey} buildDayItems={buildDayItems} onPickDay={onCellPress} onShift={monthShift} movingItem={movingItem} onPickUp={onPickUp} />
               </View>
             )}
           </View>
@@ -691,7 +734,7 @@ export default function CalendarScreen() {
 
 // ── Month / Week grid with pills (static heights — Android-safe) ──
 function MonthOrWeekGrid({
-  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay, fill,
+  view, periodDate, selectedDay, rowH, todayKey, buildDayItems, onPickDay, fill, movingItem, onPickUp,
 }: {
   view: ViewMode;
   periodDate: Date;
@@ -701,6 +744,8 @@ function MonthOrWeekGrid({
   buildDayItems: (k: string) => DayItem[];
   onPickDay: (d: Date) => void;
   fill?: boolean; // rows flex-grow to fill parent height (during a resize drag)
+  movingItem?: DayItem | null;
+  onPickUp?: (it: DayItem) => void;
 }) {
   const rows = view === "week"
     ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(periodDate), i))]
@@ -719,19 +764,30 @@ function MonthOrWeekGrid({
             const isToday = key === todayKey;
             const isSelected = key === selKey;
             const dim = view === "month" && d.getMonth() !== periodDate.getMonth();
+            // While moving an event, every day except its origin is a green target.
+            const isTarget = !!movingItem && key !== movingItem.dateKey;
             return (
-              <Pressable key={ci} style={[styles.cell, isSelected && styles.cellSelected]} onPress={() => onPickDay(d)}>
+              <Pressable key={ci} style={[styles.cell, isSelected && styles.cellSelected, isTarget && styles.cellTarget]} onPress={() => onPickDay(d)}>
                 <View style={[styles.cellDateWrap, isToday && styles.cellTodayWrap]}>
                   <Text style={[styles.cellDate, dim && styles.cellDim, isToday && styles.cellDateToday, isSelected && !isToday && styles.cellDateSel]}>
                     {d.getDate()}
                   </Text>
                 </View>
                 <View style={styles.pills}>
-                  {items.slice(0, maxPills).map((it) => (
-                    <View key={it.id} style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }]}>
-                      <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
-                    </View>
-                  ))}
+                  {items.slice(0, maxPills).map((it) => {
+                    const picked = movingItem?.id === it.id;
+                    return (
+                      <Pressable
+                        key={it.id}
+                        onPress={() => onPickDay(d)}
+                        onLongPress={() => onPickUp?.(it)}
+                        delayLongPress={280}
+                        style={[styles.pill, { backgroundColor: it.color + "22", borderLeftColor: it.color }, picked && styles.pillPicked]}
+                      >
+                        <Text style={[styles.pillText, { color: it.color }]} numberOfLines={1}>{it.title}</Text>
+                      </Pressable>
+                    );
+                  })}
                   {items.length > maxPills ? <Text style={styles.pillMore}>···</Text> : null}
                 </View>
               </Pressable>
@@ -827,7 +883,7 @@ function SwipeArea({
 // ── Native horizontal paging pager: real finger-following swipe that redraws
 // correctly on Android (unlike Animated transforms). 3 pages; recenter on commit. ──
 function MonthPager({
-  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift, fill,
+  view, month, selectedDay, rowH, width, height, todayKey, buildDayItems, onPickDay, onShift, fill, movingItem, onPickUp,
 }: {
   view: ViewMode;
   month: Date;
@@ -840,6 +896,8 @@ function MonthPager({
   onPickDay: (d: Date) => void;
   onShift: (dir: -1 | 1) => void;
   fill?: boolean; // fill parent height (grid rows flex-grow) instead of fixed height
+  movingItem?: DayItem | null;
+  onPickUp?: (it: DayItem) => void;
 }) {
   const ref = useRef<ScrollView>(null);
   const pageKey = view === "week" ? `w-${ymd(startOfWeek(selectedDay))}` : `m-${month.getFullYear()}-${month.getMonth()}`;
@@ -877,6 +935,8 @@ function MonthPager({
             buildDayItems={buildDayItems}
             onPickDay={onPickDay}
             fill={fill}
+            movingItem={movingItem}
+            onPickUp={onPickUp}
           />
         </View>
       ))}
@@ -1272,6 +1332,7 @@ const styles = StyleSheet.create({
   gridRowFill: { flexDirection: "row", flexBasis: ROW_H, flexGrow: 1, flexShrink: 0 },
   cell: { flex: 1, margin: 1.5, borderRadius: 10, backgroundColor: "#FFFFFF", paddingTop: 4, paddingHorizontal: 3 },
   cellSelected: { borderWidth: 1.5, borderColor: "#615DFA" },
+  cellTarget: { backgroundColor: "#DCFCE7", borderWidth: 1, borderColor: "#86EFAC" },
   cellDateWrap: { alignSelf: "flex-start", minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   cellTodayWrap: { backgroundColor: "#615DFA" },
   cellDate: { fontSize: 12, fontWeight: "700", color: "#374151" },
@@ -1280,7 +1341,11 @@ const styles = StyleSheet.create({
   cellDim: { color: "#D1D5DB" },
   pills: { marginTop: 2, gap: 2, flex: 1, overflow: "hidden" },
   pill: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1 },
+  pillPicked: { borderWidth: 1.5, borderColor: "#615DFA", opacity: 0.6 },
   pillText: { fontSize: 9, fontWeight: "700" },
+  moveBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 8, backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  moveBannerText: { flex: 1, fontSize: 12.5, fontWeight: "700", color: "#4338CA" },
+  moveBannerCancel: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
   pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
   handleWrap: { alignItems: "center", paddingVertical: 8 },
   handleBar: { width: 44, height: 5, borderRadius: 3, backgroundColor: "#D1D5DB" },
