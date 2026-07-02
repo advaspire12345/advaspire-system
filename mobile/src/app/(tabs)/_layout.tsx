@@ -4,6 +4,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
+// ── BUILD MARKER ──────────────────────────────────────────────────────────────
+// Change this colour on EVERY shipped fix so the user can confirm the OTA update
+// actually loaded (the centre Home button uses it). Rotate to a clearly different
+// colour each time. History: purple(orig) → green.
+const BUILD_COLOR = "#16A34A"; // green
+
 type TabDef = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap; center?: boolean };
 
 // Home sits in the centre; Marketplace is last.
@@ -106,20 +112,20 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: "#A5A3F5",
+    backgroundColor: BUILD_COLOR, // BUILD MARKER (see top of file)
     alignItems: "center",
     justifyContent: "center",
     transform: [{ translateY: -18 }],
     borderWidth: 4,
     borderColor: "#FFFFFF",
-    shadowColor: "#615DFA",
+    shadowColor: BUILD_COLOR,
     shadowOpacity: 0.35,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
   },
   centerBtnActive: {
-    backgroundColor: "#615DFA",
+    backgroundColor: BUILD_COLOR, // BUILD MARKER
     transform: [{ translateY: -22 }, { scale: 1.06 }],
     shadowOpacity: 0.5,
   },
