@@ -521,7 +521,8 @@ export default function CalendarScreen() {
   // read live view state via dragCtx.current, which is refreshed each render below.
   const movingRef = useRef<DayItem | null>(null);
   const hoverRef = useRef<string | null>(null);
-  const dragCtx = useRef({ rowH: ROW_H, gridView: "month" as ViewMode, month, selectedDay, winW, insetTop: insets.top });
+  const edgeRef = useRef(false); // throttle edge-of-screen month changes while dragging
+  const dragCtx = useRef({ rowH: ROW_H, gridView: "month" as ViewMode, month, selectedDay, winW, insetTop: insets.top, shift: (_d: -1 | 1) => {} });
   const dragStart = useCallback((it: DayItem, absX: number, absY: number) => {
     gridWrapRef.current?.measureInWindow((x, y) => { gridGeom.current = { x, y }; });
     movingRef.current = it;
@@ -533,9 +534,22 @@ export default function CalendarScreen() {
   const dragMove = useCallback((absX: number, absY: number) => {
     const c = dragCtx.current;
     dragPos.setValue({ x: absX, y: absY - c.insetTop });
+    // Drag to the left/right screen edge → flip the month (throttled), so an event
+    // can be dropped into another month.
+    if (!edgeRef.current) {
+      const dir: -1 | 1 | 0 = absX < 36 ? -1 : absX > c.winW - 36 ? 1 : 0;
+      if (dir !== 0) {
+        edgeRef.current = true;
+        c.shift(dir);
+        setTimeout(() => { edgeRef.current = false; }, 650);
+      }
+    }
+    // DRAG_NUDGE lifts the detected cell to the fingertip (touch point sits ~0.5cm
+    // below where the finger visually points).
+    const DRAG_NUDGE = 24;
     const cellW = (c.winW - 12) / 7;
     const col = Math.floor((absX - gridGeom.current.x - 6) / cellW);
-    const row = Math.floor((absY - gridGeom.current.y) / c.rowH);
+    const row = Math.floor((absY - DRAG_NUDGE - gridGeom.current.y) / c.rowH);
     const grid = c.gridView === "week"
       ? [Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(c.selectedDay), i))]
       : buildMonthGrid(c.month.getFullYear(), c.month.getMonth());
@@ -594,7 +608,7 @@ export default function CalendarScreen() {
   const rowH = monthZoom === "big" ? expandedRowH : ROW_H;
   const calcHeight = monthZoom === "row" ? weekH : monthZoom === "big" ? bigH : monthH;
   const gridView: ViewMode = monthZoom === "row" ? "week" : "month"; // row = one week
-  dragCtx.current = { rowH, gridView, month, selectedDay, winW, insetTop: insets.top };
+  dragCtx.current = { rowH, gridView, month, selectedDay, winW, insetTop: insets.top, shift: monthShift };
 
   // Vertical drag → finger-following height across week / month / big. The
   // responder lives on a STABLE outer View so switching to the animated wrapper
@@ -765,7 +779,7 @@ export default function CalendarScreen() {
           pointerEvents="none"
           style={[
             styles.floatPill,
-            { borderLeftColor: movingItem.color, transform: [{ translateX: Animated.subtract(dragPos.x, 54) }, { translateY: Animated.subtract(dragPos.y, 13) }] },
+            { borderLeftColor: movingItem.color, transform: [{ translateX: Animated.subtract(dragPos.x, 54) }, { translateY: Animated.add(dragPos.y, 12) }] },
           ]}
         >
           <Text style={styles.floatPillText} numberOfLines={1}>{movingItem.title}</Text>
