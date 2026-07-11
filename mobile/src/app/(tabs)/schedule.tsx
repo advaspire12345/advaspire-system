@@ -47,6 +47,7 @@ type EnrollmentSchedule = {
   courseName: string | null;
   scheduleDays: string[]; // lowercased weekday names
   startTime: string | null;
+  sessions: number; // sessions_remaining (can be negative = over-used)
 };
 
 type AttendanceMarker = {
@@ -180,6 +181,16 @@ function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// Green "N left" / red "N over" tag for a robotics class (from sessions_remaining).
+// Only for classes not yet attended; other items get no session tag.
+function sessionTag(it: { kind?: string; sessions?: number | null; attended?: boolean }): { text: string; ok: boolean } | null {
+  if (it.kind !== "class" || it.sessions == null || it.attended) return null;
+  const n = it.sessions;
+  if (n > 0) return { text: `${n} left`, ok: true };
+  if (n === 0) return { text: "0 left", ok: false };
+  return { text: `${-n} over`, ok: false };
+}
+
 type DayItem = {
   id: string;
   time: number | null; // start minutes-of-day (null = all-day)
@@ -191,6 +202,8 @@ type DayItem = {
   kind?: "local" | "event" | "class"; // local = parent-created (editable)
   localId?: string; // the LocalEvent id when kind === "local"
   dateKey?: string; // the day this occurrence falls on
+  sessions?: number | null; // class only: sessions_remaining (green if >0, red if ≤0)
+  attended?: boolean; // class only: already marked (attendance exists)
   reschedule?: { enrollmentId: string; studentId: string; courseName: string | null; date: string };
 };
 
@@ -276,7 +289,7 @@ export default function CalendarScreen() {
 
     const { data: enrs, error: enrErr } = await supabase
       .from("enrollments")
-      .select("id, student_id, day_of_week, start_time, schedule, course:courses(name)")
+      .select("id, student_id, day_of_week, start_time, schedule, sessions_remaining, course:courses(name)")
       .in("student_id", studentIds)
       .eq("status", "active")
       .is("deleted_at", null);
@@ -314,6 +327,7 @@ export default function CalendarScreen() {
         courseName: c?.name ?? null,
         scheduleDays: days,
         startTime,
+        sessions: Number(e.sessions_remaining ?? 0),
       };
     });
 
@@ -402,9 +416,14 @@ export default function CalendarScreen() {
         items.push({ id: `se-${e.id}`, time: toMinutes(t), endMin: toMinutes(endT), timeLabel: fmt12(t) ?? "All day", title: e.title, subtitle: meta.label, color: e.color || meta.color, kind: "event", dateKey });
       }
       const attToday = attendance.filter((a) => a.date === dateKey);
-      const isFuture = d.getTime() > new Date().setHours(0, 0, 0, 0);
+      // Editable window: at least 1 day ahead (not today/past) and within 1 month.
+      const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(t0); tomorrow.setDate(tomorrow.getDate() + 1);
+      const oneMonth = new Date(t0); oneMonth.setMonth(oneMonth.getMonth() + 1);
       for (const c of enrollments.filter((en) => en.scheduleDays.includes(wd))) {
         const at = attToday.find((a) => a.studentId === c.studentId && a.courseName === c.courseName);
+        const ok = c.sessions > 0; // has sessions left
+        const editable = !at && d.getTime() >= tomorrow.getTime() && d.getTime() <= oneMonth.getTime();
         items.push({
           id: `cl-${c.enrollmentId}-${dateKey}`,
           time: toMinutes(c.startTime),
@@ -412,10 +431,13 @@ export default function CalendarScreen() {
           timeLabel: fmt12(c.startTime) ?? "Class",
           title: c.studentName,
           subtitle: `${c.courseName ?? "Class"}${at ? ` · ${cap(at.status)}` : ""}`,
-          color: at ? STATUS_COLORS[at.status] : "#23D2E2",
+          // Attended → attendance status colour; otherwise green (sessions left) / red (none).
+          color: at ? STATUS_COLORS[at.status] : ok ? "#10B981" : "#EF4444",
           kind: "class",
           dateKey,
-          reschedule: isFuture && !at ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: dateKey } : undefined,
+          sessions: c.sessions,
+          attended: !!at,
+          reschedule: editable ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: dateKey } : undefined,
         });
       }
       items.sort((a, b) => (a.time ?? -1) - (b.time ?? -1));
@@ -871,6 +893,7 @@ export default function CalendarScreen() {
           onClose={closeDetail}
           onEdit={onEditLocal}
           onDelete={onDeleteLocal}
+          onReschedule={(r) => { closeDetail(); onReschedule(r.enrollmentId, r.date, r.studentId, r.courseName); }}
         />
       ) : null}
 
@@ -1188,10 +1211,18 @@ function DayAgenda({
                 <Text style={styles.agendaTitle} numberOfLines={1}>{it.title}</Text>
                 <Text style={styles.agendaSub} numberOfLines={1}>{it.subtitle}</Text>
               </View>
+              {(() => {
+                const tag = sessionTag(it);
+                return tag ? (
+                  <View style={[styles.sessTag, tag.ok ? styles.sessTagOk : styles.sessTagLow]}>
+                    <Text style={[styles.sessTagText, { color: tag.ok ? "#065F46" : "#991B1B" }]}>{tag.text}</Text>
+                  </View>
+                ) : null;
+              })()}
               {it.reschedule ? (
                 <Pressable style={({ pressed }) => [styles.moveButton, pressed && styles.pressed]} onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}>
-                  <Ionicons name="swap-horizontal" size={16} color="#615DFA" />
-                  <Text style={styles.moveText}>Move</Text>
+                  <Ionicons name="create-outline" size={16} color="#615DFA" />
+                  <Text style={styles.moveText}>Edit</Text>
                 </Pressable>
               ) : null}
             </Pressable>
@@ -1554,14 +1585,18 @@ function WeekTimeGrid({
 }
 
 // ── Full-screen event detail card (Edit / Delete for parent-created events) ──
-function DetailCard({ item, onClose, onEdit, onDelete }: {
+function DetailCard({ item, onClose, onEdit, onDelete, onReschedule }: {
   item: DayItem;
   onClose: () => void;
   onEdit: (localId: string) => void;
   onDelete: (localId: string) => void;
+  onReschedule: (r: NonNullable<DayItem["reschedule"]>) => void;
 }) {
   const localId = item.localId;
   const editable = item.kind === "local" && !!localId;
+  const isClass = item.kind === "class";
+  const canEditSlot = isClass && !!item.reschedule;
+  const tag = sessionTag(item);
   const dateLabel = item.dateKey
     ? new Date(item.dateKey + "T00:00:00").toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
     : "";
@@ -1583,12 +1618,25 @@ function DetailCard({ item, onClose, onEdit, onDelete }: {
           <Text style={styles.detailRowLabel}>Time</Text>
           <Text style={styles.detailRowValue}>{item.time == null ? "All day" : item.timeLabel ?? ""}</Text>
         </View>
-        {!editable ? (
+        {tag ? (
+          <View style={styles.detailRow}>
+            <Ionicons name="ticket-outline" size={18} color="#615DFA" />
+            <Text style={styles.detailRowLabel}>Sessions</Text>
+            <View style={[styles.sessTag, tag.ok ? styles.sessTagOk : styles.sessTagLow]}>
+              <Text style={[styles.sessTagText, { color: tag.ok ? "#065F46" : "#991B1B" }]}>{tag.text}</Text>
+            </View>
+          </View>
+        ) : null}
+        {isClass && !canEditSlot ? (
           <View style={styles.detailNote}>
             <Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" />
-            <Text style={styles.detailNoteText}>
-              {item.kind === "class" ? "This is a scheduled class — use the Move option to reschedule it." : "Added by your school — view only."}
-            </Text>
+            <Text style={styles.detailNoteText}>Class slots can only be changed at least a day ahead and within a month — this one is outside that window.</Text>
+          </View>
+        ) : null}
+        {!editable && !isClass ? (
+          <View style={styles.detailNote}>
+            <Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" />
+            <Text style={styles.detailNoteText}>Added by your school — view only.</Text>
           </View>
         ) : null}
         <View style={styles.detailSwipe}>
@@ -1608,6 +1656,13 @@ function DetailCard({ item, onClose, onEdit, onDelete }: {
             <Text style={styles.detailDeleteText}>Delete</Text>
           </Pressable>
         </View>
+      ) : canEditSlot ? (
+        <View style={styles.detailActions}>
+          <Pressable style={[styles.detailBtn, styles.detailEdit, styles.flex]} onPress={() => item.reschedule && onReschedule(item.reschedule)}>
+            <Ionicons name="swap-horizontal" size={18} color="#615DFA" />
+            <Text style={styles.detailEditText}>Change slot</Text>
+          </Pressable>
+        </View>
       ) : (
         <View style={styles.detailActions}>
           <Pressable style={[styles.detailBtn, styles.detailEdit, styles.flex]} onPress={onClose}>
@@ -1621,7 +1676,7 @@ function DetailCard({ item, onClose, onEdit, onDelete }: {
 
 // Swipeable detail: a native paging ScrollView over the sorted list (finger-
 // follows), stepping to the prev/next event on commit.
-function DetailPager({ list, index, width, onIndex, onClose, onEdit, onDelete }: {
+function DetailPager({ list, index, width, onIndex, onClose, onEdit, onDelete, onReschedule }: {
   list: DayItem[];
   index: number;
   width: number;
@@ -1629,6 +1684,7 @@ function DetailPager({ list, index, width, onIndex, onClose, onEdit, onDelete }:
   onClose: () => void;
   onEdit: (localId: string) => void;
   onDelete: (localId: string) => void;
+  onReschedule: (r: NonNullable<DayItem["reschedule"]>) => void;
 }) {
   const ref = useRef<ScrollView>(null);
   useLayoutEffect(() => {
@@ -1655,7 +1711,7 @@ function DetailPager({ list, index, width, onIndex, onClose, onEdit, onDelete }:
       >
         {[index - 1, index, index + 1].map((pi, o) => (
           <View key={o} style={{ width, alignSelf: "stretch" }}>
-            {list[pi] ? <DetailCard item={list[pi]} onClose={onClose} onEdit={onEdit} onDelete={onDelete} /> : <View style={styles.flex} />}
+            {list[pi] ? <DetailCard item={list[pi]} onClose={onClose} onEdit={onEdit} onDelete={onDelete} onReschedule={onReschedule} /> : <View style={styles.flex} />}
           </View>
         ))}
       </ScrollView>
@@ -1889,6 +1945,10 @@ const styles = StyleSheet.create({
   agendaSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   moveButton: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#F3F4F6", borderRadius: 8 },
   moveText: { fontSize: 13, fontWeight: "700", color: "#615DFA" },
+  sessTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, marginRight: 4 },
+  sessTagOk: { backgroundColor: "#D1FAE5" },
+  sessTagLow: { backgroundColor: "#FEE2E2" },
+  sessTagText: { fontSize: 11, fontWeight: "800" },
   yearScroll: { padding: 12, paddingBottom: 100 },
   yearGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   miniMonth: { width: "31%", backgroundColor: "#FFFFFF", borderRadius: 12, padding: 8, marginBottom: 12 },

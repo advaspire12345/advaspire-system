@@ -124,10 +124,10 @@ export default function RescheduleScreen() {
     };
   }, [enrollmentId, studentId]);
 
-  // 14-day-ahead picker, starting 1 day from now (matches the 24h advance rule)
+  // Picker: 1 day ahead (24h rule) up to 1 month out.
   const dateOptions: Date[] = [];
   const tomorrow = addDays(new Date(), 1);
-  for (let i = 0; i < 14; i++) dateOptions.push(addDays(tomorrow, i));
+  for (let i = 0; i < 30; i++) dateOptions.push(addDays(tomorrow, i));
 
   // Filter slots that match the selected date's weekday
   const slotsForSelectedDate = selectedDate
