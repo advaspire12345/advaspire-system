@@ -293,7 +293,7 @@ export default function CalendarScreen() {
       .in("student_id", studentIds)
       .eq("status", "active")
       .is("deleted_at", null);
-    if (enrErr) throw enrErr;
+    if (enrErr) console.warn("calendar enrollments load failed", enrErr.message);
 
     const enrollments: EnrollmentSchedule[] = (enrs ?? []).map((e) => {
       let days: string[] = [];
@@ -311,11 +311,14 @@ export default function CalendarScreen() {
         }
       }
       if (days.length === 0 && e.day_of_week) {
+        // day_of_week may be a JSON array (["monday",…]) OR a plain weekday string ("monday").
+        const raw = String(e.day_of_week).trim();
         try {
-          const parsed = JSON.parse(e.day_of_week as string);
+          const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) days = parsed.map((d: string) => String(d).toLowerCase());
+          else if (typeof parsed === "string") days = [parsed.toLowerCase()];
         } catch {
-          /* ignore */
+          if (raw) days = raw.toLowerCase().split(/[,\s]+/).filter(Boolean);
         }
       }
       const studentName = studentRows.find((s) => s.id === (e.student_id as string))?.name ?? "Unknown";
@@ -333,13 +336,20 @@ export default function CalendarScreen() {
 
     const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
     const monthEnd = new Date(month.getFullYear(), month.getMonth() + 2, 0);
-    const { data: att, error: attErr } = await supabase
-      .from("attendance")
-      .select(`date, status, enrollment:enrollments!inner(student_id, course:courses(name))`)
-      .gte("date", ymd(monthStart))
-      .lte("date", ymd(monthEnd))
-      .in("enrollment.student_id", studentIds);
-    if (attErr) throw attErr;
+    // Filter attendance by enrollment_id (a real column) rather than an embedded
+    // filter, and NON-FATALLY — a failure here must not blank the classes above.
+    const enrollmentIds = (enrs ?? []).map((e) => e.id as string);
+    let att: Array<{ date: string; status: string; enrollment: unknown }> = [];
+    if (enrollmentIds.length) {
+      const { data: attData, error: attErr } = await supabase
+        .from("attendance")
+        .select(`date, status, enrollment:enrollments(student_id, course:courses(name))`)
+        .in("enrollment_id", enrollmentIds)
+        .gte("date", ymd(monthStart))
+        .lte("date", ymd(monthEnd));
+      if (attErr) console.warn("calendar attendance load failed", attErr.message);
+      else att = (attData ?? []) as typeof att;
+    }
 
     const attendance: AttendanceMarker[] = (att ?? []).map((a) => {
       const enr = a.enrollment as unknown as { student_id: string; course: { name: string } | null } | null;
