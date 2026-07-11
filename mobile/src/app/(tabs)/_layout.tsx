@@ -7,8 +7,8 @@ import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 // ── BUILD MARKER ──────────────────────────────────────────────────────────────
 // Change this colour on EVERY shipped fix so the user can confirm the OTA update
 // actually loaded (the centre Home button uses it). Rotate to a clearly different
-// colour each time. History: … → indigo → amber → sky.
-const BUILD_COLOR = "#0EA5E9"; // sky blue
+// colour each time. History: … → amber → sky → lime.
+const BUILD_COLOR = "#84CC16"; // lime green
 
 type TabDef = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap; center?: boolean };
 

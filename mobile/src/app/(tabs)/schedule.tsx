@@ -828,6 +828,12 @@ export default function CalendarScreen() {
       {isStale ? (
         <View style={styles.bannerWrap}><OfflineBanner updatedAt={updatedAt} /></View>
       ) : null}
+      {/* TEMP DIAGNOSTIC — remove after debugging why classes don't show */}
+      <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 12, paddingVertical: 6 }}>
+        <Text style={{ fontSize: 11, color: "#92400E", fontWeight: "700" }} numberOfLines={2}>
+          {`DBG loading=${loading ? "Y" : "N"} err=${error ? "Y" : "N"} enr=${enrollments.length} days=[${enrollments.slice(0, 3).map((e) => `${e.scheduleDays.join("/") || "none"}@${e.startTime ?? "-"}`).join(", ")}]`}
+        </Text>
+      </View>
 
 
       {view === "year" ? (
