@@ -268,12 +268,13 @@ export default function CalendarScreen() {
 
   const fetchCalendar = async (): Promise<CalendarData> => {
     const empty: CalendarData = { parentId: null, enrollments: [], attendance: [], events: [] };
-    const { data: parentRow } = await supabase
+    const { data: parentRow, error: parentErr } = await supabase
       .from("parents")
-      .select("id, branch_id, company_id")
+      .select("id")
       .eq("auth_id", userId!)
       .is("deleted_at", null)
       .maybeSingle();
+    if (parentErr) console.warn("calendar parent load failed", parentErr.message);
     if (!parentRow) return empty;
     const parentId = parentRow.id as string;
 
@@ -828,12 +829,6 @@ export default function CalendarScreen() {
       {isStale ? (
         <View style={styles.bannerWrap}><OfflineBanner updatedAt={updatedAt} /></View>
       ) : null}
-      {/* TEMP DIAGNOSTIC — remove after debugging why classes don't show */}
-      <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 12, paddingVertical: 6 }}>
-        <Text style={{ fontSize: 11, color: "#92400E", fontWeight: "700" }} numberOfLines={2}>
-          {`DBG loading=${loading ? "Y" : "N"} err=${error ? "Y" : "N"} enr=${enrollments.length} days=[${enrollments.slice(0, 3).map((e) => `${e.scheduleDays.join("/") || "none"}@${e.startTime ?? "-"}`).join(", ")}]`}
-        </Text>
-      </View>
 
 
       {view === "year" ? (
