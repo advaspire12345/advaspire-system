@@ -18,6 +18,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/auth";
+import { useNicknames } from "@/contexts/nicknames";
+import { supabase } from "@/lib/supabase";
 import {
   addLocalEvent,
   defaultCustom,
@@ -35,6 +37,8 @@ import {
 } from "@/lib/localEvents";
 
 const COLORS = ["#615DFA", "#EF4444", "#F59E0B", "#10B981", "#23D2E2", "#EC4899"];
+// Emojis a parent can pick to "sign" an event so it's recognisable on the calendar.
+const ICONS = ["🎉", "🎂", "🏫", "⚽", "🎨", "🎵", "📚", "🍽️", "✈️", "🏥", "🦷", "🎁"];
 const WEEKDAYS = [
   { key: 0, label: "Sun" },
   { key: 1, label: "Mon" },
@@ -95,6 +99,9 @@ export default function NewEventScreen() {
   const [type, setType] = useState<LocalEventType>("event");
   const [title, setTitle] = useState("");
   const [color, setColor] = useState(COLORS[0]);
+  const [icon, setIcon] = useState<string | null>(null);
+  const [location, setLocation] = useState("");
+  const nick = useNicknames();
 
   const [startDate, setStartDate] = useState(params.startDate || today);
   const [startTime, setStartTime] = useState<string | null>(params.startTime || "09:00");
@@ -112,6 +119,8 @@ export default function NewEventScreen() {
       setType(ev.type);
       setTitle(ev.title);
       setColor(ev.color);
+      setIcon(ev.icon ?? null);
+      setLocation(ev.location ?? "");
       setStartDate(ev.startDate);
       setStartTime(ev.startTime);
       setEndDate(ev.endDate);
@@ -121,6 +130,7 @@ export default function NewEventScreen() {
       setEndRepeat(ev.endRepeat);
       setReminder(ev.reminder);
       setAlarm(ev.alarm);
+      setAssignedTo(ev.assignedTo ?? []);
       setCreatedAt(ev.createdAt);
     });
     return () => { active = false; };
@@ -131,6 +141,33 @@ export default function NewEventScreen() {
   const [endRepeat, setEndRepeat] = useState<EndRepeat>({ mode: "never" });
   const [reminder, setReminder] = useState<Reminder>("none");
   const [alarm, setAlarm] = useState(false);
+
+  // Assign-to: this parent's children. Empty selection = a general/parent event
+  // (shows regardless of the schedule's child filter).
+  const [children, setChildren] = useState<{ id: string; name: string }[]>([]);
+  const [assignedTo, setAssignedTo] = useState<string[]>([]);
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    (async () => {
+      const { data: parentRow } = await supabase
+        .from("parents").select("id").eq("auth_id", userId).is("deleted_at", null).maybeSingle();
+      if (!parentRow || !active) return;
+      const { data: links } = await supabase
+        .from("parent_students")
+        .select("student:students!inner(id, name, deleted_at)")
+        .eq("parent_id", parentRow.id);
+      if (!active) return;
+      const kids = (links ?? [])
+        .map((l) => l.student as unknown as { id: string; name: string; deleted_at: string | null })
+        .filter((s) => s && !s.deleted_at)
+        .map((s) => ({ id: s.id, name: s.name }));
+      setChildren(kids);
+    })();
+    return () => { active = false; };
+  }, [userId]);
+  const toggleChild = (id: string) =>
+    setAssignedTo((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const [saving, setSaving] = useState(false);
 
@@ -173,7 +210,10 @@ export default function NewEventScreen() {
         reminder: type === "event" || type === "birthday" ? reminder : "none",
         alarm: type === "birthday" ? alarm : false,
         color,
+        icon: icon ?? undefined,
+        location: location.trim() || undefined,
         createdAt,
+        assignedTo,
       };
       if (editId) await updateLocalEvent(userId, ev);
       else await addLocalEvent(userId, ev);
@@ -277,6 +317,60 @@ export default function NewEventScreen() {
                 </Card>
               </>
             ) : null}
+
+            {/* Location — used to warn about time clashes at *different* places. */}
+            <Card>
+              <Label>Location (optional)</Label>
+              <TextInput
+                value={location}
+                onChangeText={setLocation}
+                placeholder="e.g. Advaspire centre, home, clinic"
+                placeholderTextColor="#9CA3AF"
+                style={styles.input}
+              />
+              <Text style={styles.hint}>We&apos;ll warn you if this overlaps with something at a different place.</Text>
+            </Card>
+
+            {/* Assign to children — a general/parent event if none picked. */}
+            {children.length > 0 ? (
+              <Card>
+                <Label>Assign to</Label>
+                <View style={styles.chipWrap}>
+                  <Pressable
+                    style={[styles.assignChip, assignedTo.length === 0 && styles.assignChipActive]}
+                    onPress={() => setAssignedTo([])}
+                  >
+                    <Ionicons name="people-outline" size={15} color={assignedTo.length === 0 ? "#FFFFFF" : "#615DFA"} />
+                    <Text style={[styles.assignChipText, assignedTo.length === 0 && styles.assignChipTextActive]}>Everyone</Text>
+                  </Pressable>
+                  {children.map((c) => {
+                    const on = assignedTo.includes(c.id);
+                    return (
+                      <Pressable key={c.id} style={[styles.assignChip, on && styles.assignChipActive]} onPress={() => toggleChild(c.id)}>
+                        {on ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+                        <Text style={[styles.assignChipText, on && styles.assignChipTextActive]}>{nick.label(c.id, c.name)}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.hint}>{assignedTo.length === 0 ? "Shows for the whole family." : "Only shows when this child is selected in the filter."}</Text>
+              </Card>
+            ) : null}
+
+            {/* Sign the event with an emoji so it's easy to spot on the calendar. */}
+            <Card>
+              <Label>Icon (optional)</Label>
+              <View style={styles.iconRow}>
+                <Pressable onPress={() => setIcon(null)} style={[styles.iconChip, icon === null && styles.iconChipActive]}>
+                  <Ionicons name="ban-outline" size={18} color={icon === null ? "#615DFA" : "#9CA3AF"} />
+                </Pressable>
+                {ICONS.map((e) => (
+                  <Pressable key={e} onPress={() => setIcon(e)} style={[styles.iconChip, icon === e && styles.iconChipActive]}>
+                    <Text style={styles.iconEmoji}>{e}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </Card>
 
             <Card>
               <Label>Color</Label>
@@ -792,9 +886,17 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: "#615DFA" },
   chipText: { fontSize: 13, fontWeight: "700", color: "#374151" },
   chipTextActive: { color: "#FFFFFF" },
+  assignChip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, backgroundColor: "#F3F4F6", borderWidth: 1, borderColor: "#E5E7EB" },
+  assignChipActive: { backgroundColor: "#615DFA", borderColor: "#615DFA" },
+  assignChipText: { fontSize: 13, fontWeight: "700", color: "#374151" },
+  assignChipTextActive: { color: "#FFFFFF" },
   stepper: { flexDirection: "row", alignItems: "center", gap: 16, backgroundColor: "#F3F4F6", borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
   stepperBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   stepperValue: { fontSize: 18, fontWeight: "800", color: "#0F172A", minWidth: 28, textAlign: "center" },
+  iconRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  iconChip: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "transparent" },
+  iconChipActive: { borderColor: "#615DFA", backgroundColor: "#EEF2FF" },
+  iconEmoji: { fontSize: 22 },
   colorRow: { flexDirection: "row", gap: 12, marginTop: 4 },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 3, borderColor: "transparent" },
   colorDotActive: { borderColor: "#FFFFFF", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4, elevation: 2 },

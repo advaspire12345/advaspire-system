@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
+import { useDrawerReturn } from "@/contexts/drawer";
 import { supabase } from "@/lib/supabase";
 
 type ParentForm = {
@@ -32,6 +33,7 @@ type ParentForm = {
 };
 
 export default function ProfileScreen() {
+  useDrawerReturn();
   const { user, signOut } = useAuth();
   const userId = user?.id;
   const [original, setOriginal] = useState<ParentForm | null>(null);
@@ -268,66 +270,6 @@ export default function ProfileScreen() {
             ) : (
               <Text style={styles.saveText}>{dirty ? "Save changes" : "No changes to save"}</Text>
             )}
-          </Pressable>
-
-          {/* Password section */}
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>Password</Text>
-          {!showPasswordForm ? (
-            <Pressable
-              style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
-              onPress={() => setShowPasswordForm(true)}
-            >
-              <Ionicons name="lock-closed-outline" size={18} color="#615DFA" />
-              <Text style={styles.outlineButtonText}>Change password</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.passwordForm}>
-              <Field
-                label="New password"
-                value={newPassword}
-                onChangeText={setNewPassword}
-                secureTextEntry
-                placeholder="At least 8 characters"
-              />
-              <Field
-                label="Confirm new password"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry
-                placeholder="Re-type the new password"
-              />
-              <View style={styles.passwordButtons}>
-                <Pressable
-                  style={[styles.outlineButton, styles.passwordButtonHalf]}
-                  onPress={() => {
-                    setShowPasswordForm(false);
-                    setNewPassword("");
-                    setConfirmPassword("");
-                  }}
-                  disabled={passwordSubmitting}
-                >
-                  <Text style={styles.outlineButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.saveButton, styles.passwordButtonHalf]}
-                  onPress={onChangePassword}
-                  disabled={passwordSubmitting}
-                >
-                  {passwordSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>Update</Text>}
-                </Pressable>
-              </View>
-            </View>
-          )}
-
-          {/* Sign out */}
-          <View style={styles.divider} />
-          <Pressable
-            style={({ pressed }) => [styles.signOutButton, pressed && styles.pressed]}
-            onPress={signOut}
-          >
-            <Ionicons name="log-out-outline" size={18} color="#DC2626" />
-            <Text style={styles.signOutText}>Sign out</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>

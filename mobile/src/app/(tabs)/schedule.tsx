@@ -23,6 +23,8 @@ import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
+import { useNicknames } from "@/contexts/nicknames";
+import { useSettings } from "@/contexts/settings";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { addLocalEvent, deleteLocalEvent, listLocalEvents, localEventOccursOn, updateLocalEvent, type LocalEvent } from "@/lib/localEvents";
 import { supabase } from "@/lib/supabase";
@@ -48,6 +50,7 @@ type EnrollmentSchedule = {
   scheduleDays: string[]; // lowercased weekday names
   startTime: string | null;
   sessions: number; // sessions_remaining (can be negative = over-used)
+  branchId: string | null; // the centre — classes at the same branch don't "clash"
 };
 
 type AttendanceMarker = {
@@ -83,6 +86,7 @@ type CalendarData = {
   enrollments: EnrollmentSchedule[];
   attendance: AttendanceMarker[];
   events: EventEntry[];
+  children: { id: string; name: string }[];
 };
 
 type ViewMode = "year" | "month" | "week" | "day";
@@ -181,10 +185,61 @@ function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// ── Colour means WHO, not what ──────────────────────────────────────────────
+// Each child gets a fixed cheerful colour (by their order). Robotics classes are
+// marked with a 🤖 icon; session balance shows as a corner tag instead of colour.
+const CHILD_PALETTE = ["#2563EB", "#F97316", "#7C3AED", "#0D9488", "#DB2777", "#CA8A04"]; // blue, orange, purple, teal, pink, gold
+const GENERAL_COLOR = "#65A30D"; // olive green — parent / whole-family events
+function childColorFor(children: { id: string }[], studentId?: string): string {
+  if (!studentId) return GENERAL_COLOR;
+  const i = children.findIndex((c) => c.id === studentId);
+  return i >= 0 ? CHILD_PALETTE[i % CHILD_PALETTE.length] : GENERAL_COLOR;
+}
+
+// ── Time-clash detection ────────────────────────────────────────────────────
+// A clash = two future, LOCATED things that overlap in time but are at DIFFERENT
+// places — so the parent (or child) can't be at both. Same location = no clash
+// (e.g. 3 siblings at the same centre are together). Items with no known location
+// are ignored (we can't tell). Classes have no stored end time → assume 90 min.
+const DEFAULT_CLASS_MIN = 90;
+function itemInterval(it: DayItem): [number, number] | null {
+  if (it.time == null) return null; // all-day
+  const end = it.endMin != null && it.endMin > it.time ? it.endMin : it.time + DEFAULT_CLASS_MIN;
+  return [it.time, end];
+}
+function overlapMinutes(a: [number, number], b: [number, number]): number {
+  return Math.max(0, Math.min(a[1], b[1]) - Math.max(a[0], b[0]));
+}
+// Returns: `border` = all clashing item ids (amber border); `banner` = later item
+// id → the earlier partner it clashes with (only the later card shows the warning).
+function computeClashes(items: DayItem[]): { border: Set<string>; banner: Map<string, { withTitle: string; withId?: string; overlap: number }> } {
+  const border = new Set<string>();
+  const banner = new Map<string, { withTitle: string; withId?: string; overlap: number }>();
+  const ivs = items.map(itemInterval);
+  const clashable = (it: DayItem, iv: [number, number] | null) =>
+    !!iv && !it.past && !!it.location && (it.kind === "class" || it.kind === "local");
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (!clashable(it, ivs[i])) continue;
+    for (let j = 0; j < i; j++) {
+      const ot = items[j];
+      if (!clashable(ot, ivs[j])) continue;
+      if (it.location === ot.location) continue; // same place → not a clash
+      const ov = overlapMinutes(ivs[i]!, ivs[j]!);
+      if (ov > 0) {
+        border.add(it.id); border.add(ot.id);
+        if (!banner.has(it.id)) banner.set(it.id, { withTitle: ot.title, withId: ot.studentId, overlap: ov });
+        break;
+      }
+    }
+  }
+  return { border, banner };
+}
+
 // Green "N left" / red "N over" tag for a robotics class (from sessions_remaining).
 // Only for classes not yet attended; other items get no session tag.
-function sessionTag(it: { kind?: string; sessions?: number | null; attended?: boolean }): { text: string; ok: boolean } | null {
-  if (it.kind !== "class" || it.sessions == null || it.attended) return null;
+function sessionTag(it: { kind?: string; sessions?: number | null; attended?: boolean; past?: boolean }): { text: string; ok: boolean } | null {
+  if (it.kind !== "class" || it.sessions == null || it.attended || it.past) return null;
   const n = it.sessions;
   if (n > 0) return { text: `${n} left`, ok: true };
   if (n === 0) return { text: "0 left", ok: false };
@@ -204,6 +259,12 @@ type DayItem = {
   dateKey?: string; // the day this occurrence falls on
   sessions?: number | null; // class only: sessions_remaining (green if >0, red if ≤0)
   attended?: boolean; // class only: already marked (attendance exists)
+  studentId?: string; // class only: which child (for the child filter)
+  childColor?: string; // fixed per-child colour (WHO) — used for the card's left bar
+  icon?: string; // local event only: emoji the parent picked to "sign" it
+  location?: string; // where it happens (centre/branch for classes, free text for events) — used for clash detection
+  assignedTo?: string[]; // local event only: child ids it's for ([] = general)
+  past?: boolean; // date is before today → shown greyed
   reschedule?: { enrollmentId: string; studentId: string; courseName: string | null; date: string };
 };
 
@@ -214,10 +275,21 @@ export default function CalendarScreen() {
   const { width: winW, height: winH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
-  const [view, setView] = useState<ViewMode>("month");
+  const settings = useSettings();
+  const [view, setView] = useState<ViewMode>("week"); // weekly-focused by default
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
+  const [reschedTarget, setReschedTarget] = useState<{ enrollmentId: string; date: string; studentId: string; courseName: string | null } | null>(null);
+  const nick = useNicknames();
+  // Apply the parent's saved default view once settings have loaded.
+  const appliedDefault = useRef(false);
+  useEffect(() => {
+    if (!appliedDefault.current && settings.loaded) {
+      appliedDefault.current = true;
+      setView(settings.defaultView);
+    }
+  }, [settings.loaded, settings.defaultView]);
   // Month view's own vertical zoom, independent of the Week tab:
   //   row   = collapsed to the selected week (more room for the event list below)
   //   month = normal
@@ -267,7 +339,7 @@ export default function CalendarScreen() {
   }, [view, weekFade]);
 
   const fetchCalendar = async (): Promise<CalendarData> => {
-    const empty: CalendarData = { parentId: null, enrollments: [], attendance: [], events: [] };
+    const empty: CalendarData = { parentId: null, enrollments: [], attendance: [], events: [], children: [] };
     const { data: parentRow, error: parentErr } = await supabase
       .from("parents")
       .select("id")
@@ -280,10 +352,10 @@ export default function CalendarScreen() {
 
     const { data: links } = await supabase
       .from("parent_students")
-      .select("student_id, student:students!inner(id, name, deleted_at)")
+      .select("student_id, student:students!inner(id, name, branch_id, deleted_at)")
       .eq("parent_id", parentRow.id);
     const studentRows = (links ?? [])
-      .map((l) => l.student as unknown as { id: string; name: string; deleted_at: string | null })
+      .map((l) => l.student as unknown as { id: string; name: string; branch_id: string | null; deleted_at: string | null })
       .filter((s) => s && !s.deleted_at);
     const studentIds = studentRows.map((s) => s.id);
     if (studentIds.length === 0) return { ...empty, parentId };
@@ -322,16 +394,17 @@ export default function CalendarScreen() {
           if (raw) days = raw.toLowerCase().split(/[,\s]+/).filter(Boolean);
         }
       }
-      const studentName = studentRows.find((s) => s.id === (e.student_id as string))?.name ?? "Unknown";
+      const stu = studentRows.find((s) => s.id === (e.student_id as string));
       const c = e.course as unknown as { name: string } | null;
       return {
         enrollmentId: e.id as string,
         studentId: e.student_id as string,
-        studentName,
+        studentName: stu?.name ?? "Unknown",
         courseName: c?.name ?? null,
         scheduleDays: days,
         startTime,
         sessions: Number(e.sessions_remaining ?? 0),
+        branchId: stu?.branch_id ?? null,
       };
     });
 
@@ -395,7 +468,7 @@ export default function CalendarScreen() {
       createdByParent: (e.created_by_parent_id as string | null) === parentId,
     }));
 
-    return { parentId, enrollments, attendance, events };
+    return { parentId, enrollments, attendance, events, children: studentRows.map((s) => ({ id: s.id, name: s.name })) };
   };
 
   const { data, loading, error, isStale, updatedAt } = useCachedQuery<CalendarData>(
@@ -407,24 +480,37 @@ export default function CalendarScreen() {
   const enrollments = useMemo(() => data?.enrollments ?? [], [data]);
   const attendance = useMemo(() => data?.attendance ?? [], [data]);
   const events = useMemo(() => data?.events ?? [], [data]);
+  const children = useMemo(() => data?.children ?? [], [data]);
   const parentId = data?.parentId ?? null;
   const errorMessage = error && !data ? "Couldn't load your calendar. Check your connection." : null;
+  // Child filter chips: empty = show everyone; otherwise only the selected children.
+  const [childFilter, setChildFilter] = useState<string[]>([]);
 
   // Build the time-ordered items for a day (events + local + classes).
   const buildDayItems = useCallback(
     (dateKey: string): DayItem[] => {
       const d = new Date(dateKey + "T00:00:00");
       const wd = WEEKDAYS_FULL[d.getDay()];
+      const todayK = ymd(new Date());
+      const isPast = dateKey < todayK;
+      const GREY = "#9CA3AF";
       const items: DayItem[] = [];
       for (const e of localEvents.filter((ev) => localEventOccursOn(ev, dateKey))) {
+        // Child filter: general events (no assignedTo) always show; assigned ones
+        // only when one of their children is selected (or nothing filtered).
+        const assignedTo = e.assignedTo ?? [];
+        if (childFilter.length && assignedTo.length && !assignedTo.some((id) => childFilter.includes(id))) continue;
         const typeName = e.type === "birthday" ? "Birthday" : e.type === "holiday" ? "Holiday" : "Event";
-        items.push({ id: `le-${e.id}`, time: toMinutes(e.startTime), endMin: toMinutes(e.endTime), timeLabel: fmt12(e.startTime) ?? "All day", title: e.title, subtitle: typeName, color: e.color, kind: "local", localId: e.id, dateKey });
+        // WHO colour: a single-child event uses that child's colour; family/parent
+        // events stay the user-picked colour. (Grey when past.)
+        const childColor = assignedTo.length === 1 ? (nick.color(assignedTo[0]) ?? childColorFor(children, assignedTo[0])) : undefined;
+        items.push({ id: `le-${e.id}`, time: toMinutes(e.startTime), endMin: toMinutes(e.endTime), timeLabel: fmt12(e.startTime) ?? "All day", title: e.title, subtitle: e.location ? `${typeName} · ${e.location}` : typeName, color: isPast ? GREY : e.color, childColor, icon: e.icon, location: e.location ? `place:${e.location.trim().toLowerCase()}` : undefined, kind: "local", localId: e.id, dateKey, assignedTo, past: isPast });
       }
       for (const e of events.filter((ev) => eventOccursOn(ev, dateKey))) {
         const meta = EVENT_TYPE_META[e.eventType];
         const t = e.isRecurring ? e.recurringStartTime : e.startTime;
         const endT = e.isRecurring ? e.recurringEndTime : e.endTime;
-        items.push({ id: `se-${e.id}`, time: toMinutes(t), endMin: toMinutes(endT), timeLabel: fmt12(t) ?? "All day", title: e.title, subtitle: meta.label, color: e.color || meta.color, kind: "event", dateKey });
+        items.push({ id: `se-${e.id}`, time: toMinutes(t), endMin: toMinutes(endT), timeLabel: fmt12(t) ?? "All day", title: e.title, subtitle: meta.label, color: isPast ? GREY : (e.color || meta.color), kind: "event", dateKey, past: isPast });
       }
       const attToday = attendance.filter((a) => a.date === dateKey);
       // Editable window: at least 1 day ahead (not today/past) and within 1 month.
@@ -432,29 +518,38 @@ export default function CalendarScreen() {
       const tomorrow = new Date(t0); tomorrow.setDate(tomorrow.getDate() + 1);
       const oneMonth = new Date(t0); oneMonth.setMonth(oneMonth.getMonth() + 1);
       for (const c of enrollments.filter((en) => en.scheduleDays.includes(wd))) {
+        if (childFilter.length && !childFilter.includes(c.studentId)) continue; // child filter
         const at = attToday.find((a) => a.studentId === c.studentId && a.courseName === c.courseName);
-        const ok = c.sessions > 0; // has sessions left
         const editable = !at && d.getTime() >= tomorrow.getTime() && d.getTime() <= oneMonth.getTime();
+        // Custom colour override wins over the system palette; nickname over full name.
+        const cColor = nick.color(c.studentId) ?? childColorFor(children, c.studentId);
         items.push({
           id: `cl-${c.enrollmentId}-${dateKey}`,
           time: toMinutes(c.startTime),
           endMin: null,
           timeLabel: fmt12(c.startTime) ?? "Class",
-          title: c.studentName,
+          title: nick.raw(c.studentId) ?? c.studentName,
           subtitle: `${c.courseName ?? "Class"}${at ? ` · ${cap(at.status)}` : ""}`,
-          // Attended → attendance status colour; otherwise green (sessions left) / red (none).
-          color: at ? STATUS_COLORS[at.status] : ok ? "#10B981" : "#EF4444",
+          // WHO colour: the child's fixed colour. Attended/past → grey. Session
+          // balance is shown as a tag (sessionTag), not via card colour.
+          color: at || isPast ? GREY : cColor,
+          childColor: cColor,
           kind: "class",
           dateKey,
           sessions: c.sessions,
           attended: !!at,
+          studentId: c.studentId,
+          // Classes at the same centre share a location key → they never "clash"
+          // (siblings are together). Prefix distinguishes from event locations.
+          location: c.branchId ? `branch:${c.branchId}` : undefined,
+          past: isPast,
           reschedule: editable ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: dateKey } : undefined,
         });
       }
       items.sort((a, b) => (a.time ?? -1) - (b.time ?? -1));
       return items;
     },
-    [enrollments, attendance, events, localEvents],
+    [enrollments, attendance, events, localEvents, childFilter, children, nick],
   );
 
   const hasAnyItem = useCallback((dateKey: string): boolean => buildDayItems(dateKey).length > 0, [buildDayItems]);
@@ -512,8 +607,9 @@ export default function CalendarScreen() {
       setSelectedDay(t.getMonth() === nm.getMonth() && t.getFullYear() === nm.getFullYear() ? t : new Date(nm.getFullYear(), nm.getMonth(), 1));
     }
   };
+  // Reschedule opens a bottom-sheet drawer (no page jump) — spec requirement.
   const onReschedule = (enrollmentId: string, date: string, studentId: string, courseName: string | null) =>
-    router.push({ pathname: "/reschedule", params: { enrollmentId, originalDate: date, studentId, courseName: courseName ?? "" } });
+    setReschedTarget({ enrollmentId, date, studentId, courseName });
 
   // Tapping the + in a week-grid slot opens the editor with that slot's
   // date + time pre-filled.
@@ -611,6 +707,10 @@ export default function CalendarScreen() {
     listLocalEvents(userId).then((list) => {
       const ev = list.find((e) => e.id === item.localId);
       if (!ev) return;
+      // Preserve a multi-day span: keep the same number of days between start and
+      // end (dragging the block used to collapse it to a single day).
+      const spanDays = Math.max(0, Math.round((new Date(ev.endDate + "T00:00:00").getTime() - new Date(ev.startDate + "T00:00:00").getTime()) / 86_400_000));
+      const newEndDate = ymd(addDays(new Date(newDateKey + "T00:00:00"), spanDays));
       if (ev.repeat !== "never") {
         Alert.alert("Repeating event", `Move "${ev.title}" — change the whole series, or just this one?`, [
           { text: "Cancel", style: "cancel" },
@@ -618,14 +718,14 @@ export default function CalendarScreen() {
             text: "Just this one",
             onPress: async () => {
               await updateLocalEvent(userId, { ...ev, excludes: [...(ev.excludes ?? []), origDate] });
-              await addLocalEvent(userId, { id: `${Date.now()}-${Math.round(Math.random() * 1e9)}`, type: ev.type, title: ev.title, startDate: newDateKey, startTime, endDate: newDateKey, endTime, repeat: "never", custom: null, endRepeat: { mode: "never" }, reminder: ev.reminder, alarm: false, color: ev.color, createdAt: Date.now() });
+              await addLocalEvent(userId, { id: `${Date.now()}-${Math.round(Math.random() * 1e9)}`, type: ev.type, title: ev.title, startDate: newDateKey, startTime, endDate: newEndDate, endTime, repeat: "never", custom: null, endRepeat: { mode: "never" }, reminder: ev.reminder, alarm: false, color: ev.color, createdAt: Date.now() });
               reloadLocal();
             },
           },
-          { text: "Whole series", onPress: () => updateLocalEvent(userId, { ...ev, startDate: newDateKey, startTime, endDate: newDateKey, endTime }).then(reloadLocal) },
+          { text: "Whole series", onPress: () => updateLocalEvent(userId, { ...ev, startDate: newDateKey, startTime, endDate: newEndDate, endTime }).then(reloadLocal) },
         ]);
       } else {
-        updateLocalEvent(userId, { ...ev, startDate: newDateKey, startTime, endDate: newDateKey, endTime }).then(reloadLocal);
+        updateLocalEvent(userId, { ...ev, startDate: newDateKey, startTime, endDate: newEndDate, endTime }).then(reloadLocal);
       }
     });
   }, [userId, reloadLocal]);
@@ -800,7 +900,36 @@ export default function CalendarScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <TopBar title="Schedule" />
+      {/* Compact child filter sits beside the "Schedule" title (small chips).
+          Colour = which child; tap to filter, tap "All" to clear. */}
+      <TopBar
+        title="Schedule"
+        center={
+          settings.showFilter && children.length > 1 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.miniFilterRow}>
+              <Pressable onPress={() => setChildFilter([])} style={[styles.miniChip, childFilter.length === 0 && styles.miniChipActive]}>
+                <Ionicons name="people" size={13} color={childFilter.length === 0 ? "#FFFFFF" : "#6B7280"} />
+              </Pressable>
+              {children.map((c) => {
+                const on = childFilter.includes(c.id);
+                const cc = nick.color(c.id) ?? childColorFor(children, c.id);
+                return (
+                  <Pressable
+                    key={c.id}
+                    onPress={() => setChildFilter((prev) => (prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id]))}
+                    style={[styles.miniChip, { backgroundColor: on ? cc : "#EEF0F6" }, on && { borderColor: cc }]}
+                  >
+                    <View style={[styles.miniChipDot, { backgroundColor: on ? "#FFFFFF" : cc }]} />
+                    <Text style={[styles.miniChipText, on && styles.miniChipTextActive]} numberOfLines={1}>
+                      {nick.label(c.id, c.name)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : undefined
+        }
+      />
 
       {/* View tabs */}
       <View style={styles.tabs}>
@@ -896,7 +1025,7 @@ export default function CalendarScreen() {
       </Pressable>
 
       {detailList ? (
-        <DetailPager
+        <QuickSheetPager
           list={detailList}
           index={detailIndex}
           width={winW}
@@ -935,6 +1064,10 @@ export default function CalendarScreen() {
             setSearchOpen(false);
           }}
         />
+      ) : null}
+
+      {reschedTarget ? (
+        <RescheduleSheet target={reschedTarget} onClose={() => setReschedTarget(null)} />
       ) : null}
 
       {/* Move banner — absolute so it never shifts the calendar (which would throw
@@ -1039,7 +1172,7 @@ function GridPill({
 }) {
   return (
     <Pressable onPress={() => onPickDay(day)} style={[styles.pill, { backgroundColor: item.color + "22", borderLeftColor: item.color }, picked && styles.pillPicked]}>
-      <Text style={[styles.pillText, { color: item.color }]} numberOfLines={1}>{item.title}</Text>
+      <Text style={[styles.pillText, { color: item.color }]} numberOfLines={1}>{item.kind === "class" ? "🤖 " : item.icon ? `${item.icon} ` : ""}{item.title}</Text>
     </Pressable>
   );
 }
@@ -1189,6 +1322,283 @@ function MonthPager({
   );
 }
 
+// ── Quick-view / simple-edit half sheet (tap an event in the week grid) ──────
+// One event's compact content (no modal chrome) — used as a page in the swipeable
+// half-sheet. Title already carries the child's nickname (set in buildDayItems).
+function QuickCard({ item, onEdit, onDelete, onReschedule }: {
+  item: DayItem;
+  onEdit: (localId: string) => void;
+  onDelete: (localId: string) => void;
+  onReschedule: (r: NonNullable<DayItem["reschedule"]>) => void;
+}) {
+  const isClass = item.kind === "class";
+  const isLocal = item.kind === "local" && !!item.localId;
+  const sign = isClass ? "🤖" : item.icon ?? null;
+  // Robotics classes read "Robotic class (child)"; other events keep their title.
+  const displayTitle = isClass ? `Robotic class (${item.title})` : item.title;
+  const dateLabel = item.dateKey
+    ? new Date(item.dateKey + "T00:00:00").toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })
+    : "";
+  const locationLabel = item.location?.startsWith("place:")
+    ? item.location.slice(6)
+    : item.location?.startsWith("branch:")
+      ? "At the centre"
+      : null;
+  const tag = sessionTag(item);
+  return (
+    <View style={styles.qpCard}>
+      <View style={[styles.qBar, { backgroundColor: item.color }]} />
+      <View style={styles.sheetHeaderRow}>
+        <View style={styles.flex}>
+          <Text style={styles.sheetTitle} numberOfLines={1}>{sign ? `${sign} ` : ""}{displayTitle}</Text>
+          <Text style={styles.sheetSub} numberOfLines={1}>{item.subtitle}</Text>
+        </View>
+        {tag ? (
+          <View style={[styles.sessTag, tag.ok ? styles.sessTagOk : styles.sessTagLow]}>
+            <Text style={[styles.sessTagText, { color: tag.ok ? "#065F46" : "#991B1B" }]}>{tag.text}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.qMetaRow}><Ionicons name="calendar-outline" size={16} color="#615DFA" /><Text style={styles.qMetaText}>{dateLabel}</Text></View>
+      <View style={styles.qMetaRow}><Ionicons name="time-outline" size={16} color="#615DFA" /><Text style={styles.qMetaText}>{item.timeLabel ?? "All day"}</Text></View>
+      {locationLabel ? (
+        <View style={styles.qMetaRow}><Ionicons name="location-outline" size={16} color="#615DFA" /><Text style={styles.qMetaText}>{locationLabel}</Text></View>
+      ) : null}
+      {isClass && item.sessions != null ? (
+        <View style={styles.qMetaRow}>
+          <Ionicons name="ticket-outline" size={16} color="#615DFA" />
+          <Text style={styles.qMetaText}>
+            {item.sessions > 0 ? `${item.sessions} session${item.sessions === 1 ? "" : "s"} left` : item.sessions === 0 ? "No sessions left" : `${-item.sessions} session${item.sessions === -1 ? "" : "s"} over`}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Actions: classes → Reschedule only; local events → Edit + Delete. */}
+      {isClass ? (
+        item.reschedule ? (
+          <View style={styles.qActions}>
+            <Pressable style={[styles.qBtn, styles.qBtnPrimary]} onPress={() => onReschedule(item.reschedule!)}>
+              <Ionicons name="repeat" size={17} color="#FFFFFF" />
+              <Text style={styles.qBtnPrimaryText}>Reschedule</Text>
+            </Pressable>
+          </View>
+        ) : null
+      ) : isLocal ? (
+        <View style={styles.qActions}>
+          <Pressable style={[styles.qBtn, styles.qBtnPrimary]} onPress={() => onEdit(item.localId!)}>
+            <Ionicons name="create-outline" size={17} color="#FFFFFF" />
+            <Text style={styles.qBtnPrimaryText}>Edit</Text>
+          </Pressable>
+          <Pressable style={[styles.qBtn, styles.qBtnDanger]} onPress={() => onDelete(item.localId!)}>
+            <Ionicons name="trash-outline" size={17} color="#DC2626" />
+            <Text style={styles.qBtnDangerText}>Delete</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.qMetaRow}><Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" /><Text style={styles.qNote}>Added by your school — view only.</Text></View>
+      )}
+    </View>
+  );
+}
+
+// Swipeable half-sheet: a bottom popup you can flick left/right through the day's
+// events (finger-follows via a 3-page native paging ScrollView).
+function QuickSheetPager({ list, index, width, onIndex, onClose, onEdit, onDelete, onReschedule }: {
+  list: DayItem[];
+  index: number;
+  width: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+  onEdit: (localId: string) => void;
+  onDelete: (localId: string) => void;
+  onReschedule: (r: NonNullable<DayItem["reschedule"]>) => void;
+}) {
+  const ref = useRef<ScrollView>(null);
+  useLayoutEffect(() => { ref.current?.scrollTo({ x: width, animated: false }); }, [index, width]);
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View style={styles.qpSheet}>
+        <View style={styles.sheetHandle} />
+        <ScrollView
+          ref={ref}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          disableIntervalMomentum
+          directionalLockEnabled
+          contentOffset={{ x: width, y: 0 }}
+          onMomentumScrollEnd={(e) => {
+            const p = Math.round(e.nativeEvent.contentOffset.x / width);
+            if (p === 1) return;
+            const ni = p === 0 ? index - 1 : index + 1;
+            if (ni < 0 || ni >= list.length) { ref.current?.scrollTo({ x: width, animated: true }); return; }
+            onIndex(ni);
+          }}
+        >
+          {[index - 1, index, index + 1].map((pi, o) => (
+            <View key={o} style={{ width }}>
+              {list[pi] ? <QuickCard item={list[pi]} onEdit={onEdit} onDelete={onDelete} onReschedule={onReschedule} /> : <View />}
+            </View>
+          ))}
+        </ScrollView>
+        {list.length > 1 ? (
+          <View style={styles.qpHint}>
+            <Ionicons name="chevron-back" size={13} color="#9CA3AF" />
+            <Text style={styles.qpHintText}>{index + 1} of {list.length} · swipe</Text>
+            <Ionicons name="chevron-forward" size={13} color="#9CA3AF" />
+          </View>
+        ) : null}
+      </View>
+    </Modal>
+  );
+}
+
+// ── Reschedule bottom-sheet (drawer) ────────────────────────────────────────
+// Opens over the calendar — no page jump. Fetches the course's real slots and
+// lets the parent pick a new day + time. The actual booking + capacity check is
+// server-side (parents can't write under RLS), so Confirm queues the request.
+type ReschedSlot = { id: string; day: string; time: string; duration: number; limitStudent: number };
+const WEEKDAY_ORDER: Record<string, number> = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7 };
+
+function RescheduleSheet({
+  target, onClose, onBack,
+}: {
+  target: { enrollmentId: string; date: string; studentId: string; courseName: string | null };
+  onClose: () => void;
+  onBack?: () => void; // when opened from the class quick-sheet, go back to it
+}) {
+  const [studentName, setStudentName] = useState("");
+  const [slots, setSlots] = useState<ReschedSlot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [selDate, setSelDate] = useState<Date | null>(null);
+  const [selSlot, setSelSlot] = useState<ReschedSlot | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: stu } = await supabase.from("students").select("name").eq("id", target.studentId).maybeSingle();
+        if (!cancelled) setStudentName((stu?.name as string) ?? "");
+        const { data: enr } = await supabase
+          .from("enrollments").select("course_id, student:students!inner(branch_id)").eq("id", target.enrollmentId).maybeSingle();
+        if (!enr) { if (!cancelled) setErr("Class not found."); return; }
+        const courseId = enr.course_id as string;
+        const branchId = (enr.student as unknown as { branch_id: string }).branch_id;
+        const { data: rows, error } = await supabase
+          .from("course_slots").select("id, day, time, duration, limit_student")
+          .eq("course_id", courseId).eq("branch_id", branchId).is("deleted_at", null);
+        if (error) throw error;
+        const mapped: ReschedSlot[] = (rows ?? [])
+          .map((s) => ({ id: s.id as string, day: (s.day as string).toLowerCase(), time: s.time as string, duration: Number(s.duration ?? 0), limitStudent: Number(s.limit_student ?? 0) }))
+          .sort((a, b) => (WEEKDAY_ORDER[a.day] ?? 8) - (WEEKDAY_ORDER[b.day] ?? 8) || a.time.localeCompare(b.time));
+        if (!cancelled) setSlots(mapped);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : "Couldn't load slots.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [target.enrollmentId, target.studentId]);
+
+  const dateOptions = useMemo(() => {
+    const out: Date[] = [];
+    const tomorrow = addDays(new Date(), 1);
+    for (let i = 0; i < 30; i++) out.push(addDays(tomorrow, i));
+    return out;
+  }, []);
+  const slotsForDate = selDate
+    ? slots.filter((s) => s.day === ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][selDate.getDay()])
+    : [];
+  const canConfirm = !!(selDate && selSlot);
+
+  const confirm = () => {
+    if (!selDate || !selSlot) return;
+    Alert.alert(
+      "Reschedule requested",
+      `We've noted moving ${studentName || "this class"}'s ${target.courseName || "class"} to ${selDate.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })} at ${fmt12(selSlot.time)}.\n\nOnline rescheduling is being switched on shortly — once live it moves instantly, updates class credits, and any full slot won't be offered.`,
+      [{ text: "Got it", onPress: onClose }],
+    );
+  };
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View style={styles.sheet}>
+        <View style={styles.sheetHandle} />
+        <View style={styles.sheetHeaderRow}>
+          {onBack ? (
+            <Pressable onPress={onBack} hitSlop={8} style={styles.sheetBack}><Ionicons name="chevron-back" size={22} color="#615DFA" /></Pressable>
+          ) : null}
+          <View style={styles.flex}>
+            <Text style={styles.sheetTitle}>🤖 Reschedule class</Text>
+            <Text style={styles.sheetSub} numberOfLines={1}>
+              {studentName || "…"} · {target.courseName || "Class"} · from {new Date(target.date + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" })}
+            </Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={8} style={styles.sheetClose}><Ionicons name="close" size={20} color="#6B7280" /></Pressable>
+        </View>
+
+        {loading ? (
+          <View style={styles.sheetLoading}><ActivityIndicator color="#615DFA" /></View>
+        ) : err ? (
+          <Text style={styles.sheetErr}>{err}</Text>
+        ) : (
+          <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+            <Text style={styles.sheetStep}>1 · Pick a new day</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {dateOptions.map((d) => {
+                const on = selDate && ymd(selDate) === ymd(d);
+                return (
+                  <Pressable key={ymd(d)} style={[styles.rsDate, on && styles.rsDateOn]} onPress={() => { setSelDate(d); setSelSlot(null); }}>
+                    <Text style={[styles.rsDateWd, on && styles.rsOnText]}>{d.toLocaleDateString("en-MY", { weekday: "short" })}</Text>
+                    <Text style={[styles.rsDateNum, on && styles.rsOnText]}>{d.getDate()}</Text>
+                    <Text style={[styles.rsDateMo, on && styles.rsOnText]}>{d.toLocaleDateString("en-MY", { month: "short" })}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={styles.sheetStep}>2 · Pick a time slot</Text>
+            {!selDate ? (
+              <Text style={styles.sheetHelp}>Pick a day first to see the slots that run then.</Text>
+            ) : slotsForDate.length === 0 ? (
+              <Text style={styles.sheetHelp}>No class slots run on this weekday. Try another day.</Text>
+            ) : (
+              <View style={styles.rsSlots}>
+                {slotsForDate.map((s) => {
+                  const on = selSlot?.id === s.id;
+                  return (
+                    <Pressable key={s.id} style={[styles.rsSlot, on && styles.rsSlotOn]} onPress={() => setSelSlot(s)}>
+                      <Text style={[styles.rsSlotTime, on && styles.rsOnText]}>{fmt12(s.time)}</Text>
+                      <Text style={[styles.rsSlotDur, on && styles.rsOnText]}>{s.duration} min</Text>
+                      {s.limitStudent > 0 ? (
+                        <View style={[styles.rsCap, on && styles.rsCapOn]}>
+                          <Ionicons name="people" size={10} color={on ? "#FFFFFF" : "#615DFA"} />
+                          <Text style={[styles.rsCapText, on && styles.rsOnText]}>Up to {s.limitStudent}</Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            <Text style={styles.sheetNote}>Only 24h+ ahead can be moved, so today and tomorrow aren&apos;t shown. A full slot won&apos;t be offered once online rescheduling is live.</Text>
+          </ScrollView>
+        )}
+
+        <Pressable style={[styles.rsConfirm, !canConfirm && styles.rsConfirmOff]} onPress={confirm} disabled={!canConfirm}>
+          <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+          <Text style={styles.rsConfirmText}>Confirm reschedule</Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
 // ── Day agenda list ──
 function DayAgenda({
   day, items, onReschedule, onOpenEvent, big,
@@ -1199,45 +1609,69 @@ function DayAgenda({
   onOpenEvent: (it: DayItem) => void;
   big?: boolean;
 }) {
-  const router = useRouter();
+  const clash = useMemo(() => computeClashes(items), [items]);
   return (
     <View style={styles.agenda}>
       {!big ? (
         <Text style={styles.agendaDate}>{day.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })}</Text>
       ) : null}
       <ScrollView style={styles.flex} contentContainerStyle={styles.agendaList} showsVerticalScrollIndicator={false}>
-        <Pressable style={({ pressed }) => [styles.demoChip, pressed && styles.pressed]} onPress={() => router.push("/schedule-demo" as Href)}>
-          <Ionicons name="hand-left" size={14} color="#615DFA" />
-          <Text style={styles.demoChipText}>Try: drag a class to reschedule (demo)</Text>
-          <Ionicons name="chevron-forward" size={14} color="#615DFA" />
-        </Pressable>
         {items.length === 0 ? (
           <Text style={styles.agendaEmpty}>Nothing scheduled on this day.</Text>
         ) : (
-          items.map((it) => (
-            <Pressable key={it.id} style={({ pressed }) => [styles.agendaItem, pressed && styles.pressed]} onPress={() => onOpenEvent(it)}>
-              <Text style={styles.agendaTime}>{it.timeLabel}</Text>
-              <View style={[styles.agendaBar, { backgroundColor: it.color }]} />
-              <View style={styles.flex}>
-                <Text style={styles.agendaTitle} numberOfLines={1}>{it.title}</Text>
-                <Text style={styles.agendaSub} numberOfLines={1}>{it.subtitle}</Text>
-              </View>
-              {(() => {
-                const tag = sessionTag(it);
-                return tag ? (
-                  <View style={[styles.sessTag, tag.ok ? styles.sessTagOk : styles.sessTagLow]}>
-                    <Text style={[styles.sessTagText, { color: tag.ok ? "#065F46" : "#991B1B" }]}>{tag.text}</Text>
+          items.map((it) => {
+            const tag = sessionTag(it);
+            const isClass = it.kind === "class";
+            const clashed = clash.border.has(it.id);
+            const barColor = clashed ? "#F59E0B" : it.color;
+            const warn = clash.banner.get(it.id);
+            // Title already carries the nickname (resolved in buildDayItems).
+            const firstName = it.title.split(" ")[0];
+            const withName = warn ? warn.withTitle.split(" ")[0] : "";
+            return (
+              <View key={it.id}>
+                <Pressable style={({ pressed }) => [styles.agendaItem, clashed && styles.agendaItemClash, it.past && styles.agendaItemPast, pressed && styles.pressed]} onPress={() => onOpenEvent(it)}>
+                  <Text style={[styles.agendaTime, it.past && styles.agendaTextMuted]}>{it.timeLabel}</Text>
+                  <View style={[styles.agendaBar, { backgroundColor: barColor }]} />
+                  <View style={styles.flex}>
+                    <View style={styles.agendaTitleRow}>
+                      {isClass ? <Text style={styles.robot}>🤖</Text> : it.icon ? <Text style={styles.robot}>{it.icon}</Text> : null}
+                      <Text style={[styles.agendaTitle, it.past && styles.agendaTextMuted]} numberOfLines={1}>{isClass ? `Robotic class (${it.title})` : it.title}</Text>
+                    </View>
+                    <Text style={[styles.agendaSub, it.past && styles.agendaTextMuted]} numberOfLines={1}>{it.subtitle}</Text>
                   </View>
-                ) : null;
-              })()}
-              {it.reschedule ? (
-                <Pressable style={({ pressed }) => [styles.moveButton, pressed && styles.pressed]} onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}>
-                  <Ionicons name="create-outline" size={16} color="#615DFA" />
-                  <Text style={styles.moveText}>Edit</Text>
+                  {it.past && isClass ? (
+                    <View style={styles.attendedTag}><Text style={styles.attendedTagText}>{it.attended ? "Attended" : "Done"}</Text></View>
+                  ) : tag ? (
+                    <View style={[styles.sessTag, tag.ok ? styles.sessTagOk : styles.sessTagLow]}>
+                      <Text style={[styles.sessTagText, { color: tag.ok ? "#065F46" : "#991B1B" }]}>{tag.text}</Text>
+                    </View>
+                  ) : null}
+                  {it.reschedule ? (
+                    <Pressable style={({ pressed }) => [styles.moveButton, pressed && styles.pressed]} onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}>
+                      <Ionicons name="repeat" size={15} color="#615DFA" />
+                      <Text style={styles.moveText}>Reschedule</Text>
+                    </Pressable>
+                  ) : null}
                 </Pressable>
-              ) : null}
-            </Pressable>
-          ))
+                {warn ? (
+                  <View style={styles.clashWarn}>
+                    <Ionicons name="warning" size={15} color="#B45309" />
+                    <View style={styles.flex}>
+                      <Text style={styles.clashWarnText}>
+                        {firstName} & {withName} are at different places and overlap by {warn.overlap} min — you might not make both pick-up / drop-off.
+                      </Text>
+                    </View>
+                    {it.reschedule ? (
+                      <Pressable style={({ pressed }) => [styles.clashFix, pressed && styles.pressed]} onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}>
+                        <Text style={styles.clashFixText}>Reschedule {firstName}</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })
         )}
       </ScrollView>
     </View>
@@ -1352,17 +1786,21 @@ function WeekPager({
 }
 
 // Lay timed events into side-by-side lanes so overlapping ones don't stack.
-// Returns each item with its lane index and the column count of its overlap cluster.
-function layoutLanes(items: DayItem[]): { it: DayItem; lane: number; cols: number }[] {
+// Returns each item with its lane index, the column count of its overlap cluster,
+// and a cluster id (so a crowded cluster can be collapsed into one swipeable block).
+function layoutLanes(items: DayItem[]): { it: DayItem; lane: number; cols: number; cluster: number }[] {
   const endOf = (it: DayItem) => (it.endMin != null && it.endMin > (it.time as number) ? it.endMin : (it.time as number) + 60);
   const sorted = [...items].sort((a, b) => (a.time as number) - (b.time as number) || endOf(a) - endOf(b));
-  const out: { it: DayItem; lane: number; cols: number }[] = [];
+  const out: { it: DayItem; lane: number; cols: number; cluster: number }[] = [];
   let cluster: { it: DayItem; lane: number }[] = [];
   let clusterEnd = -1;
   let laneEnds: number[] = [];
+  let clusterId = 0;
   const flush = () => {
+    if (!cluster.length) return;
     const cols = cluster.reduce((m, x) => Math.max(m, x.lane + 1), 1);
-    for (const x of cluster) out.push({ it: x.it, lane: x.lane, cols });
+    for (const x of cluster) out.push({ it: x.it, lane: x.lane, cols, cluster: clusterId });
+    clusterId += 1;
     cluster = [];
     laneEnds = [];
     clusterEnd = -1;
@@ -1380,6 +1818,10 @@ function layoutLanes(items: DayItem[]): { it: DayItem; lane: number; cols: numbe
   flush();
   return out;
 }
+
+// A crowded time slot (this many overlapping events or more) collapses into one
+// full-width block you tap to swipe through, instead of unusably-thin lanes.
+const COLLAPSE_AT = 4;
 
 // ── Week time-grid (tap a slot → +, tap + → add; tap an event → detail) ──
 function WeekTimeGrid({
@@ -1569,7 +2011,7 @@ function WeekTimeGrid({
                       style={[styles.wgEvent, { top, height, left, width: w, backgroundColor: it.color + "22", borderLeftColor: it.color }, ghost?.id === it.id && { opacity: 0.25 }]}
                       onPress={() => onOpenEvent(it)}
                     >
-                      <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={cols > 2 ? 1 : 2}>{it.title}</Text>
+                      <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={cols > 2 ? 1 : 2}>{it.kind === "class" ? "🤖 " : it.icon ? `${it.icon} ` : ""}{it.title}</Text>
                       {height > 30 && cols < 3 ? <Text style={styles.wgEventTime} numberOfLines={1}>{it.timeLabel}</Text> : null}
                     </Pressable>
                   );
@@ -1616,7 +2058,7 @@ function DetailCard({ item, onClose, onEdit, onDelete, onReschedule }: {
       <View style={[styles.detailHeader, { backgroundColor: item.color }]}>
         <Pressable onPress={onClose} hitSlop={10} style={styles.detailCloseBtn}><Ionicons name="close" size={22} color="#FFFFFF" /></Pressable>
         <Text style={styles.detailKind}>{item.subtitle}</Text>
-        <Text style={styles.detailTitle}>{item.title}</Text>
+        <Text style={styles.detailTitle}>{isClass ? "🤖 " : item.icon ? `${item.icon} ` : ""}{item.title}</Text>
       </View>
       <View style={styles.detailBody}>
         <View style={styles.detailRow}>
@@ -1849,6 +2291,12 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
   tabs: { flexDirection: "row", marginHorizontal: 16, backgroundColor: "#EEF0F6", borderRadius: 12, padding: 4, gap: 4 },
+  miniFilterRow: { gap: 6, alignItems: "center", paddingRight: 4 },
+  miniChip: { flexDirection: "row", alignItems: "center", gap: 4, height: 28, paddingHorizontal: 8, borderRadius: 14, backgroundColor: "#EEF0F6", borderWidth: 1.5, borderColor: "transparent" },
+  miniChipActive: { backgroundColor: "#615DFA" },
+  miniChipDot: { width: 8, height: 8, borderRadius: 4 },
+  miniChipText: { fontSize: 12, fontWeight: "700", color: "#4B5563", maxWidth: 74 },
+  miniChipTextActive: { color: "#FFFFFF" },
   tab: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: "center" },
   tabActive: { backgroundColor: "#FFFFFF", shadowColor: "#0F172A", shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   tabText: { fontSize: 13, fontWeight: "700", color: "#6B7280" },
@@ -1929,6 +2377,14 @@ const styles = StyleSheet.create({
   wgGhost: { position: "absolute", left: 2, right: 2, borderWidth: 2, borderStyle: "dashed", borderRadius: 6, paddingHorizontal: 3, paddingTop: 2, zIndex: 5 },
   wgEventTitle: { fontSize: 9, fontWeight: "800" },
   wgEventTime: { fontSize: 8, color: "#6B7280", marginTop: 1 },
+  // Collapsed "many events" block: a segmented colour strip + a count badge.
+  wgCluster: { position: "absolute", borderRadius: 6, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E5E7EB", overflow: "hidden" },
+  wgClusterStrip: { flexDirection: "row", height: 5, width: "100%" },
+  wgClusterSeg: { flex: 1, height: 5 },
+  wgClusterBody: { flex: 1, alignItems: "center", justifyContent: "center", gap: 2, paddingHorizontal: 2 },
+  wgClusterBadge: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
+  wgClusterBadgeText: { fontSize: 10, fontWeight: "800", color: "#FFFFFF" },
+  wgClusterLabel: { fontSize: 7, fontWeight: "700", color: "#9CA3AF" },
   // event detail modal
   detailRoot: { flex: 1, backgroundColor: "#F6F6FB" },
   detailHeader: { paddingTop: 64, paddingBottom: 28, paddingHorizontal: 24 },
@@ -1950,12 +2406,72 @@ const styles = StyleSheet.create({
   detailDelete: { flex: 1, backgroundColor: "#EF4444" },
   detailDeleteText: { fontSize: 15, fontWeight: "800", color: "#FFFFFF" },
   agendaItem: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, shadowColor: "#0F172A", shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  agendaItemClash: { borderWidth: 1.5, borderColor: "#FCD34D" },
+  agendaItemPast: { backgroundColor: "#F9FAFB", shadowOpacity: 0 },
   agendaTime: { width: 64, fontSize: 11, fontWeight: "700", color: "#6B7280" },
   agendaBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
+  agendaTitleRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  robot: { fontSize: 14 },
   agendaTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
   agendaSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
-  moveButton: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#F3F4F6", borderRadius: 8 },
+  agendaTextMuted: { color: "#9CA3AF" },
+  attendedTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, marginRight: 4, backgroundColor: "#E5E7EB" },
+  attendedTagText: { fontSize: 11, fontWeight: "800", color: "#6B7280" },
+  clashWarn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFBEB", borderRadius: 12, borderWidth: 1, borderColor: "#FDE68A", paddingHorizontal: 12, paddingVertical: 10, marginTop: 6, marginLeft: 12 },
+  clashWarnText: { fontSize: 12, fontWeight: "600", color: "#92400E", lineHeight: 16 },
+  clashFix: { backgroundColor: "#F59E0B", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
+  clashFixText: { fontSize: 12, fontWeight: "800", color: "#FFFFFF" },
+  moveButton: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#EEF2FF", borderRadius: 8 },
   moveText: { fontSize: 13, fontWeight: "700", color: "#615DFA" },
+  // Reschedule bottom sheet
+  sheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.5)" },
+  sheet: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28 },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: "#E5E7EB", alignSelf: "center", marginBottom: 10 },
+  sheetHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 8 },
+  sheetTitle: { fontSize: 17, fontWeight: "800", color: "#0F172A" },
+  sheetSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  sheetClose: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
+  sheetBack: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
+  sheetLoading: { paddingVertical: 40, alignItems: "center" },
+  sheetErr: { fontSize: 13, color: "#991B1B", paddingVertical: 20, textAlign: "center" },
+  sheetStep: { fontSize: 12, fontWeight: "800", color: "#615DFA", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 14, marginBottom: 6 },
+  sheetHelp: { fontSize: 13, color: "#6B7280", paddingVertical: 10 },
+  sheetNote: { fontSize: 11, color: "#9CA3AF", lineHeight: 16, marginTop: 12 },
+  rsDate: { width: 60, paddingVertical: 9, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center" },
+  rsDateOn: { backgroundColor: "#615DFA" },
+  rsDateWd: { fontSize: 11, fontWeight: "600", color: "#6B7280" },
+  rsDateNum: { fontSize: 19, fontWeight: "800", color: "#111827", marginVertical: 1 },
+  rsDateMo: { fontSize: 10, color: "#6B7280" },
+  rsOnText: { color: "#FFFFFF" },
+  rsSlots: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  rsSlot: { paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "#F3F4F6", borderRadius: 12, borderWidth: 1.5, borderColor: "transparent", minWidth: 96, alignItems: "center" },
+  rsSlotOn: { backgroundColor: "#615DFA", borderColor: "#615DFA" },
+  rsSlotTime: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  rsSlotDur: { fontSize: 11, color: "#6B7280", marginTop: 2 },
+  rsCap: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 6, backgroundColor: "#EEF2FF", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  rsCapOn: { backgroundColor: "rgba(255,255,255,0.25)" },
+  rsCapText: { fontSize: 10, fontWeight: "800", color: "#615DFA" },
+  rsConfirm: { marginTop: 16, height: 52, borderRadius: 14, backgroundColor: "#615DFA", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  rsConfirmOff: { opacity: 0.45 },
+  rsConfirmText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
+  // Quick-view sheet
+  qBar: { height: 4, borderRadius: 2, marginBottom: 12 },
+  qMetaRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
+  qMetaText: { fontSize: 14, color: "#374151", fontWeight: "600" },
+  qActions: { flexDirection: "row", gap: 10, marginTop: 14 },
+  qBtn: { flex: 1, height: 48, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  qBtnPrimary: { backgroundColor: "#615DFA" },
+  qBtnPrimaryText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
+  qBtnDanger: { backgroundColor: "#FEE2E2" },
+  qBtnDangerText: { color: "#DC2626", fontSize: 14, fontWeight: "800" },
+  qBtnGhost: { backgroundColor: "#EEF2FF" },
+  qBtnGhostText: { color: "#615DFA", fontSize: 14, fontWeight: "800" },
+  qNote: { fontSize: 13, color: "#9CA3AF", fontStyle: "italic" },
+  // Swipeable half-sheet pager
+  qpSheet: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10, paddingBottom: 20 },
+  qpCard: { paddingHorizontal: 16, paddingTop: 4, gap: 2 },
+  qpHint: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingTop: 8 },
+  qpHintText: { fontSize: 12, fontWeight: "700", color: "#9CA3AF" },
   sessTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, marginRight: 4 },
   sessTagOk: { backgroundColor: "#D1FAE5" },
   sessTagLow: { backgroundColor: "#FEE2E2" },

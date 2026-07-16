@@ -36,6 +36,13 @@
       "expo-router",
       "expo-secure-store",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Advaspire to access your photos so you can upload a payment slip or a student's work.",
+          "cameraPermission": "Allow Advaspire to use the camera so you can take a photo of a student's work."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#615DFA",

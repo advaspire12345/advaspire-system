@@ -1,11 +1,13 @@
 import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
+import { useNicknames } from "@/contexts/nicknames";
+import { TourTarget } from "@/contexts/tour";
 import { supabase } from "@/lib/supabase";
 
 type ParentRow = {
@@ -18,7 +20,27 @@ type ProgramInfo = {
   remaining: number;
   nextClass: string | null; // yyyy-mm-dd
   startTime: string | null; // HH:mm
+  duration: number | null; // minutes (for dismissal time)
 };
+
+// Fixed cheerful colour per child (by order) — matches the Schedule tab.
+const CHILD_PALETTE = ["#2563EB", "#F97316", "#7C3AED", "#0D9488", "#DB2777", "#CA8A04"];
+const childColorAt = (i: number) => CHILD_PALETTE[i % CHILD_PALETTE.length];
+
+function toMin(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
+  return h * 60 + (m || 0);
+}
+function fmtTime12(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
+  const period = h < 12 ? "AM" : "PM";
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${period}`;
+}
+function minToLabel(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return fmtTime12(`${h}:${String(m).padStart(2, "0")}`);
+}
 
 type ChildSummary = {
   studentId: string;
@@ -89,16 +111,87 @@ type HomeData = {
   totalSessions: number; // family-wide sessions_remaining (can be negative)
   unpaidCount: number; // number of pending payment bills
   unpaidAmount: number; // total RM outstanding
+  latestUnpaidId: string | null; // newest pending bill → tap-to-pay deep link
 };
 
 function formatRM(amount: number): string {
   return `RM${amount.toFixed(2)}`;
 }
 
+type SmartClass = { childName: string; studentId: string; program: string; startMin: number; endMin: number; color: string };
+type Smart =
+  | { mode: "during"; focus: SmartClass; count: number }
+  | { mode: "rush" | "prep"; focus: SmartClass; count: number; minsToStart: number; more: number };
+
+// Time-sensitive banner. Prep (warm, > ~1h away), Rush (urgent, < 60m), During
+// (reassuring, class in progress). Colour accent = the focus child.
+function SmartBanner({ smart, onOpenSchedule }: { smart: Smart; onOpenSchedule: () => void }) {
+  const nick = useNicknames();
+  const { focus } = smart;
+  const first = nick.label(focus.studentId, focus.childName);
+
+  if (smart.mode === "during") {
+    return (
+      <View style={[styles.smart, styles.smartDuring]}>
+        <View style={styles.smartRow}>
+          <Text style={styles.smartEmoji}>🧩</Text>
+          <View style={styles.flex}>
+            <Text style={styles.smartDuringTitle}>{first} is happily building…</Text>
+            <Text style={styles.smartDuringSub}>{focus.program} · expected dismissal at {minToLabel(focus.endMin)}</Text>
+          </View>
+        </View>
+        <Pressable style={({ pressed }) => [styles.smartGhostBtn, pressed && styles.cardPressed]} onPress={onOpenSchedule}>
+          <Ionicons name="time-outline" size={16} color="#065F46" />
+          <Text style={styles.smartGhostText}>Pickup reminder</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (smart.mode === "rush") {
+    return (
+      <View style={[styles.smart, styles.smartRush, { borderLeftColor: focus.color }]}>
+        <View style={styles.smartRow}>
+          <View style={[styles.smartDot, { backgroundColor: focus.color }]} />
+          <Text style={styles.smartRushName}>🤖 {focus.childName}</Text>
+          <View style={styles.smartRushPill}>
+            <Text style={styles.smartRushPillText}>in {smart.minsToStart} min</Text>
+          </View>
+        </View>
+        <Text style={styles.smartRushBig}>{focus.program}</Text>
+        <Text style={styles.smartRushTime}>🕒 {minToLabel(focus.startMin)} – {minToLabel(focus.endMin)}</Text>
+        <Pressable style={({ pressed }) => [styles.smartRushBtn, pressed && styles.cardPressed]} onPress={onOpenSchedule}>
+          <Ionicons name="navigate" size={16} color="#FFFFFF" />
+          <Text style={styles.smartRushBtnText}>View schedule</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // prep
+  return (
+    <View style={[styles.smart, styles.smartPrep]}>
+      <View style={styles.smartRow}>
+        <Text style={styles.smartEmoji}>🤖</Text>
+        <View style={styles.flex}>
+          <Text style={styles.smartPrepTitle}>
+            {smart.count} robotics {smart.count === 1 ? "class" : "classes"} scheduled today
+          </Text>
+          <Text style={styles.smartPrepSub}>
+            Next up: <Text style={{ color: focus.color, fontWeight: "800" }}>{first}</Text> · starts at {minToLabel(focus.startMin)}
+            {smart.more > 0 ? ` · +${smart.more} more` : ""}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const router = useRouter();
+  const nick = useNicknames();
 
   const fetchHome = async (): Promise<HomeData> => {
     const { data: parentRow, error: parentErr } = await supabase
@@ -110,7 +203,7 @@ export default function HomeScreen() {
     if (parentErr) throw parentErr;
 
     if (!parentRow) {
-      return { parent: null, children: [], totalSessions: 0, unpaidCount: 0, unpaidAmount: 0 };
+      return { parent: null, children: [], totalSessions: 0, unpaidCount: 0, unpaidAmount: 0, latestUnpaidId: null };
     }
 
     const { data: links, error: linksErr } = await supabase
@@ -178,6 +271,7 @@ export default function HomeScreen() {
             remaining: Number(e.sessions_remaining ?? 0),
             nextClass: nextClassDate(days),
             startTime: e.start_time ?? time,
+            duration: e.package?.duration != null ? Number(e.package.duration) : null,
           });
         }
         return {
@@ -201,23 +295,26 @@ export default function HomeScreen() {
     const studentIds = rows.map((r) => r.studentId);
     let unpaidCount = 0;
     let unpaidAmount = 0;
+    let latestUnpaidId: string | null = null;
     if (studentIds.length) {
       const { data: pays } = await supabase
         .from("payments")
-        .select("id, amount, status, student_id")
+        .select("id, amount, status, student_id, created_at")
         .in("student_id", studentIds)
-        .eq("status", "pending");
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
       const seen = new Set<string>();
       for (const p of pays ?? []) {
         const id = p.id as string;
         if (seen.has(id)) continue;
         seen.add(id);
+        if (!latestUnpaidId) latestUnpaidId = id; // first = newest (ordered desc)
         unpaidCount += 1;
         unpaidAmount += Number(p.amount ?? 0);
       }
     }
 
-    return { parent: parentRow as ParentRow, children: rows, totalSessions, unpaidCount, unpaidAmount };
+    return { parent: parentRow as ParentRow, children: rows, totalSessions, unpaidCount, unpaidAmount, latestUnpaidId };
   };
 
   const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<HomeData>(
@@ -232,10 +329,33 @@ export default function HomeScreen() {
   const totalSessions = data?.totalSessions ?? 0;
   const unpaidCount = data?.unpaidCount ?? 0;
   const unpaidAmount = data?.unpaidAmount ?? 0;
+  const latestUnpaidId = data?.latestUnpaidId ?? null;
   // Only a hard failure with nothing cached to fall back on.
   const errorMessage =
     error && !data ? "Couldn't load your dashboard. Check your connection and pull down to refresh." : null;
   const firstName = parent?.name?.split(" ")[0] ?? "";
+
+  // ── Smart dashboard: what does the parent need RIGHT NOW? ──
+  // Collect today's classes (per child/program) with start/end minutes, then pick
+  // the most time-sensitive state: During > Rush (<60m) > Prep (later today).
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const todaysClasses = children.flatMap((c, ci) =>
+    c.programs
+      .filter((p) => p.nextClass === todayKey && p.startTime)
+      .map((p) => {
+        const startMin = toMin(p.startTime!);
+        return { childName: c.studentName, studentId: c.studentId, program: p.name, startMin, endMin: startMin + (p.duration && p.duration > 0 ? p.duration : 90), color: nick.color(c.studentId) ?? childColorAt(ci) };
+      }),
+  );
+  const during = todaysClasses.find((c) => nowMin >= c.startMin && nowMin < c.endMin) ?? null;
+  const upcoming = todaysClasses.filter((c) => c.startMin > nowMin).sort((a, b) => a.startMin - b.startMin);
+  const smart = during
+    ? { mode: "during" as const, focus: during, count: todaysClasses.length }
+    : upcoming[0]
+      ? { mode: upcoming[0].startMin - nowMin <= 60 ? ("rush" as const) : ("prep" as const), focus: upcoming[0], count: todaysClasses.length, minsToStart: upcoming[0].startMin - nowMin, more: upcoming.length - 1 }
+      : null;
 
   if (loading) {
     return (
@@ -274,20 +394,26 @@ export default function HomeScreen() {
           </Text>
         </View>
 
+        {smart ? (
+          <SmartBanner smart={smart} onOpenSchedule={() => router.push("/(tabs)/schedule")} />
+        ) : null}
+
         {parent && children.length > 0 ? (
           <View style={styles.summaryRow}>
             {/* Sessions balance — info only. Red when used up / owing. */}
-            <View style={styles.sumTile}>
-              <Text style={styles.sumLabel}>Sessions left</Text>
-              <Text style={[styles.sumValue, totalSessions <= 0 && styles.sumValueNeg]}>{totalSessions}</Text>
-              <Text style={styles.sumSub}>
-                {totalSessions < 0
-                  ? "Owing sessions"
-                  : totalSessions === 0
-                    ? "None left"
-                    : `across ${children.length} ${children.length === 1 ? "child" : "children"}`}
-              </Text>
-            </View>
+            <TourTarget name="sessions" style={styles.flex}>
+              <View style={styles.sumTile}>
+                <Text style={styles.sumLabel}>Sessions left</Text>
+                <Text style={[styles.sumValue, totalSessions <= 0 && styles.sumValueNeg]}>{totalSessions}</Text>
+                <Text style={styles.sumSub}>
+                  {totalSessions < 0
+                    ? "Owing sessions"
+                    : totalSessions === 0
+                      ? "None left"
+                      : `across ${children.length} ${children.length === 1 ? "child" : "children"}`}
+                </Text>
+              </View>
+            </TourTarget>
 
             {/* Unpaid — the action. Tap to jump to Payments. */}
             <Pressable
@@ -296,7 +422,7 @@ export default function HomeScreen() {
                 unpaidCount > 0 ? styles.sumTileAlert : styles.sumTilePaid,
                 pressed && styles.cardPressed,
               ]}
-              onPress={() => router.push("/(tabs)/payment")}
+              onPress={() => router.push(unpaidCount > 0 && latestUnpaidId ? (`/payment/${latestUnpaidId}` as Href) : "/(tabs)/payment")}
             >
               <View style={styles.sumTileHead}>
                 <Text style={[styles.sumLabel, unpaidCount > 0 ? styles.sumLabelAlert : styles.sumLabelPaid]}>
@@ -361,7 +487,8 @@ export default function HomeScreen() {
                 </View>
               </View>
               <View style={styles.childInfo}>
-                <Text style={styles.childName} numberOfLines={1}>{c.studentName}</Text>
+                <Text style={styles.childName} numberOfLines={1}>{nick.raw(c.studentId) ?? c.studentName}</Text>
+                {nick.raw(c.studentId) ? <Text style={styles.childRealName} numberOfLines={1}>{c.studentName}</Text> : null}
                 <View style={styles.programChip}>
                   <View style={styles.programDot} />
                   <Text style={styles.childProgram} numberOfLines={1}>
@@ -421,7 +548,29 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F6FB" },
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  // Smart dashboard banner
+  smart: { borderRadius: 18, padding: 16, gap: 10 },
+  smartRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  smartEmoji: { fontSize: 24 },
+  smartDot: { width: 10, height: 10, borderRadius: 5 },
+  smartPrep: { backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE" },
+  smartPrepTitle: { fontSize: 15, fontWeight: "800", color: "#3730A3" },
+  smartPrepSub: { fontSize: 13, color: "#4338CA", marginTop: 2 },
+  smartRush: { backgroundColor: "#FFF7ED", borderWidth: 1, borderColor: "#FDBA74", borderLeftWidth: 5 },
+  smartRushName: { flex: 1, fontSize: 15, fontWeight: "800", color: "#7C2D12" },
+  smartRushPill: { backgroundColor: "#EA580C", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  smartRushPillText: { fontSize: 12, fontWeight: "800", color: "#FFFFFF" },
+  smartRushBig: { fontSize: 20, fontWeight: "800", color: "#0F172A", letterSpacing: -0.4 },
+  smartRushTime: { fontSize: 14, fontWeight: "600", color: "#9A3412" },
+  smartRushBtn: { marginTop: 2, height: 46, borderRadius: 12, backgroundColor: "#EA580C", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  smartRushBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+  smartDuring: { backgroundColor: "#F0FDF4", borderWidth: 1, borderColor: "#BBF7D0" },
+  smartDuringTitle: { fontSize: 15, fontWeight: "800", color: "#065F46" },
+  smartDuringSub: { fontSize: 13, color: "#047857", marginTop: 2 },
+  smartGhostBtn: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#DCFCE7", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  smartGhostText: { color: "#065F46", fontSize: 13, fontWeight: "800" },
   heroBg: {
     position: "absolute",
     top: 0,
@@ -547,6 +696,7 @@ const styles = StyleSheet.create({
   levelBadgeText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
   childInfo: { flex: 1, gap: 6 },
   childName: { fontSize: 18, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
+  childRealName: { fontSize: 12, color: "#9CA3AF", fontWeight: "600", marginTop: 1 },
   programChip: {
     flexDirection: "row",
     alignItems: "center",

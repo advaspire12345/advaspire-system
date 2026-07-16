@@ -3,7 +3,9 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { useNicknames } from "@/contexts/nicknames";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { supabase } from "@/lib/supabase";
@@ -16,7 +18,7 @@ type Bill = {
   createdAt: string;
   courseId: string | null;
   courseName: string;
-  childNames: string[];
+  children: { id: string; name: string }[];
   isShared: boolean;
 };
 
@@ -46,6 +48,7 @@ export default function PaymentsScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const router = useRouter();
+  const nick = useNicknames();
   const [programId, setProgramId] = useState<string | null>(null);
 
   const fetchBills = async (): Promise<Bill[]> => {
@@ -85,17 +88,17 @@ export default function PaymentsScreen() {
     return (data ?? []).map((p) => {
       const c = p.course as unknown as { name: string } | null;
       const shared = !!p.is_shared_package;
-      let childNames: string[] = [];
+      let childList: { id: string; name: string }[] = [];
       if (shared && p.shared_with) {
         try {
           const ids = JSON.parse(p.shared_with as string) as string[];
-          childNames = ids.map((id) => nameById.get(id)).filter((n): n is string => !!n);
+          childList = ids.map((cid) => ({ id: cid, name: nameById.get(cid) ?? "" })).filter((x) => x.name);
         } catch {
           /* ignore */
         }
       }
-      if (childNames.length === 0) {
-        childNames = [nameById.get(p.student_id as string) ?? "Child"];
+      if (childList.length === 0) {
+        childList = [{ id: p.student_id as string, name: nameById.get(p.student_id as string) ?? "Child" }];
       }
       return {
         id: p.id as string,
@@ -105,14 +108,14 @@ export default function PaymentsScreen() {
         createdAt: p.created_at as string,
         courseId: (p.course_id as string | null) ?? null,
         courseName: c?.name ?? "Program",
-        childNames,
+        children: childList,
         isShared: shared,
       };
     });
   };
 
   const { data, loading, refreshing, error, isStale, updatedAt, refetch } = useCachedQuery<Bill[]>(
-    `payments:${userId ?? "anon"}`,
+    `payments:v2:${userId ?? "anon"}`, // v2 — Bill shape changed (children carry ids for nicknames)
     fetchBills,
     { enabled: !!userId },
   );
@@ -145,8 +148,8 @@ export default function PaymentsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
+      <TopBar title="Payments" />
       <View style={styles.header}>
-        <Text style={styles.title}>Payments</Text>
         <Text style={styles.subtitle}>{pendingTotal > 0 ? `${pendingTotal} pending` : "All up to date"}</Text>
       </View>
 
@@ -199,7 +202,7 @@ export default function PaymentsScreen() {
                 </View>
                 <View style={styles.childRow}>
                   {b.isShared ? <Ionicons name="people" size={14} color="#615DFA" /> : <Ionicons name="person" size={14} color="#9CA3AF" />}
-                  <Text style={styles.childNames} numberOfLines={1}>{joinNames(b.childNames ?? [])}</Text>
+                  <Text style={styles.childNames} numberOfLines={1}>{joinNames((b.children ?? []).map((c) => nick.raw(c.id) ?? c.name))}</Text>
                   {b.isShared ? <View style={styles.sharedBadge}><Text style={styles.sharedText}>Shared</Text></View> : null}
                 </View>
                 <Text style={styles.courseName}>{b.courseName}</Text>

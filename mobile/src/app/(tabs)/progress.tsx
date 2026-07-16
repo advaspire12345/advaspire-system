@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -9,16 +9,19 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
+import { useProgressBadge } from "@/contexts/progressBadge";
+import { useNicknames } from "@/contexts/nicknames";
 import { supabase } from "@/lib/supabase";
 
 type Child = { id: string; name: string; photo: string | null };
@@ -43,23 +46,56 @@ type Certification = {
   template: string | null;
 };
 
-type Section = "attendance" | "certifications";
+type LedgerRow = {
+  id: string;
+  originalDate: string;
+  originalTime: string | null;
+  newDate: string;
+  newDay: string | null;
+  newTime: string | null;
+  createdAt: string | null;
+  courseName: string | null;
+};
+
+type Section = "attendance" | "certifications" | "ledger";
 
 type ProgressData = {
   attendance: AttendanceRow[];
   certifications: Certification[];
+  ledger: LedgerRow[];
 };
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 }
+function shortDate(iso: string): string {
+  return new Date(iso + (iso.length === 10 ? "T00:00:00" : "")).toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" });
+}
+function time12(t: string | null): string {
+  if (!t) return "";
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+// System palette (mirrors the Schedule tab) — a child's default colour by order.
+const CHILD_PALETTE = ["#2563EB", "#F97316", "#7C3AED", "#0D9488", "#DB2777", "#CA8A04"];
+
+// "New this week" highlight: attended within the last 7 days.
+function isRecent(iso: string): boolean {
+  const d = new Date(iso + "T00:00:00").getTime();
+  return Date.now() - d <= 7 * 86_400_000 && d <= Date.now();
+}
 
 export default function ProgressScreen() {
   const { user } = useAuth();
   const userId = user?.id;
   const { studentId: paramStudentId } = useLocalSearchParams<{ studentId?: string }>();
+  const { markSeen } = useProgressBadge();
+  const nick = useNicknames();
+  // Opening Progress clears the "new" dot on the tab.
+  useFocusEffect(useCallback(() => { markSeen(); }, [markSeen]));
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
+  const [nickEditFor, setNickEditFor] = useState<Child | null>(null);
   const [section, setSection] = useState<Section>("attendance");
   const [photoViewer, setPhotoViewer] = useState<string[] | null>(null);
   const [certPreview, setCertPreview] = useState<Certification | null>(null);
@@ -103,7 +139,7 @@ export default function ProgressScreen() {
 
   // Stage 2: attendance + certifications for the selected child (cached per child).
   const fetchProgress = async (): Promise<ProgressData> => {
-    const [{ data: att, error: attErr }, { data: exams, error: examErr }] = await Promise.all([
+    const [{ data: att, error: attErr }, { data: exams, error: examErr }, { data: resched, error: reschedErr }] = await Promise.all([
       supabase
         .from("attendance")
         .select(`
@@ -129,6 +165,13 @@ export default function ProgressScreen() {
         .select("id, course_name, grade, code, date_issued, template")
         .eq("student_id", selectedChildId!)
         .order("date_issued", { ascending: false }),
+      // Class-credit ledger = the child's reschedule history. Best-effort:
+      // parents may lack RLS read access, so failure must NOT block the page.
+      supabase
+        .from("session_reschedules")
+        .select("id, original_date, original_slot_time, new_date, new_slot_day, new_slot_time, created_at, course:courses(name)")
+        .eq("student_id", selectedChildId!)
+        .order("created_at", { ascending: false }),
     ]);
     if (attErr) throw attErr;
 
@@ -155,7 +198,23 @@ export default function ProgressScreen() {
       dateIssued: (c.date_issued as string | null) ?? null,
       template: (c.template as string | null) ?? null,
     }));
-    return { attendance, certifications };
+
+    const ledgerRows = reschedErr ? [] : (resched ?? []);
+    const ledger: LedgerRow[] = ledgerRows.map((r) => {
+      const course = r.course as unknown as { name: string } | null;
+      return {
+        id: r.id as string,
+        originalDate: r.original_date as string,
+        originalTime: (r.original_slot_time as string | null) ?? null,
+        newDate: r.new_date as string,
+        newDay: (r.new_slot_day as string | null) ?? null,
+        newTime: (r.new_slot_time as string | null) ?? null,
+        createdAt: (r.created_at as string | null) ?? null,
+        courseName: course?.name ?? null,
+      };
+    });
+
+    return { attendance, certifications, ledger };
   };
 
   const dataQuery = useCachedQuery<ProgressData>(
@@ -169,6 +228,8 @@ export default function ProgressScreen() {
   const refreshing = dataQuery.refreshing;
   const attendance = dataQuery.data?.attendance ?? [];
   const certifications = dataQuery.data?.certifications ?? [];
+  const ledger = dataQuery.data?.ledger ?? [];
+  const newThisWeek = useMemo(() => attendance.filter((a) => isRecent(a.date)).length, [attendance]);
   const isStale = childrenQuery.isStale || dataQuery.isStale;
   const updatedAt = dataQuery.updatedAt ?? childrenQuery.updatedAt;
   const errorMessage =
@@ -180,6 +241,10 @@ export default function ProgressScreen() {
     () => children.find((c) => c.id === selectedChildId) ?? null,
     [children, selectedChildId],
   );
+
+  // Each child's colour: custom override, else system palette by order.
+  const childColorOf = (id: string) =>
+    nick.color(id) ?? CHILD_PALETTE[Math.max(0, children.findIndex((c) => c.id === id)) % CHILD_PALETTE.length];
 
   if (loadingChildren) {
     return (
@@ -216,22 +281,25 @@ export default function ProgressScreen() {
                   style={[styles.childChip, isActive && styles.childChipActive]}
                   onPress={() => setSelectedChildId(c.id)}
                 >
-                  {c.photo ? (
-                    <Image source={{ uri: c.photo }} style={styles.childChipAvatar} />
-                  ) : (
-                    <View
-                      style={[
-                        styles.childChipAvatar,
-                        isActive ? styles.childChipAvatarFallbackActive : styles.childChipAvatarFallback,
-                      ]}
-                    >
-                      <Text style={[styles.childChipInitial, isActive && { color: "#FFFFFF" }]}>
-                        {c.name.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
+                  <View>
+                    {c.photo ? (
+                      <Image source={{ uri: c.photo }} style={styles.childChipAvatar} />
+                    ) : (
+                      <View
+                        style={[
+                          styles.childChipAvatar,
+                          isActive ? styles.childChipAvatarFallbackActive : styles.childChipAvatarFallback,
+                        ]}
+                      >
+                        <Text style={[styles.childChipInitial, isActive && { color: "#FFFFFF" }]}>
+                          {c.name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={[styles.colorDotSmall, { backgroundColor: childColorOf(c.id) }]} />
+                  </View>
                   <Text style={[styles.childChipName, isActive && styles.childChipNameActive]} numberOfLines={1}>
-                    {c.name.split(" ")[0]}
+                    {nick.label(c.id, c.name)}
                   </Text>
                 </Pressable>
               );
@@ -243,17 +311,38 @@ export default function ProgressScreen() {
       {/* Selected child hero */}
       {selectedChild ? (
         <View style={styles.heroCard}>
-          {selectedChild.photo ? (
-            <Image source={{ uri: selectedChild.photo }} style={styles.heroAvatar} />
-          ) : (
-            <View style={[styles.heroAvatar, styles.heroAvatarFallback]}>
-              <Text style={styles.heroAvatarInitial}>{selectedChild.name.charAt(0).toUpperCase()}</Text>
-            </View>
-          )}
+          <View>
+            {selectedChild.photo ? (
+              <Image source={{ uri: selectedChild.photo }} style={styles.heroAvatar} />
+            ) : (
+              <View style={[styles.heroAvatar, styles.heroAvatarFallback]}>
+                <Text style={styles.heroAvatarInitial}>{selectedChild.name.charAt(0).toUpperCase()}</Text>
+              </View>
+            )}
+            <View style={[styles.colorDotBig, { backgroundColor: childColorOf(selectedChild.id) }]} />
+          </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.heroEyebrow}>Viewing progress for</Text>
-            <Text style={styles.heroName}>{selectedChild.name}</Text>
+            <View style={styles.heroNameRow}>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={styles.heroName} numberOfLines={1}>
+                  {nick.raw(selectedChild.id) ?? selectedChild.name}
+                </Text>
+                {/* Keep the real name visible (smaller) once a nickname is set. */}
+                {nick.raw(selectedChild.id) ? (
+                  <Text style={styles.heroRealName} numberOfLines={1}>{selectedChild.name}</Text>
+                ) : null}
+              </View>
+              <Pressable onPress={() => setNickEditFor(selectedChild)} hitSlop={8} style={styles.heroPen}>
+                <Ionicons name="pencil" size={13} color="#FFFFFF" />
+              </Pressable>
+            </View>
             <View style={styles.heroStats}>
+              {newThisWeek > 0 ? (
+                <View style={[styles.heroStat, styles.heroStatNew]}>
+                  <Text style={styles.heroStatText}>🎉 {newThisWeek} new this week</Text>
+                </View>
+              ) : null}
               <View style={styles.heroStat}>
                 <Ionicons name="ribbon-outline" size={12} color="#FFFFFF" />
                 <Text style={styles.heroStatText}>{certifications.length} certs</Text>
@@ -292,7 +381,20 @@ export default function ProgressScreen() {
             color={section === "certifications" ? "#FFFFFF" : "#6B7280"}
           />
           <Text style={[styles.sectionTabText, section === "certifications" && styles.sectionTabTextActive]}>
-            Certifications
+            Certs
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.sectionTab, section === "ledger" && styles.sectionTabActive]}
+          onPress={() => setSection("ledger")}
+        >
+          <Ionicons
+            name="swap-horizontal"
+            size={14}
+            color={section === "ledger" ? "#FFFFFF" : "#6B7280"}
+          />
+          <Text style={[styles.sectionTabText, section === "ledger" && styles.sectionTabTextActive]}>
+            Ledger
           </Text>
         </Pressable>
       </View>
@@ -327,7 +429,7 @@ export default function ProgressScreen() {
           }
           renderItem={({ item }) => <AttendanceCard row={item} onPhoto={setPhotoViewer} />}
         />
-      ) : (
+      ) : section === "certifications" ? (
         <FlatList
           data={certifications}
           keyExtractor={(c) => c.id}
@@ -346,8 +448,42 @@ export default function ProgressScreen() {
           }
           renderItem={({ item }) => <CertCard cert={item} onPress={() => setCertPreview(item)} />}
         />
+      ) : (
+        <FlatList
+          data={ledger}
+          keyExtractor={(r) => r.id}
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={dataQuery.refetch} tintColor="#615DFA" />}
+          ListHeaderComponent={
+            ledger.length > 0 ? (
+              <View style={styles.ledgerNote}>
+                <Ionicons name="shield-checkmark" size={15} color="#065F46" />
+                <Text style={styles.ledgerNoteText}>Rescheduling a class <Text style={{ fontWeight: "800" }}>moves</Text> it — no session credit is used up.</Text>
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            loadingData ? (
+              <View style={styles.center}><ActivityIndicator color="#615DFA" /></View>
+            ) : (
+              <View style={styles.empty}>
+                <Ionicons name="swap-horizontal" size={48} color="#D1D5DB" />
+                <Text style={styles.emptyTitle}>No reschedules yet</Text>
+                <Text style={styles.emptyText}>When you move a class to another day, it&apos;ll be logged here so you can see the class credit was kept, not lost.</Text>
+              </View>
+            )
+          }
+          renderItem={({ item }) => <LedgerCard row={item} />}
+        />
       )}
 
+      {nickEditFor ? (
+        <NicknameModal
+          child={nickEditFor}
+          systemColor={CHILD_PALETTE[Math.max(0, children.findIndex((c) => c.id === nickEditFor.id)) % CHILD_PALETTE.length]}
+          onClose={() => setNickEditFor(null)}
+        />
+      ) : null}
       {photoViewer ? <PhotoViewer uris={photoViewer} onClose={() => setPhotoViewer(null)} /> : null}
       {certPreview ? (
         <CertPreview
@@ -360,18 +496,111 @@ export default function ProgressScreen() {
   );
 }
 
+// Colours the parent can pick for a child. "Auto" (null) keeps the system colour.
+const COLOR_CHOICES = ["#2563EB", "#F97316", "#7C3AED", "#0D9488", "#DB2777", "#CA8A04", "#DC2626", "#0891B2", "#16A34A", "#4F46E5"];
+
+function NicknameModal({ child, systemColor, onClose }: { child: Child; systemColor: string; onClose: () => void }) {
+  const nick = useNicknames();
+  const [value, setValue] = useState(nick.raw(child.id) ?? "");
+  const [color, setColor] = useState<string | null>(nick.color(child.id));
+  const save = () => { nick.setNickname(child.id, value); nick.setColor(child.id, color); onClose(); };
+  const clearAll = () => { nick.setNickname(child.id, ""); nick.setColor(child.id, null); onClose(); };
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.previewBackdrop} onPress={onClose} />
+      <View style={styles.nickSheet}>
+        <View style={styles.previewHandle} />
+        <Text style={styles.nickTitle}>Edit {child.name.split(" ")[0]}</Text>
+        <Text style={styles.nickSub}>A nickname and colour to recognise {child.name} — only you see these, on this device.</Text>
+
+        <Text style={styles.nickLabel}>Nickname</Text>
+        <TextInput
+          value={value}
+          onChangeText={setValue}
+          placeholder={child.name.split(" ")[0]}
+          placeholderTextColor="#9CA3AF"
+          style={styles.nickInput}
+          maxLength={24}
+        />
+
+        <Text style={styles.nickLabel}>Colour</Text>
+        <View style={styles.swatchRow}>
+          {/* Auto = system colour */}
+          <Pressable onPress={() => setColor(null)} style={[styles.swatch, { backgroundColor: systemColor }, color === null && styles.swatchOn]}>
+            <Text style={styles.swatchAuto}>A</Text>
+          </Pressable>
+          {COLOR_CHOICES.map((c) => (
+            <Pressable key={c} onPress={() => setColor(c)} style={[styles.swatch, { backgroundColor: c }, color === c && styles.swatchOn]}>
+              {color === c ? <Ionicons name="checkmark" size={16} color="#FFFFFF" /> : null}
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={styles.nickBtns}>
+          <Pressable style={[styles.nickBtn, styles.nickBtnGhost]} onPress={clearAll}>
+            <Text style={styles.nickBtnGhostText}>Reset</Text>
+          </Pressable>
+          <Pressable style={[styles.nickBtn, styles.nickBtnPrimary]} onPress={save}>
+            <Text style={styles.nickBtnPrimaryText}>Save</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function LedgerCard({ row }: { row: LedgerRow }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.ledgerHead}>
+        <View style={styles.ledgerIcon}><Ionicons name="swap-horizontal" size={16} color="#615DFA" /></View>
+        <Text style={styles.ledgerCourse} numberOfLines={1}>{row.courseName ?? "Class"}</Text>
+        <View style={styles.ledgerKeptPill}>
+          <Ionicons name="checkmark-circle" size={12} color="#065F46" />
+          <Text style={styles.ledgerKeptText}>Credit kept</Text>
+        </View>
+      </View>
+      <View style={styles.ledgerMoveRow}>
+        <View style={styles.ledgerCol}>
+          <Text style={styles.ledgerColLabel}>From</Text>
+          <Text style={styles.ledgerColDate}>{shortDate(row.originalDate)}</Text>
+          {row.originalTime ? <Text style={styles.ledgerColTime}>{time12(row.originalTime)}</Text> : null}
+        </View>
+        <Ionicons name="arrow-forward" size={18} color="#9CA3AF" />
+        <View style={styles.ledgerCol}>
+          <Text style={styles.ledgerColLabel}>To</Text>
+          <Text style={[styles.ledgerColDate, { color: "#615DFA" }]}>{shortDate(row.newDate)}</Text>
+          {row.newTime ? <Text style={styles.ledgerColTime}>{time12(row.newTime)}</Text> : null}
+        </View>
+      </View>
+      {row.createdAt ? <Text style={styles.ledgerWhen}>Requested {shortDate(row.createdAt.slice(0, 10))}</Text> : null}
+    </View>
+  );
+}
+
 function AttendanceCard({ row, onPhoto }: { row: AttendanceRow; onPhoto: (uris: string[]) => void }) {
   const activities = row.activities ?? [];
   const fallback = row.lastActivity ? [{ lesson: row.lastActivity, mission: "" }] : [];
   const displayed = activities.length > 0 ? activities : fallback;
   const photos = row.projectPhotos ?? [];
   const hasPhoto = photos.length > 0;
+  const recent = isRecent(row.date);
+  const built = displayed.find((a) => a.lesson)?.lesson ?? null;
   // Every row is a button (press feedback); a row with photo(s) opens the viewer.
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, styles.cardButton, pressed && styles.cardPressed]}
+      style={({ pressed }) => [styles.card, styles.cardButton, recent && styles.cardRecent, pressed && styles.cardPressed]}
       onPress={hasPhoto ? () => onPhoto(photos) : undefined}
     >
+      {/* Recent sessions get an achievement banner — the "completed today" moment. */}
+      {recent ? (
+        <View style={styles.achieveBanner}>
+          <Text style={styles.achieveText} numberOfLines={2}>
+            🎉 {row.courseName ? `${row.courseName}: ` : ""}{built ? `built ${built}` : "attended a session"}
+          </Text>
+          <View style={styles.newTag}><Text style={styles.newTagText}>NEW</Text></View>
+        </View>
+      ) : null}
       {/* Date/course on the left · work done on the right (no status badge —
           this list only shows present sessions). */}
       <View style={styles.cardTop}>
@@ -534,6 +763,8 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   childChipAvatar: { width: 32, height: 32, borderRadius: 16 },
+  colorDotSmall: { position: "absolute", right: -1, bottom: -1, width: 11, height: 11, borderRadius: 6, borderWidth: 2, borderColor: "#FFFFFF" },
+  colorDotBig: { position: "absolute", right: -2, bottom: -2, width: 16, height: 16, borderRadius: 8, borderWidth: 2.5, borderColor: "#0F172A" },
   childChipAvatarFallback: { backgroundColor: "#E0E7FF", alignItems: "center", justifyContent: "center" },
   childChipAvatarFallbackActive: { backgroundColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center" },
   childChipInitial: { color: "#615DFA", fontWeight: "800", fontSize: 13 },
@@ -558,7 +789,25 @@ const styles = StyleSheet.create({
   heroAvatarFallback: { backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center" },
   heroAvatarInitial: { color: "#FFFFFF", fontSize: 22, fontWeight: "800" },
   heroEyebrow: { fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: 1, fontWeight: "700" },
-  heroName: { fontSize: 20, fontWeight: "800", color: "#FFFFFF", marginTop: 2, letterSpacing: -0.3 },
+  heroNameRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 },
+  heroName: { fontSize: 20, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.3, flexShrink: 1 },
+  heroRealName: { fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: "600", marginTop: 1 },
+  heroPen: { width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  nickSheet: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
+  nickTitle: { fontSize: 18, fontWeight: "800", color: "#111827", marginTop: 4 },
+  nickSub: { fontSize: 13, color: "#6B7280", marginTop: 4, lineHeight: 18 },
+  nickLabel: { fontSize: 11, fontWeight: "800", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 16, marginBottom: 6 },
+  nickInput: { borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: "#111827", backgroundColor: "#F9FAFB" },
+  swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  swatch: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "transparent" },
+  swatchOn: { borderColor: "#0F172A" },
+  swatchAuto: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
+  nickBtns: { flexDirection: "row", gap: 12, marginTop: 16 },
+  nickBtn: { flex: 1, height: 48, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  nickBtnGhost: { backgroundColor: "#F3F4F6" },
+  nickBtnGhostText: { color: "#6B7280", fontSize: 15, fontWeight: "700" },
+  nickBtnPrimary: { backgroundColor: "#615DFA" },
+  nickBtnPrimaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
   heroStats: { flexDirection: "row", gap: 8, marginTop: 8 },
   heroStat: {
     flexDirection: "row",
@@ -569,6 +818,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
+  heroStatNew: { backgroundColor: "rgba(97,93,250,0.55)" },
   heroStatText: { fontSize: 11, color: "#FFFFFF", fontWeight: "700" },
   sectionSwitcher: {
     flexDirection: "row",
@@ -604,7 +854,25 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
   card: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, shadowColor: "#615DFA", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   cardButton: { borderWidth: 1, borderColor: "#EEF0F6" },
+  cardRecent: { borderColor: "#C7D2FE", borderWidth: 1.5 },
   cardPressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
+  achieveBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 12 },
+  achieveText: { flex: 1, fontSize: 12, fontWeight: "800", color: "#3730A3" },
+  newTag: { backgroundColor: "#615DFA", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  newTagText: { fontSize: 9, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 },
+  ledgerNote: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#F0FDF4", borderWidth: 1, borderColor: "#BBF7D0", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 4 },
+  ledgerNoteText: { flex: 1, fontSize: 12, color: "#065F46", fontWeight: "600", lineHeight: 16 },
+  ledgerHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
+  ledgerIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
+  ledgerCourse: { flex: 1, fontSize: 14, fontWeight: "800", color: "#111827" },
+  ledgerKeptPill: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#D1FAE5", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  ledgerKeptText: { fontSize: 11, fontWeight: "800", color: "#065F46" },
+  ledgerMoveRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  ledgerCol: { flex: 1, gap: 1 },
+  ledgerColLabel: { fontSize: 9, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6 },
+  ledgerColDate: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  ledgerColTime: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
+  ledgerWhen: { fontSize: 11, color: "#9CA3AF", marginTop: 10, fontWeight: "600" },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   cardLeft: { flexShrink: 0, maxWidth: "45%" },
   cardDate: { fontSize: 14, fontWeight: "700", color: "#111827" },

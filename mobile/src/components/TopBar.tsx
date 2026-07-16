@@ -1,37 +1,39 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/auth";
 import { supabase } from "@/lib/supabase";
+import { useDrawer } from "@/contexts/drawer";
+import { TourTarget } from "@/contexts/tour";
 
 type Props = {
   title?: string;
   showLogo?: boolean;
+  center?: React.ReactNode; // optional content shown between the title and the icons
 };
 
-export function TopBar({ title, showLogo = false }: Props) {
+export function TopBar({ title, showLogo = false, center }: Props) {
   const router = useRouter();
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [parentInitial, setParentInitial] = useState<string>("");
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const { openDrawer } = useDrawer();
 
-  useEffect(() => {
+  // Refetch on every focus so counts (esp. unread messages) update after the
+  // user reads a thread and returns to a tab that stayed mounted.
+  useFocusEffect(useCallback(() => {
     let cancelled = false;
     (async () => {
       if (!user) return;
       try {
         const { data: parentRow } = await supabase
           .from("parents")
-          .select("id, name, photo")
+          .select("id")
           .eq("auth_id", user.id)
           .is("deleted_at", null)
           .maybeSingle();
         if (cancelled || !parentRow) return;
-        setPhotoUrl((parentRow.photo as string | null) ?? null);
-        const name = (parentRow.name as string) ?? "";
-        setParentInitial(name.charAt(0).toUpperCase() || "?");
 
         const { count } = await supabase
           .from("notifications")
@@ -39,6 +41,15 @@ export function TopBar({ title, showLogo = false }: Props) {
           .eq("parent_id", parentRow.id as string)
           .is("read_at", null);
         if (!cancelled) setUnreadCount(count ?? 0);
+
+        // Unread staff replies in the chat thread.
+        const { count: msgCount } = await supabase
+          .from("parent_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("parent_id", parentRow.id as string)
+          .eq("sender", "staff")
+          .is("read_at", null);
+        if (!cancelled) setUnreadMessages(msgCount ?? 0);
       } catch {
         // silent — TopBar shouldn't crash on count fetch
       }
@@ -46,11 +57,11 @@ export function TopBar({ title, showLogo = false }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id]));
 
   return (
     <View style={styles.bar}>
-      <View style={styles.leftSlot}>
+      <View style={center ? styles.leftSlotShrink : styles.leftSlot}>
         {showLogo ? (
           <View style={styles.logoWrap}>
             <View style={styles.logoMark}>
@@ -65,7 +76,21 @@ export function TopBar({ title, showLogo = false }: Props) {
         ) : null}
       </View>
 
+      {center ? <View style={styles.centerSlot}>{center}</View> : null}
+
       <View style={styles.rightSlot}>
+        <Pressable
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          onPress={() => router.push("/messages" as Href)}
+        >
+          <Ionicons name="chatbubble-ellipses-outline" size={20} color="#1F2937" />
+          {unreadMessages > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{unreadMessages > 9 ? "9+" : String(unreadMessages)}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+
         <Pressable
           style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
           onPress={() => router.push("/inbox")}
@@ -78,19 +103,14 @@ export function TopBar({ title, showLogo = false }: Props) {
           ) : null}
         </Pressable>
 
-        <Pressable
-          style={({ pressed }) => [styles.avatarButton, pressed && styles.pressed]}
-          onPress={() => router.push("/profile")}
-        >
-          {photoUrl ? (
-            <Image source={{ uri: photoUrl }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.avatarFallback]}>
-              <Text style={styles.avatarInitial}>{parentInitial}</Text>
-            </View>
-          )}
-          <View style={styles.avatarRing} pointerEvents="none" />
-        </Pressable>
+        <TourTarget name="settings">
+          <Pressable
+            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+            onPress={openDrawer}
+          >
+            <Ionicons name="settings-outline" size={20} color="#1F2937" />
+          </Pressable>
+        </TourTarget>
       </View>
     </View>
   );
@@ -106,6 +126,8 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   leftSlot: { flex: 1, paddingRight: 8 },
+  leftSlotShrink: { flexShrink: 0, paddingRight: 10 },
+  centerSlot: { flex: 1, minWidth: 0 },
   rightSlot: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoWrap: { flexDirection: "row", alignItems: "center", gap: 10 },
   logoMark: {

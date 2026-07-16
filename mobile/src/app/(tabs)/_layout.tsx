@@ -3,12 +3,16 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import { ProgressBadgeProvider, useProgressBadge } from "@/contexts/progressBadge";
+import { OnboardingTour } from "@/components/OnboardingTour";
+import { SettingsDrawer } from "@/components/SettingsDrawer";
+import { TourTarget } from "@/contexts/tour";
 
 // ── BUILD MARKER ──────────────────────────────────────────────────────────────
 // Change this colour on EVERY shipped fix so the user can confirm the OTA update
 // actually loaded (the centre Home button uses it). Rotate to a clearly different
-// colour each time. History: … → sky → lime → rose.
-const BUILD_COLOR = "#E11D48"; // rose
+// colour each time. History: … → hot pink → bright blue → violet → amber.
+const BUILD_COLOR = "#EA580C"; // orange
 
 type TabDef = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap; center?: boolean };
 
@@ -23,7 +27,9 @@ const TABS: TabDef[] = [
 
 function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { hasNew } = useProgressBadge();
   return (
+    <TourTarget name="tabs">
     <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
       {TABS.map((t) => {
         const route = state.routes.find((r) => r.name === t.name);
@@ -34,6 +40,8 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
           if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
         };
         const iconName = (focused ? t.icon : (`${t.icon}-outline` as keyof typeof Ionicons.glyphMap));
+        // Red dot when there's a recent session the parent hasn't seen yet.
+        const showBadge = t.name === "progress" && hasNew && !focused;
 
         if (t.center) {
           return (
@@ -50,24 +58,30 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
           <Pressable key={t.name} onPress={onPress} style={styles.item}>
             <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
               <Ionicons name={iconName} size={22} color={focused ? "#FFFFFF" : "#9CA3AF"} />
+              {showBadge ? <View style={styles.badge} /> : null}
             </View>
             <Text style={[styles.label, focused && styles.labelActive]} numberOfLines={1}>{t.label}</Text>
           </Pressable>
         );
       })}
     </View>
+    </TourTarget>
   );
 }
 
 export default function TabsLayout() {
   return (
-    <Tabs tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
-      <Tabs.Screen name="progress" />
-      <Tabs.Screen name="schedule" />
-      <Tabs.Screen name="index" />
-      <Tabs.Screen name="payment" />
-      <Tabs.Screen name="marketplace" />
-    </Tabs>
+    <ProgressBadgeProvider>
+      <Tabs tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
+        <Tabs.Screen name="progress" />
+        <Tabs.Screen name="schedule" />
+        <Tabs.Screen name="index" />
+        <Tabs.Screen name="payment" />
+        <Tabs.Screen name="marketplace" />
+      </Tabs>
+      <SettingsDrawer />
+      <OnboardingTour />
+    </ProgressBadgeProvider>
   );
 }
 
@@ -131,4 +145,15 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 10, fontWeight: "700", color: "#9CA3AF" },
   labelActive: { color: "#615DFA", fontWeight: "800" },
+  badge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#EF4444",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
 });

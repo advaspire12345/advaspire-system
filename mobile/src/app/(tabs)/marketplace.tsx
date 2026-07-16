@@ -1,5 +1,6 @@
-import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
@@ -19,6 +20,7 @@ type ProgramCard = {
 export default function MarketplaceScreen() {
   const { user } = useAuth();
   const userId = user?.id;
+  const router = useRouter();
 
   const fetchPrograms = async (): Promise<ProgramCard[]> => {
     const { data, error } = await supabase
@@ -93,7 +95,11 @@ export default function MarketplaceScreen() {
           </View>
         ) : (
           programs.map((p) => (
-            <View key={p.id} style={styles.card}>
+            <Pressable
+              key={p.id}
+              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+              onPress={() => router.push(`/program/${p.id}` as Href)}
+            >
               {p.cover ? (
                 <Image source={{ uri: p.cover }} style={styles.cover} />
               ) : (
@@ -117,9 +123,13 @@ export default function MarketplaceScreen() {
                       <Text style={styles.metaText}>{p.programType}</Text>
                     </View>
                   ) : null}
+                  <View style={styles.viewMore}>
+                    <Text style={styles.viewMoreText}>View & buy</Text>
+                    <Ionicons name="chevron-forward" size={12} color="#615DFA" />
+                  </View>
                 </View>
               </View>
-            </View>
+            </Pressable>
           ))
         )}
       </ScrollView>
@@ -157,4 +167,7 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: "row", gap: 8, marginTop: 2 },
   metaChip: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#EEF2FF", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   metaText: { fontSize: 11, fontWeight: "700", color: "#615DFA" },
+  cardPressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },
+  viewMore: { flexDirection: "row", alignItems: "center", gap: 2, marginLeft: "auto" },
+  viewMoreText: { fontSize: 11, fontWeight: "800", color: "#615DFA" },
 });
