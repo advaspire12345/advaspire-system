@@ -16,7 +16,7 @@
       }
     },
     "android": {
-      "package": "com.advaspire.app",
+      "package": "com.advaspire.advasy",
       "adaptiveIcon": {
         "backgroundColor": "#615DFA",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
