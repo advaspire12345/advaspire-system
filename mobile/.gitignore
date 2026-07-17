@@ -41,3 +41,6 @@ example
 # generated native folders
 /ios
 /android
+*.keystore
+upload_certificate.pem
+credentials.json
