@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateMobile } from "@/lib/mobile-auth";
-import { markAttendance, updateSessionTracking } from "@/data/attendance";
+import { markAttendance, updateSessionTracking, reverseSessionDeduction } from "@/data/attendance";
 import { getPermissionsForUser } from "@/data/permissions";
 import type { AttendanceStatus } from "@/db/schema";
 
@@ -37,9 +37,23 @@ export async function POST(request: NextRequest) {
     });
     if (!result.attendance) return NextResponse.json({ error: "Failed to mark attendance." }, { status: 500 });
 
-    // Present/late → run the same session-tracking the dashboard runs.
-    if (status === "present" || status === "late") {
+    // Match the web dashboard exactly: deduct a session only on a NEW present/late
+    // or a change INTO present/late — and never on a re-save of the same status
+    // (that guards the double-deduct bug). Absent does NOT refund (same as web).
+    // Symmetric session accounting — deduct/refund exactly once per transition so
+    // toggling present↔absent never stacks:
+    //  • new present/late, or absent→present  → deduct a session
+    //  • present/late → absent (or excused)     → REFUND the session (revert)
+    //  • same-status re-save                    → no change (guards double-deduct)
+    const isNowPresent = status === "present" || status === "late";
+    const wasPresent = result.previousStatus === "present" || result.previousStatus === "late";
+    const isNewPresent = result.isNew && isNowPresent;
+    const changedToPresent = !result.isNew && !wasPresent && isNowPresent;
+    const changedFromPresent = !result.isNew && wasPresent && !isNowPresent;
+    if (isNewPresent || changedToPresent) {
       await updateSessionTracking(enrollmentId, date);
+    } else if (changedFromPresent) {
+      await reverseSessionDeduction(enrollmentId);
     }
 
     return NextResponse.json({ success: true, attendance: result.attendance, isNew: result.isNew });

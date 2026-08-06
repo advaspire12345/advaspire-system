@@ -1,6 +1,7 @@
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
+import { SwipeBackView } from "@/components/SwipeBackView";
 import { Ionicons } from "@expo/vector-icons";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useAuth } from "@/contexts/auth";
@@ -25,6 +26,7 @@ type TransferRow = {
 };
 
 export default function TransfersScreen() {
+  const router = useRouter();
   const { user } = useAuth();
   const userId = user?.id;
 
@@ -116,14 +118,15 @@ export default function TransfersScreen() {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
         <Stack.Screen options={{ title: "Session transfers", headerShown: true }} />
-        <ActivityIndicator color="#615DFA" />
+        <ActivityIndicator color="#EC2127" />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <Stack.Screen options={{ title: "Session transfers", headerShown: true, headerTintColor: "#615DFA" }} />
+      <Stack.Screen options={{ title: "Session transfers", headerShown: true, headerTintColor: "#EC2127" }} />
+      <SwipeBackView onBack={() => router.back()} style={styles.safe}>
       {errorMessage ? (
         <View style={styles.errorCard}>
           <Text style={styles.errorText}>{errorMessage}</Text>
@@ -140,7 +143,7 @@ export default function TransfersScreen() {
         data={transfers}
         keyExtractor={(t) => t.id}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#615DFA" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#EC2127" />}
         ListHeaderComponent={
           <View style={styles.intro}>
             <Text style={styles.introTitle}>Sibling session transfers</Text>
@@ -161,6 +164,7 @@ export default function TransfersScreen() {
         }
         renderItem={({ item }) => <TransferCard row={item} onAct={onAct} />}
       />
+      </SwipeBackView>
     </SafeAreaView>
   );
 }
@@ -187,7 +191,7 @@ function TransferCard({ row, onAct }: { row: TransferRow; onAct: (action: "appro
           <Text style={styles.flowLabel}>From</Text>
           <Text style={styles.flowName}>{row.fromStudentName}</Text>
         </View>
-        <Ionicons name="arrow-forward" size={20} color="#9CA3AF" />
+        <Ionicons name="arrow-forward" size={20} color="#999999" />
         <View style={styles.flowSide}>
           <Text style={styles.flowLabel}>To</Text>
           <Text style={styles.flowName}>{row.toStudentName}</Text>
@@ -218,23 +222,23 @@ function TransferCard({ row, onAct }: { row: TransferRow; onAct: (action: "appro
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F7F3F5" },
   errorCard: { marginHorizontal: 16, marginTop: 12, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
   bannerWrap: { paddingHorizontal: 16, marginTop: 12 },
   errorText: { color: "#991B1B", fontSize: 13 },
   list: { padding: 16, gap: 12 },
   intro: { paddingBottom: 4 },
-  introTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  introText: { fontSize: 13, color: "#6B7280", marginTop: 4, lineHeight: 18 },
+  introTitle: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  introText: { fontSize: 13, color: "#666666", marginTop: 4, lineHeight: 18 },
   empty: { padding: 48, alignItems: "center", gap: 8 },
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#2B161B" },
+  emptyText: { fontSize: 14, color: "#666666", textAlign: "center", maxWidth: 280 },
   card: {
     backgroundColor: "#FFFFFF",
     padding: 16,
     borderRadius: 16,
-    shadowColor: "#615DFA",
+    shadowColor: "#EC2127",
     shadowOpacity: 0.05,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
@@ -254,14 +258,14 @@ const styles = StyleSheet.create({
   sessionsBadge: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#111827",
+    color: "#2B161B",
   },
   flow: { flexDirection: "row", alignItems: "center", gap: 12 },
   flowSide: { flex: 1 },
-  flowLabel: { fontSize: 10, color: "#9CA3AF", fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" },
-  flowName: { fontSize: 15, color: "#111827", fontWeight: "700", marginTop: 2 },
-  course: { fontSize: 13, color: "#6B7280" },
-  notes: { fontSize: 13, color: "#6B7280", fontStyle: "italic", lineHeight: 18 },
+  flowLabel: { fontSize: 10, color: "#999999", fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" },
+  flowName: { fontSize: 15, color: "#2B161B", fontWeight: "700", marginTop: 2 },
+  course: { fontSize: 13, color: "#666666" },
+  notes: { fontSize: 13, color: "#666666", fontStyle: "italic", lineHeight: 18 },
   actionsRow: { flexDirection: "row", gap: 8 },
   rejectButton: {
     flex: 1,
@@ -280,7 +284,7 @@ const styles = StyleSheet.create({
     flex: 2,
     height: 44,
     borderRadius: 10,
-    backgroundColor: "#615DFA",
+    backgroundColor: "#EC2127",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",

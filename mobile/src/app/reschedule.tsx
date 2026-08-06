@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "@/lib/supabase";
+import { SwipeBackView } from "@/components/SwipeBackView";
 
 type Slot = {
   id: string;
@@ -159,14 +160,15 @@ export default function RescheduleScreen() {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
         <Stack.Screen options={{ title: "Reschedule", headerShown: true }} />
-        <ActivityIndicator color="#615DFA" />
+        <ActivityIndicator color="#EC2127" />
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <Stack.Screen options={{ title: "Reschedule", headerShown: true, headerTintColor: "#615DFA" }} />
+      <Stack.Screen options={{ title: "Reschedule", headerShown: true, headerTintColor: "#EC2127" }} />
+      <SwipeBackView onBack={() => router.back()} style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.summaryCard}>
           <Text style={styles.summaryLabel}>Cancel & move class</Text>
@@ -235,7 +237,7 @@ export default function RescheduleScreen() {
                   <Text style={[styles.slotDuration, isSelected && styles.slotTextSelected]}>{s.duration} min</Text>
                   {s.limitStudent > 0 ? (
                     <View style={[styles.slotCapPill, isSelected && styles.slotCapPillSelected]}>
-                      <Ionicons name="people" size={10} color={isSelected ? "#FFFFFF" : "#615DFA"} />
+                      <Ionicons name="people" size={10} color={isSelected ? "#FFFFFF" : "#EC2127"} />
                       <Text style={[styles.slotCapText, isSelected && styles.slotTextSelected]}>Up to {s.limitStudent}</Text>
                     </View>
                   ) : null}
@@ -264,22 +266,23 @@ export default function RescheduleScreen() {
           )}
         </Pressable>
       </ScrollView>
+      </SwipeBackView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F7F3F5" },
   scroll: { padding: 16, gap: 12 },
-  summaryCard: { backgroundColor: "#615DFA", padding: 20, borderRadius: 16 },
+  summaryCard: { backgroundColor: "#EC2127", padding: 20, borderRadius: 16 },
   summaryLabel: { fontSize: 11, fontWeight: "700", color: "#E0E7FF", letterSpacing: 1, textTransform: "uppercase" },
   summaryTitle: { fontSize: 22, fontWeight: "800", color: "#FFFFFF", marginTop: 4 },
   summarySubtitle: { fontSize: 13, color: "#E0E7FF", marginTop: 4 },
   errorCard: { backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
   errorText: { color: "#991B1B", fontSize: 13 },
-  stepLabel: { fontSize: 14, fontWeight: "700", color: "#111827", marginTop: 8 },
-  helperText: { fontSize: 13, color: "#6B7280", paddingVertical: 12 },
+  stepLabel: { fontSize: 14, fontWeight: "700", color: "#2B161B", marginTop: 8 },
+  helperText: { fontSize: 13, color: "#666666", paddingVertical: 12 },
   datesRow: { flexDirection: "row" },
   datePill: {
     width: 64,
@@ -289,10 +292,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     alignItems: "center",
   },
-  datePillSelected: { backgroundColor: "#615DFA" },
-  datePillWeekday: { fontSize: 11, color: "#6B7280", fontWeight: "600" },
-  datePillNumber: { fontSize: 20, fontWeight: "800", color: "#111827", marginVertical: 2 },
-  datePillMonth: { fontSize: 10, color: "#6B7280" },
+  datePillSelected: { backgroundColor: "#EC2127" },
+  datePillWeekday: { fontSize: 11, color: "#666666", fontWeight: "600" },
+  datePillNumber: { fontSize: 20, fontWeight: "800", color: "#2B161B", marginVertical: 2 },
+  datePillMonth: { fontSize: 10, color: "#666666" },
   datePillTextSelected: { color: "#FFFFFF" },
   slotsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   slotChip: {
@@ -305,20 +308,20 @@ const styles = StyleSheet.create({
     minWidth: 100,
     alignItems: "center",
   },
-  slotChipSelected: { backgroundColor: "#615DFA", borderColor: "#615DFA" },
-  slotTime: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  slotDuration: { fontSize: 11, color: "#6B7280", marginTop: 2 },
+  slotChipSelected: { backgroundColor: "#EC2127", borderColor: "#EC2127" },
+  slotTime: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  slotDuration: { fontSize: 11, color: "#666666", marginTop: 2 },
   slotTextSelected: { color: "#FFFFFF" },
-  slotCapPill: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 6, backgroundColor: "#EEF2FF", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  slotCapPill: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 6, backgroundColor: "#EAF7FD", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   slotCapPillSelected: { backgroundColor: "rgba(255,255,255,0.25)" },
-  slotCapText: { fontSize: 10, fontWeight: "800", color: "#615DFA" },
+  slotCapText: { fontSize: 10, fontWeight: "800", color: "#EC2127" },
   previewBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFBEB", borderWidth: 1, borderColor: "#FDE68A", padding: 12, borderRadius: 12 },
   previewBannerText: { flex: 1, fontSize: 12, color: "#92400E", fontWeight: "600", lineHeight: 17 },
-  note: { fontSize: 12, color: "#6B7280", lineHeight: 18, marginTop: 16, paddingHorizontal: 4 },
+  note: { fontSize: 12, color: "#666666", lineHeight: 18, marginTop: 16, paddingHorizontal: 4 },
   confirmButton: {
     marginTop: 24,
     height: 52,
-    backgroundColor: "#615DFA",
+    backgroundColor: "#EC2127",
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",

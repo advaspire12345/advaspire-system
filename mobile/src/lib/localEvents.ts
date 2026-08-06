@@ -59,7 +59,17 @@ export type LocalEvent = {
   reminder: Reminder;
   alarm: boolean; // birthday alarm toggle
   color: string;
+  // Optional emoji the parent picks to "sign" the event (e.g. 🎂 🏫 ⚽). Shown on
+  // the calendar cards. Undefined = no icon.
+  icon?: string;
+  // Optional place the event happens. Used for clash detection: two overlapping
+  // items at the SAME location aren't a real clash (you're already there).
+  location?: string;
   createdAt: number;
+  // Who this event is for: student ids it's assigned to (empty/undefined = a
+  // general/parent event that shows regardless of the child filter). Drives the
+  // schedule child-filter chips.
+  assignedTo?: string[];
   // "Move just this occurrence": the series SKIPS these dates (the moved
   // occurrence becomes a separate single event on the target date). Standard
   // detached-instance model — each move is self-contained.
