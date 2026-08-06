@@ -11,10 +11,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { Stack, useFocusEffect } from "expo-router";
+import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/auth";
 import { supabase } from "@/lib/supabase";
+import { C } from "@/theme/tech";
 
 type Message = {
   id: string;
@@ -34,6 +35,7 @@ function dayLabel(iso: string): string {
 export default function MessagesScreen() {
   const { user } = useAuth();
   const userId = user?.id;
+  const router = useRouter();
   const [parentId, setParentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,13 +115,23 @@ export default function MessagesScreen() {
   let lastDay = "";
 
   return (
-    <SafeAreaView style={styles.safe} edges={[]}>
-      <Stack.Screen options={{ title: "Message us", headerShown: true, headerTintColor: "#615DFA" }} />
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <Stack.Screen options={{ headerShown: false }} />
+      {/* Custom Turn-4 thread header */}
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} hitSlop={10} style={styles.back}><Ionicons name="chevron-back" size={22} color={C.textDim} /></Pressable>
+        <View style={styles.headerAv}><Text style={styles.headerAvText}>A</Text></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.headerName}>Advaspire team</Text>
+          <Text style={styles.headerSub}>Usually replies within a day</Text>
+        </View>
+      </View>
+
       {/* Manual keyboard avoidance: pad the bottom by the keyboard height while it's
           open, otherwise by the safe-area (nav bar) inset. */}
       <View style={[styles.flex, { paddingBottom: kb > 0 ? kb : insets.bottom }]}>
         {loading ? (
-          <View style={styles.center}><ActivityIndicator color="#615DFA" /></View>
+          <View style={styles.center}><ActivityIndicator color={C.red} /></View>
         ) : (
           <ScrollView
             ref={scrollRef}
@@ -127,15 +139,8 @@ export default function MessagesScreen() {
             contentContainerStyle={styles.list}
             onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
           >
-            <View style={styles.intro}>
-              <Ionicons name="chatbubbles" size={22} color="#615DFA" />
-              <Text style={styles.introText}>
-                Message the Advaspire team — ask to update your child&apos;s details, or anything else. We&apos;ll reply here.
-              </Text>
-            </View>
-
             {messages.length === 0 ? (
-              <Text style={styles.empty}>No messages yet. Say hello 👋</Text>
+              <Text style={styles.empty}>No messages yet — say hello and the team will reply here.</Text>
             ) : (
               messages.map((m) => {
                 const day = dayLabel(m.createdAt);
@@ -145,13 +150,26 @@ export default function MessagesScreen() {
                 return (
                   <View key={m.id}>
                     {showDay ? <Text style={styles.daySep}>{day}</Text> : null}
-                    <View style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}>
-                      <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-                        {!mine ? <Text style={styles.staffLabel}>Advaspire</Text> : null}
-                        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{m.body}</Text>
-                        <Text style={[styles.bubbleTime, mine && styles.bubbleTimeMine]}>{timeLabel(m.createdAt)}</Text>
+                    {mine ? (
+                      <View style={styles.rowMine}>
+                        <View style={styles.bubbleCol}>
+                          <View style={styles.bubbleMine}>
+                            <Text style={styles.bubbleTextMine}>{m.body}</Text>
+                          </View>
+                          <Text style={[styles.bubbleTime, styles.timeRight]}>{timeLabel(m.createdAt)}</Text>
+                        </View>
                       </View>
-                    </View>
+                    ) : (
+                      <View style={styles.rowTheirs}>
+                        <View style={styles.staffAv}><Text style={styles.staffAvText}>A</Text></View>
+                        <View style={styles.bubbleCol}>
+                          <View style={styles.bubbleTheirs}>
+                            <Text style={styles.bubbleText}>{m.body}</Text>
+                          </View>
+                          <Text style={styles.bubbleTime}>{timeLabel(m.createdAt)}</Text>
+                        </View>
+                      </View>
+                    )}
                   </View>
                 );
               })
@@ -166,8 +184,8 @@ export default function MessagesScreen() {
             style={styles.input}
             value={draft}
             onChangeText={setDraft}
-            placeholder="Type a message…"
-            placeholderTextColor="#9CA3AF"
+            placeholder="Message the Advaspire team…"
+            placeholderTextColor="#999999"
             multiline
             maxLength={4000}
           />
@@ -176,7 +194,7 @@ export default function MessagesScreen() {
             onPress={send}
             disabled={!draft.trim() || sending}
           >
-            <Ionicons name="send" size={18} color="#FFFFFF" />
+            <Ionicons name="paper-plane" size={18} color="#FFFFFF" style={{ marginLeft: -2 }} />
           </Pressable>
         </View>
       </View>
@@ -185,28 +203,32 @@ export default function MessagesScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
-  flex: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  list: { padding: 16, paddingBottom: 8, gap: 2 },
-  intro: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#EEF2FF", borderRadius: 14, padding: 12, marginBottom: 12 },
-  introText: { flex: 1, fontSize: 12, color: "#4338CA", fontWeight: "600", lineHeight: 17 },
-  empty: { textAlign: "center", color: "#9CA3AF", fontSize: 14, marginTop: 30 },
-  daySep: { textAlign: "center", color: "#9CA3AF", fontSize: 11, fontWeight: "700", marginVertical: 12 },
-  bubbleRow: { flexDirection: "row", marginBottom: 8 },
-  rowMine: { justifyContent: "flex-end" },
-  rowTheirs: { justifyContent: "flex-start" },
-  bubble: { maxWidth: "82%", borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleMine: { backgroundColor: "#615DFA", borderBottomRightRadius: 4 },
-  bubbleTheirs: { backgroundColor: "#FFFFFF", borderBottomLeftRadius: 4, borderWidth: 1, borderColor: "#EEF0F6" },
-  staffLabel: { fontSize: 10, fontWeight: "800", color: "#615DFA", marginBottom: 2 },
-  bubbleText: { fontSize: 15, color: "#111827", lineHeight: 20 },
-  bubbleTextMine: { color: "#FFFFFF" },
-  bubbleTime: { fontSize: 10, color: "#9CA3AF", marginTop: 4, alignSelf: "flex-end" },
-  bubbleTimeMine: { color: "rgba(255,255,255,0.7)" },
-  err: { color: "#B91C1C", fontSize: 12, textAlign: "center", paddingVertical: 6 },
-  inputBar: { flexDirection: "row", alignItems: "flex-end", gap: 10, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 8, backgroundColor: "#FFFFFF", borderTopWidth: 1, borderTopColor: "#F0F0F6" },
-  input: { flex: 1, maxHeight: 120, minHeight: 44, borderRadius: 22, backgroundColor: "#F3F4F6", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, fontSize: 15, color: "#111827" },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center" },
-  sendBtnOff: { backgroundColor: "#C7CAD1" },
+  safe: { flex: 1, backgroundColor: C.card },
+  flex: { flex: 1, backgroundColor: C.bg },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.bg },
+  header: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.borderFaint },
+  back: { marginRight: -4 },
+  headerAv: { width: 38, height: 38, borderRadius: 13, backgroundColor: C.red, alignItems: "center", justifyContent: "center" },
+  headerAvText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  headerName: { fontSize: 16, fontWeight: "600", color: C.ink },
+  headerSub: { fontSize: 11, color: C.green, fontWeight: "600", marginTop: 2 },
+  list: { padding: 14, paddingBottom: 8, gap: 13 },
+  empty: { textAlign: "center", color: C.textMute, fontSize: 14, marginTop: 40, paddingHorizontal: 32, lineHeight: 20 },
+  daySep: { textAlign: "center", color: C.textMute, fontSize: 11, marginVertical: 4 },
+  rowMine: { flexDirection: "row", justifyContent: "flex-end" },
+  rowTheirs: { flexDirection: "row", justifyContent: "flex-start", gap: 9 },
+  staffAv: { width: 30, height: 30, borderRadius: 11, backgroundColor: C.red, alignItems: "center", justifyContent: "center", alignSelf: "flex-start" },
+  staffAvText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
+  bubbleCol: { maxWidth: "78%" },
+  bubbleMine: { backgroundColor: C.ink, borderRadius: 18, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 12 },
+  bubbleTheirs: { backgroundColor: C.card, borderRadius: 18, borderTopLeftRadius: 4, paddingHorizontal: 14, paddingVertical: 12, shadowColor: "#000000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  bubbleText: { fontSize: 14, color: C.ink, lineHeight: 21 },
+  bubbleTextMine: { color: "#FFFFFF", fontSize: 14, lineHeight: 21 },
+  bubbleTime: { fontSize: 10, color: C.textMute, marginTop: 5 },
+  timeRight: { textAlign: "right" },
+  err: { color: C.red, fontSize: 12, textAlign: "center", paddingVertical: 6 },
+  inputBar: { flexDirection: "row", alignItems: "flex-end", gap: 9, paddingHorizontal: 14, paddingTop: 11, paddingBottom: 11, backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.borderFaint },
+  input: { flex: 1, maxHeight: 120, minHeight: 44, borderRadius: 22, backgroundColor: C.bg, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, fontSize: 14, color: C.ink },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.red, alignItems: "center", justifyContent: "center" },
+  sendBtnOff: { backgroundColor: "#D8CFD2" },
 });

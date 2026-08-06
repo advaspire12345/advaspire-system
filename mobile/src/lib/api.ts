@@ -14,6 +14,34 @@ async function post(path: string, body: unknown, token: string): Promise<Respons
   });
 }
 
+// Public marketing trial signup (no auth) — mirrors the website's /trial form.
+// The row lands in the `trials` table admins + the teacher portal see. The web
+// endpoint resolves branch_id server-side (service role), so RLS isn't a blocker
+// even though the parent isn't signed in.
+export type TrialSignup = {
+  parent_name: string;
+  parent_phone: string;
+  parent_email?: string | null;
+  child_name: string;
+  child_age: number;
+  branch: string; // "semenyih" | "kepong" (matched by name/city on the server)
+  message?: string | null;
+};
+export async function submitTrialSignup(body: TrialSignup): Promise<ApiResult<{ trial_id: string }>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/marketing/trial-signup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({} as Record<string, unknown>));
+    if (!res.ok) return { ok: false, error: (json as { error?: string })?.error || `Request failed (${res.status})` };
+    return { ok: true, data: json as { trial_id: string } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error — check your connection." };
+  }
+}
+
 // POST to a web /api/mobile/* endpoint, authenticated with the user's Supabase
 // access token. On a 401 (stale/expired token) we force a refresh and retry once.
 export async function mobileApi<T = unknown>(path: string, body: unknown): Promise<ApiResult<T>> {

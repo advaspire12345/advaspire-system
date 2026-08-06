@@ -1,13 +1,34 @@
-import { useState } from "react";
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as WebBrowser from "expo-web-browser";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { useNicknames } from "@/contexts/nicknames";
 import { supabase } from "@/lib/supabase";
+import { mobileApi } from "@/lib/api";
+import { takePaymentResult } from "@/lib/paymentResult";
+import { SwipeBackView } from "@/components/SwipeBackView";
+
+// In-app checkout (react-native-webview) is NATIVE — crashes a build without it.
+// FALSE on the current OTA build (uses the in-app browser tab); flip to true ONLY in a
+// fresh build that bundles react-native-webview.
+const IN_APP_CHECKOUT = true;
+
+// Receipt header — mirrors the web receipt template's company defaults
+// (components/payments/receipt-preview-modal.tsx).
+const RECEIPT_LOGO = require("../../../assets/images/advaspire-logo.png");
+const RECEIPT_CO = {
+  name: "ADVASPIRE SDN BHD",
+  address: ["32A-3, Jalan Ecohill 1/3C, Setia Ecohill", "43500 Semenyih, Selangor"],
+  phone: "012-5804645",
+  email: "advaspire@gmail.com",
+  bankName: "HONG LEONG BANK",
+  bankAccount: "201 000 48797",
+};
 
 // Minimal base64 → bytes (no extra deps) for uploading the picked image.
 function base64ToBytes(b64: string): Uint8Array {
@@ -57,19 +78,19 @@ type CoveredSession = {
 };
 
 const STATUS_STYLES: Record<PaymentDetail["status"], { bg: string; fg: string; label: string }> = {
-  pending: { bg: "#FEF3C7", fg: "#92400E", label: "Pending" },
-  paid: { bg: "#D1FAE5", fg: "#065F46", label: "Paid" },
-  failed: { bg: "#FEE2E2", fg: "#991B1B", label: "Failed" },
-  refunded: { bg: "#E0E7FF", fg: "#3730A3", label: "Refunded" },
-  cancelled: { bg: "#F3F4F6", fg: "#374151", label: "Cancelled" },
+  pending: { bg: "#FDC049", fg: "#2B161B", label: "Pending" },
+  paid: { bg: "#E7F7EE", fg: "#0F8B3C", label: "Paid" },
+  failed: { bg: "#FDECED", fg: "#EC2127", label: "Failed" },
+  refunded: { bg: "#EAF7FD", fg: "#01A0E4", label: "Refunded" },
+  cancelled: { bg: "#F5F5F5", fg: "#666666", label: "Cancelled" },
 };
 
 const SESSION_STATUS: Record<CoveredSession["status"], { bg: string; fg: string; label: string }> = {
-  present: { bg: "#D1FAE5", fg: "#065F46", label: "Present" },
-  absent: { bg: "#FEE2E2", fg: "#991B1B", label: "Absent" },
-  late: { bg: "#FEF3C7", fg: "#92400E", label: "Late" },
-  excused: { bg: "#E0E7FF", fg: "#3730A3", label: "Excused" },
-  upcoming: { bg: "#F3F4F6", fg: "#374151", label: "Upcoming" },
+  present: { bg: "#E7F7EE", fg: "#0F8B3C", label: "Present" },
+  absent: { bg: "#FDECED", fg: "#EC2127", label: "Absent" },
+  late: { bg: "#FEF0D6", fg: "#B57614", label: "Late" },
+  excused: { bg: "#EAF7FD", fg: "#01A0E4", label: "Excused" },
+  upcoming: { bg: "#F5F5F5", fg: "#666666", label: "Upcoming" },
 };
 
 function formatDate(iso: string): string {
@@ -82,6 +103,12 @@ function formatRM(amount: number): string {
 }
 function formatDateShort(iso: string): string {
   return new Date(iso).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" });
+}
+// dd/MM/yyyy — matches the web receipt template's date format.
+function formatDDMMYYYY(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 function joinNames(names: string[] = []): string {
   if (names.length <= 1) return names[0] ?? "—";
@@ -104,6 +131,7 @@ export default function PaymentDetailScreen() {
   const nick = useNicknames();
   const [selectedPkgId, setSelectedPkgId] = useState<string | null>(null);
   const [qtyOverride, setQtyOverride] = useState<number | null>(null); // null = use the suggested (full-coverage) quantity
+  const [payMethod, setPayMethod] = useState<"fpx" | "duitnow" | "slip">("fpx");
 
   const fetchPayment = async (): Promise<PaymentDetailData> => {
     const { data, error } = await supabase
@@ -244,16 +272,94 @@ export default function PaymentDetailScreen() {
     { enabled: !!id },
   );
   const [uploadingSlip, setUploadingSlip] = useState(false);
+  const [payingOnline, setPayingOnline] = useState(false);
+  // Refetch when the screen regains focus (e.g. returning from checkout), but skip
+  // the very first focus (useCachedQuery already loads on mount). Also tell the
+  // parent whether the payment succeeded or failed.
+  //
+  // Billplz reliably redirects back only on SUCCESS, so the in-app WebView's
+  // billplz[paid] signal often never arrives on a failed/abandoned payment. So the
+  // source of truth for the message is the payment's ACTUAL status after a checkout
+  // attempt: paid → success; still-pending → not completed. (The WebView result is
+  // used as a fast-path when present.)
+  const firstFocus = useRef(true);
+  const attemptedCheckout = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (firstFocus.current) { firstFocus.current = false; return; }
+    const result = takePaymentResult();
+    const attempted = attemptedCheckout.current;
+    attemptedCheckout.current = false;
+    refetch();
+    if (result?.status === "paid") {
+      Alert.alert("Payment successful 🎉", "Your payment is confirmed — your receipt is ready below.");
+      return;
+    }
+    if (!attempted && !result) return; // returned here for some other reason
+    // Confirm the real status straight from the DB (a completed payment is already
+    // marked paid server-side by the Billplz redirect handler).
+    (async () => {
+      const { data: fresh } = await supabase.from("payments").select("status").eq("id", id).maybeSingle();
+      if (fresh?.status === "paid") {
+        Alert.alert("Payment successful 🎉", "Your payment is confirmed — your receipt is ready below.");
+      } else {
+        Alert.alert("Payment not completed", "Your payment wasn't completed and no charge was made. You can try again, or upload a payment slip instead.");
+      }
+    })();
+  }, [refetch, id]));
 
   const payment = data?.payment ?? null;
   const coveredSessions = data?.coveredSessions ?? [];
   const errorMessage = error && !data ? error : null;
 
-  const onPayOnline = () => {
-    Alert.alert(
-      "Coming soon",
-      "Online payment via Billplz will go live once we add the mobile checkout endpoint. For now, please upload your transfer slip below.",
-    );
+  // Build a tidy text receipt and share it (WhatsApp first, else the system sheet).
+  const shareReceipt = async () => {
+    if (!payment) return;
+    const lines = [
+      `🧾 ${RECEIPT_CO.name} — RECEIPT`,
+      payment.receiptNumber ? `Receipt No: ${payment.receiptNumber}` : "",
+      payment.invoiceNumber ? `Invoice No: ${payment.invoiceNumber}` : "",
+      `Bill to: ${joinNames(displayNames)}`,
+      payment.courseName ? `Product: ${payment.courseName}${payment.packageDuration ? ` (${payment.packageDuration} sessions)` : ""}` : "",
+      `Amount received: ${formatRM(payment.amount)}`,
+      payment.paidAt ? `Date: ${formatDate(payment.paidAt)}` : "",
+      "Status: PAID ✅",
+      `${RECEIPT_CO.phone} · ${RECEIPT_CO.email}`,
+    ].filter(Boolean);
+    const text = lines.join("\n");
+    const wa = `whatsapp://send?text=${encodeURIComponent(text)}`;
+    const canWa = await Linking.canOpenURL(wa).catch(() => false);
+    if (canWa) { Linking.openURL(wa); return; }
+    try { const { Share } = await import("react-native"); await Share.share({ message: text }); }
+    catch { Alert.alert("Couldn't share", "No sharing app is available."); }
+  };
+  const goHome = () => router.replace("/(tabs)" as Href);
+
+  // Create a Billplz bill via the web endpoint, open its hosted checkout in an
+  // in-app browser, then refetch so a completed payment shows as paid on return.
+  const onPayOnline = async () => {
+    if (!payment || payingOnline) return;
+    setPayingOnline(true);
+    const res = await mobileApi<{ url?: string }>("/api/mobile/payments/checkout", { paymentId: payment.id });
+    if (!res.ok || !res.data.url) {
+      setPayingOnline(false);
+      Alert.alert("Couldn't start payment", res.ok ? "No checkout link was returned. Please try again." : res.error);
+      return;
+    }
+    setPayingOnline(false);
+    attemptedCheckout.current = true; // so the focus handler reports the outcome on return
+    // Fresh build (react-native-webview bundled): open the checkout INSIDE the app.
+    if (IN_APP_CHECKOUT) {
+      router.push(`/payment/checkout?url=${encodeURIComponent(res.data.url)}` as Href);
+      return;
+    }
+    // Current build: in-app browser tab (Custom Tab), external browser as last resort.
+    try {
+      await WebBrowser.openBrowserAsync(res.data.url);
+    } catch {
+      await Linking.openURL(res.data.url).catch(() => {});
+    }
+    // The webhook confirms server-side; refetch to reflect a just-completed payment.
+    refetch();
   };
 
   const onUploadSlip = async () => {
@@ -288,7 +394,7 @@ export default function PaymentDetailScreen() {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
         <Stack.Screen options={{ title: "Payment", headerShown: true }} />
-        <ActivityIndicator color="#615DFA" />
+        <ActivityIndicator color="#EC2127" />
       </SafeAreaView>
     );
   }
@@ -322,14 +428,15 @@ export default function PaymentDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <Stack.Screen options={{ title: "Payment", headerShown: true, headerTintColor: "#615DFA" }} />
+      <Stack.Screen options={{ title: "Payment", headerShown: true, headerTintColor: "#EC2127", headerStyle: { backgroundColor: "#FFFFFF" }, headerTitleStyle: { color: "#2B161B" }, headerShadowVisible: false }} />
+      <SwipeBackView onBack={() => router.back()} style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
         {isStale ? <OfflineBanner updatedAt={updatedAt} /> : null}
-        <View style={styles.amountCard}>
-          <Text style={styles.amountLabel}>Amount</Text>
-          <Text style={styles.amount}>{formatRM(payment.amount)}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
-            <Text style={[styles.statusText, { color: statusStyle.fg }]}>{statusStyle.label}</Text>
+        <View style={[styles.amountCard, isPending && styles.amountCardDue]}>
+          <Text style={[styles.amountLabel, isPending && styles.amountLabelDue]}>{isPending ? "AMOUNT DUE" : "Amount"}</Text>
+          <Text style={[styles.amount, isPending && styles.amountDue]}>{formatRM(payment.amount)}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: isPending ? "#FFFFFF" : statusStyle.bg }]}>
+            <Text style={[styles.statusText, { color: isPending ? "#EC2127" : statusStyle.fg }]}>{statusStyle.label}</Text>
           </View>
         </View>
 
@@ -343,7 +450,7 @@ export default function PaymentDetailScreen() {
         {/* Invoice */}
         <View style={styles.docCard}>
           <View style={styles.docHeader}>
-            <Ionicons name="document-text-outline" size={18} color="#615DFA" />
+            <Ionicons name="document-text-outline" size={18} color="#EC2127" />
             <Text style={styles.docTitle}>Invoice</Text>
             <Text style={styles.docNo}>{payment.invoiceNumber ?? "Pending approval"}</Text>
           </View>
@@ -360,20 +467,117 @@ export default function PaymentDetailScreen() {
           </View>
         </View>
 
-        {/* Receipt — only once paid */}
+        {/* Receipt — only once paid. Faithfully mirrors the web receipt template
+            (components/payments/receipt-preview-modal.tsx): logo + company header,
+            big RECEIPT title, BILL TO / date meta, items table, AMOUNT RECEIVED,
+            bank details + notes + THANK YOU. */}
         {payment.status === "paid" ? (
-          <View style={[styles.docCard, styles.receiptCard]}>
-            <View style={styles.docHeader}>
-              <Ionicons name="receipt-outline" size={18} color="#065F46" />
-              <Text style={[styles.docTitle, { color: "#065F46" }]}>Receipt</Text>
-              <Text style={[styles.docNo, { color: "#047857" }]}>{payment.receiptNumber ?? "—"}</Text>
+          <View style={styles.receiptDoc}>
+            {/* Header: logo + company (left), RECEIPT title (right) */}
+            <View style={styles.rcHeader}>
+              <View style={styles.rcHeaderLeft}>
+                <View style={styles.rcBrandRow}>
+                  <Image source={RECEIPT_LOGO} style={styles.rcLogo} resizeMode="contain" />
+                  <Text style={styles.rcCompany}>{RECEIPT_CO.name}</Text>
+                </View>
+                {RECEIPT_CO.address.map((line, i) => (
+                  <Text key={i} style={styles.rcCoLine}>{line}</Text>
+                ))}
+                <Text style={styles.rcCoLine}>Contact: {RECEIPT_CO.phone}</Text>
+                <Text style={styles.rcCoLine}>Email: {RECEIPT_CO.email}</Text>
+              </View>
+              <Text style={styles.rcTitle}>RECEIPT</Text>
             </View>
-            <Row label="Paid by" value={joinNames(displayNames)} />
-            <Row label="Amount paid" value={formatRM(payment.amount)} />
-            {payment.paidAt ? <Row label="Paid on" value={formatDate(payment.paidAt)} /> : null}
-            <View style={styles.paidStamp}>
-              <Ionicons name="checkmark-circle" size={16} color="#065F46" />
-              <Text style={styles.paidStampText}>PAID</Text>
+
+            <View style={styles.rcRule} />
+
+            {/* BILL TO (left) + date / receipt / invoice meta (right) */}
+            <View style={styles.rcMeta}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rcBillToLabel}>BILL TO:</Text>
+                <Text style={styles.rcBillName}>{joinNames(displayNames)}</Text>
+              </View>
+              <View style={styles.rcMetaKV}>
+                <View style={styles.rcKVCol}>
+                  <Text style={styles.rcKVKey}>DATE:</Text>
+                  <Text style={styles.rcKVKey}>RECEIPT NO:</Text>
+                  <Text style={styles.rcKVKey}>INVOICE NO:</Text>
+                  <Text style={styles.rcKVKey}>PAGE:</Text>
+                </View>
+                <View style={styles.rcKVValCol}>
+                  <Text style={styles.rcKVVal}>{formatDDMMYYYY(payment.paidAt ?? payment.createdAt)}</Text>
+                  <Text style={[styles.rcKVVal, styles.rcKVRed]}>{payment.receiptNumber ?? "—"}</Text>
+                  <Text style={[styles.rcKVVal, styles.rcKVRed]}>{payment.invoiceNumber ?? "—"}</Text>
+                  <Text style={styles.rcKVVal}>1 of 1</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Items table */}
+            <View style={styles.rcTableHead}>
+              <Text style={[styles.rcTh, { width: 26 }]}>#</Text>
+              <Text style={[styles.rcTh, { flex: 1 }]}>PRODUCT</Text>
+              <Text style={[styles.rcTh, styles.rcThRight, { width: 34 }]}>QTY</Text>
+              <Text style={[styles.rcTh, styles.rcThRight, { width: 62 }]}>RATE</Text>
+              <Text style={[styles.rcTh, styles.rcThRight, { width: 72 }]}>AMOUNT</Text>
+            </View>
+            {(() => {
+              const qty = payment.packageDuration && payment.packageDuration > 0 ? payment.packageDuration : 1;
+              const rate = payment.amount / qty;
+              return (
+                <View style={styles.rcRow}>
+                  <Text style={[styles.rcTd, { width: 26 }]}>1</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rcTd} numberOfLines={2}>{payment.courseName ?? payment.packageName ?? "Course payment"}</Text>
+                    {payment.packageName && payment.courseName ? <Text style={styles.rcTdSub}>{payment.packageName}</Text> : null}
+                    {payment.packageDuration ? <Text style={styles.rcTdSub}>{payment.packageDuration} sessions</Text> : null}
+                  </View>
+                  <Text style={[styles.rcTd, styles.rcThRight, { width: 34 }]}>{qty}</Text>
+                  <Text style={[styles.rcTd, styles.rcThRight, { width: 62 }]}>{rate.toFixed(2)}</Text>
+                  <Text style={[styles.rcTd, styles.rcThRight, { width: 72 }]}>{payment.amount.toFixed(2)}</Text>
+                </View>
+              );
+            })()}
+            {payment.discount > 0 ? (
+              <View style={styles.rcRow}>
+                <Text style={[styles.rcTd, { width: 26 }]} />
+                <Text style={[styles.rcTd, { flex: 1 }]}>Discount</Text>
+                <Text style={[styles.rcTd, styles.rcThRight, { width: 72 + 62 + 34 }]}>- {payment.discount.toFixed(2)}</Text>
+              </View>
+            ) : null}
+
+            {/* Amount received */}
+            <View style={styles.rcTotalWrap}>
+              <View style={styles.rcTotalRow}>
+                <Text style={styles.rcTotalLabel}>AMOUNT RECEIVED</Text>
+                <Text style={styles.rcTotalValue}>RM {payment.amount.toFixed(2)}</Text>
+              </View>
+            </View>
+
+            {/* Bank details + notes (left), THANK YOU (right) */}
+            <View style={styles.rcFooter}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rcBankHead}>BANK DETAILS:</Text>
+                <Text style={styles.rcBankLine}>{RECEIPT_CO.bankName}</Text>
+                <Text style={styles.rcBankLine}>ACC NO: {RECEIPT_CO.bankAccount}</Text>
+                <Text style={styles.rcNotesHead}>Notes:</Text>
+                <Text style={styles.rcNote}>1. All cheques should be crossed and made payable to {RECEIPT_CO.name}.</Text>
+                <Text style={styles.rcNote}>2. Goods sold are neither returnable nor refundable. Otherwise a cancellation fee of at least 20% on purchase price may be imposed.</Text>
+              </View>
+              <View style={styles.rcThankWrap}>
+                <Text style={styles.rcThank}>THANK YOU!</Text>
+              </View>
+            </View>
+
+            <View style={styles.receiptActions}>
+              <Pressable style={({ pressed }) => [styles.waButton, pressed && styles.pressed]} onPress={shareReceipt}>
+                <Ionicons name="logo-whatsapp" size={18} color="#FFFFFF" />
+                <Text style={styles.waButtonText}>Share receipt</Text>
+              </Pressable>
+              <Pressable style={({ pressed }) => [styles.homeButton, pressed && styles.pressed]} onPress={goHome}>
+                <Ionicons name="home-outline" size={18} color="#2B161B" />
+                <Text style={styles.homeButtonText}>Home</Text>
+              </Pressable>
             </View>
           </View>
         ) : null}
@@ -446,11 +650,11 @@ export default function PaymentDetailScreen() {
                 <Text style={styles.qtyLabel}>Quantity</Text>
                 <View style={styles.stepper}>
                   <Pressable style={styles.stepBtn} onPress={() => setQtyOverride(Math.max(1, qty - 1))} hitSlop={6}>
-                    <Ionicons name="remove" size={18} color="#615DFA" />
+                    <Ionicons name="remove" size={18} color="#EC2127" />
                   </Pressable>
                   <Text style={styles.stepVal}>{qty}</Text>
                   <Pressable style={styles.stepBtn} onPress={() => setQtyOverride(qty + 1)} hitSlop={6}>
-                    <Ionicons name="add" size={18} color="#615DFA" />
+                    <Ionicons name="add" size={18} color="#EC2127" />
                   </Pressable>
                 </View>
                 {debt > 0 ? (
@@ -479,23 +683,40 @@ export default function PaymentDetailScreen() {
 
         {isPending ? (
           <View style={styles.actions}>
-            <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]} onPress={onPayOnline}>
-              <Ionicons name="card" size={20} color="#FFFFFF" />
-              <Text style={styles.primaryButtonText}>Pay {formatRM(payAmount)}</Text>
+            <Text style={styles.payWithLabel}>PAY WITH</Text>
+            {([
+              { key: "fpx", title: "Online banking (FPX)", sub: "Maybank, CIMB, Public Bank…" },
+              { key: "duitnow", title: "DuitNow QR", sub: "Scan with any Malaysian bank app" },
+              { key: "slip", title: payment.receiptPhoto ? "Re-upload payment slip" : "Upload payment slip", sub: "Staff confirm within 1 working day" },
+            ] as const).map((m) => {
+              const on = payMethod === m.key;
+              return (
+                <Pressable key={m.key} style={[styles.payOption, on && styles.payOptionOn]} onPress={() => setPayMethod(m.key)}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.payOptionTitle}>{m.title}</Text>
+                    <Text style={styles.payOptionSub}>{m.sub}</Text>
+                  </View>
+                  <View style={[styles.payRadio, on && styles.payRadioOn]}>
+                    {on ? <Ionicons name="checkmark" size={13} color="#FFFFFF" /> : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              style={({ pressed }) => [styles.primaryButton, (payingOnline || uploadingSlip) && styles.pressed, pressed && styles.pressed]}
+              onPress={payMethod === "slip" ? onUploadSlip : onPayOnline}
+              disabled={payingOnline || uploadingSlip}
+            >
+              {(payingOnline || uploadingSlip) ? <ActivityIndicator color="#FFFFFF" /> : null}
+              <Text style={styles.primaryButtonText}>
+                {payingOnline ? "Opening checkout…" : uploadingSlip ? "Uploading…" : payMethod === "slip" ? "UPLOAD SLIP" : `PAY ${formatRM(payment.amount)}`}
+              </Text>
             </Pressable>
-            <Pressable style={({ pressed }) => [styles.secondaryButton, (uploadingSlip) && styles.pressed, pressed && styles.pressed]} onPress={onUploadSlip} disabled={uploadingSlip}>
-              {uploadingSlip ? (
-                <ActivityIndicator color="#615DFA" />
-              ) : (
-                <>
-                  <Ionicons name="cloud-upload-outline" size={20} color="#615DFA" />
-                  <Text style={styles.secondaryButtonText}>{payment.receiptPhoto ? "Re-upload slip" : "Upload payment slip"}</Text>
-                </>
-              )}
-            </Pressable>
+            <Text style={styles.payFoot}>Sessions are credited as soon as payment clears.</Text>
           </View>
         ) : null}
       </ScrollView>
+      </SwipeBackView>
     </SafeAreaView>
   );
 }
@@ -510,44 +731,96 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB", gap: 12 },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F7F3F5", gap: 12 },
   scroll: { padding: 16, gap: 12 },
-  amountCard: { backgroundColor: "#FFFFFF", padding: 24, borderRadius: 16, alignItems: "center", gap: 8 },
-  amountLabel: { fontSize: 12, color: "#6B7280", fontWeight: "600", letterSpacing: 1, textTransform: "uppercase" },
-  amount: { fontSize: 36, fontWeight: "800", color: "#615DFA" },
+  amountCard: { backgroundColor: "#FFFFFF", padding: 24, borderRadius: 22, alignItems: "center", gap: 8, shadowColor: "#000000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  amountCardDue: { backgroundColor: "#EC2127", shadowColor: "#EC2127", shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
+  amountLabel: { fontSize: 12, color: "#666666", fontWeight: "600", letterSpacing: 1, textTransform: "uppercase" },
+  amountLabelDue: { color: "rgba(255,255,255,0.85)", letterSpacing: 2 },
+  amount: { fontSize: 36, fontWeight: "800", color: "#EC2127" },
+  amountDue: { color: "#FFFFFF" },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, marginTop: 4 },
   statusText: { fontSize: 12, fontWeight: "700" },
   detailCard: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16 },
-  docCard: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, borderWidth: 1, borderColor: "#EEF2FF" },
+  docCard: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, borderWidth: 1, borderColor: "#EAF7FD" },
   receiptCard: { borderColor: "#D1FAE5", backgroundColor: "#F0FDF4" },
   docHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  docTitle: { fontSize: 15, fontWeight: "800", color: "#615DFA", flex: 1 },
-  docNo: { fontSize: 12, fontWeight: "700", color: "#9CA3AF" },
+  docTitle: { fontSize: 15, fontWeight: "800", color: "#EC2127", flex: 1 },
+  docNo: { fontSize: 12, fontWeight: "700", color: "#999999" },
   totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: "#E5E7EB" },
-  totalLabel: { fontSize: 14, fontWeight: "800", color: "#111827" },
-  totalValue: { fontSize: 18, fontWeight: "800", color: "#615DFA" },
+  totalLabel: { fontSize: 14, fontWeight: "800", color: "#2B161B" },
+  totalValue: { fontSize: 18, fontWeight: "800", color: "#EC2127" },
   paidStamp: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: 10, backgroundColor: "#D1FAE5", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   paidStampText: { fontSize: 12, fontWeight: "800", color: "#065F46", letterSpacing: 1 },
-  sessionStudent: { fontSize: 11, color: "#6B7280", marginTop: 1 },
+  receiptDoc: { backgroundColor: "#FFFFFF", borderRadius: 14, borderWidth: 1, borderColor: "#E5E7EB", padding: 16, marginBottom: 12 },
+  rcHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8 },
+  rcHeaderLeft: { flex: 1 },
+  rcBrandRow: { flexDirection: "row", alignItems: "flex-end", gap: 6, marginBottom: 4 },
+  rcLogo: { width: 42, height: 42 },
+  rcCompany: { fontSize: 14, fontWeight: "900", color: "#2B161B", textTransform: "uppercase", paddingBottom: 2 },
+  rcCoLine: { fontSize: 10, color: "#374151", marginTop: 1 },
+  rcTitle: { fontSize: 30, fontWeight: "900", color: "#2B161B", letterSpacing: 1, textTransform: "uppercase" },
+  rcRule: { height: 2, backgroundColor: "#2B161B", marginTop: 10, marginBottom: 10 },
+  rcMeta: { flexDirection: "row", gap: 12, marginBottom: 12 },
+  rcBillToLabel: { fontSize: 11, fontWeight: "700", color: "#2B161B", textTransform: "uppercase" },
+  rcBillName: { fontSize: 13, fontWeight: "800", color: "#2B161B", marginTop: 3 },
+  rcMetaKV: { flexDirection: "row", gap: 8 },
+  rcKVCol: { alignItems: "flex-end", gap: 3 },
+  rcKVValCol: { alignItems: "flex-start", gap: 3, minWidth: 74 },
+  rcKVKey: { fontSize: 10, fontWeight: "800", color: "#2B161B" },
+  rcKVVal: { fontSize: 10, fontWeight: "800", color: "#2B161B" },
+  rcKVRed: { color: "#EF4444" },
+  rcTableHead: { flexDirection: "row", paddingHorizontal: 4, paddingVertical: 6, borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#2B161B" },
+  rcTh: { fontSize: 9.5, fontWeight: "800", color: "#2B161B", letterSpacing: 0.3 },
+  rcThRight: { textAlign: "right" },
+  rcRow: { flexDirection: "row", paddingHorizontal: 4, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
+  rcTd: { fontSize: 11.5, color: "#2B161B", fontWeight: "600" },
+  rcTdSub: { fontSize: 10, color: "#666666", marginTop: 1 },
+  rcTotalWrap: { alignItems: "flex-end", marginTop: 4, marginBottom: 14 },
+  rcTotalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minWidth: 220, borderBottomWidth: 1, borderTopWidth: 1, borderColor: "#2B161B", paddingHorizontal: 6, paddingVertical: 6 },
+  rcTotalLabel: { fontSize: 11, fontWeight: "900", color: "#2B161B", letterSpacing: 0.3 },
+  rcTotalValue: { fontSize: 14, fontWeight: "900", color: "#2B161B" },
+  rcFooter: { flexDirection: "row", gap: 12, marginTop: 4 },
+  rcBankHead: { fontSize: 10, fontWeight: "800", color: "#2B161B", textTransform: "uppercase", textDecorationLine: "underline" },
+  rcBankLine: { fontSize: 10, fontWeight: "800", color: "#2B161B", textTransform: "uppercase", marginTop: 2 },
+  rcNotesHead: { fontSize: 10, fontWeight: "700", color: "#374151", marginTop: 10, marginBottom: 2 },
+  rcNote: { fontSize: 9.5, color: "#4B5563", lineHeight: 13, marginTop: 2 },
+  rcThankWrap: { width: 90, alignItems: "center", justifyContent: "flex-start", paddingTop: 4 },
+  rcThank: { fontSize: 13, fontWeight: "900", color: "#2B161B" },
+  receiptActions: { flexDirection: "row", gap: 10, marginTop: 16 },
+  waButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 46, borderRadius: 12, backgroundColor: "#25D366" },
+  waButtonText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+  homeButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 46, paddingHorizontal: 16, borderRadius: 12, backgroundColor: "#F1F5F9" },
+  homeButtonText: { color: "#2B161B", fontSize: 15, fontWeight: "800" },
+  sessionStudent: { fontSize: 11, color: "#666666", marginTop: 1 },
   row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  rowLabel: { fontSize: 14, color: "#6B7280", fontWeight: "500" },
-  rowValue: { fontSize: 14, color: "#111827", fontWeight: "600", flex: 1, textAlign: "right", marginLeft: 16 },
-  actions: { gap: 12, marginTop: 8 },
+  rowLabel: { fontSize: 14, color: "#666666", fontWeight: "500" },
+  rowValue: { fontSize: 14, color: "#2B161B", fontWeight: "600", flex: 1, textAlign: "right", marginLeft: 16 },
+  actions: { gap: 10, marginTop: 8 },
+  payWithLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 2, color: "#666666", marginTop: 4, marginBottom: 2 },
+  payOption: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 16, padding: 15, borderWidth: 2, borderColor: "transparent", shadowColor: "#000000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  payOptionOn: { borderColor: "#EC2127" },
+  payOptionTitle: { fontSize: 14, fontWeight: "600", color: "#2B161B" },
+  payOptionSub: { fontSize: 12, color: "#666666", marginTop: 3 },
+  payRadio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: "#DDDDDD", alignItems: "center", justifyContent: "center" },
+  payRadioOn: { backgroundColor: "#EC2127", borderColor: "#EC2127" },
+  payFoot: { fontSize: 11, color: "#999999", textAlign: "center", marginTop: 2 },
   primaryButton: {
-    height: 52,
-    backgroundColor: "#615DFA",
-    borderRadius: 12,
+    minHeight: 52,
+    backgroundColor: "#EC2127",
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     gap: 8,
+    marginTop: 4,
   },
-  primaryButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
+  primaryButtonText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700", letterSpacing: 1 },
   secondaryButton: {
     height: 52,
     backgroundColor: "#FFFFFF",
-    borderColor: "#615DFA",
+    borderColor: "#EC2127",
     borderWidth: 1.5,
     borderRadius: 12,
     alignItems: "center",
@@ -555,26 +828,26 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
-  secondaryButtonText: { color: "#615DFA", fontSize: 16, fontWeight: "700" },
+  secondaryButtonText: { color: "#EC2127", fontSize: 16, fontWeight: "700" },
   pressed: { opacity: 0.85 },
   errorText: { color: "#991B1B", fontSize: 14, textAlign: "center", paddingHorizontal: 24 },
   backButton: { paddingHorizontal: 24, paddingVertical: 12 },
-  backText: { color: "#615DFA", fontSize: 16, fontWeight: "700" },
+  backText: { color: "#EC2127", fontSize: 16, fontWeight: "700" },
   pkgCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#F9FAFB", borderRadius: 12, padding: 14, borderWidth: 1.5, borderColor: "#EEF0F6" },
-  pkgCardOn: { borderColor: "#615DFA", backgroundColor: "#F5F5FF" },
+  pkgCardOn: { borderColor: "#EC2127", backgroundColor: "#F5F5FF" },
   radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: "#D1D5DB", alignItems: "center", justifyContent: "center" },
-  radioOn: { borderColor: "#615DFA" },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#615DFA" },
-  pkgType: { fontSize: 15, fontWeight: "800", color: "#111827" },
-  pkgMeta: { fontSize: 12, color: "#6B7280", fontWeight: "600", marginTop: 2 },
-  pkgNeed: { fontSize: 11, color: "#615DFA", fontWeight: "700", marginTop: 3 },
-  pkgPrice: { fontSize: 16, fontWeight: "800", color: "#615DFA" },
+  radioOn: { borderColor: "#EC2127" },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#EC2127" },
+  pkgType: { fontSize: 15, fontWeight: "800", color: "#2B161B" },
+  pkgMeta: { fontSize: 12, color: "#666666", fontWeight: "600", marginTop: 2 },
+  pkgNeed: { fontSize: 11, color: "#EC2127", fontWeight: "700", marginTop: 3 },
+  pkgPrice: { fontSize: 16, fontWeight: "800", color: "#EC2127" },
   qtyRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: "#F3F4F6" },
-  qtyLabel: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  qtyLabel: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
   stepper: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: "#F3F4F6", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 4 },
   stepBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
-  stepVal: { fontSize: 16, fontWeight: "800", color: "#0F172A", minWidth: 20, textAlign: "center" },
-  coverText: { fontSize: 12, fontWeight: "800", color: "#6B7280", marginLeft: "auto" },
+  stepVal: { fontSize: 16, fontWeight: "800", color: "#2B161B", minWidth: 20, textAlign: "center" },
+  coverText: { fontSize: 12, fontWeight: "800", color: "#666666", marginLeft: "auto" },
   coverOk: { color: "#059669" },
   coverShort: { color: "#DC2626" },
   slipCard: { backgroundColor: "#F0FDF4", borderRadius: 16, borderWidth: 1, borderColor: "#BBF7D0", padding: 14, gap: 10 },
@@ -582,20 +855,20 @@ const styles = StyleSheet.create({
   slipTitle: { fontSize: 14, fontWeight: "800", color: "#065F46" },
   slipImage: { width: "100%", height: 180, borderRadius: 12, backgroundColor: "#E5E7EB" },
   slipNote: { fontSize: 12, color: "#047857", lineHeight: 17 },
-  coveredHeader: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  coveredSubtitle: { fontSize: 12, color: "#6B7280", marginTop: 4, lineHeight: 16 },
+  coveredHeader: { fontSize: 15, fontWeight: "700", color: "#2B161B" },
+  coveredSubtitle: { fontSize: 12, color: "#666666", marginTop: 4, lineHeight: 16 },
   sessionList: { marginTop: 12, gap: 8 },
   sessionRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
   sessionIndex: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#EEF2FF",
+    backgroundColor: "#EAF7FD",
     alignItems: "center",
     justifyContent: "center",
   },
-  sessionIndexText: { fontSize: 12, fontWeight: "800", color: "#615DFA" },
-  sessionDate: { fontSize: 13, fontWeight: "600", color: "#111827" },
+  sessionIndexText: { fontSize: 12, fontWeight: "800", color: "#EC2127" },
+  sessionDate: { fontSize: 13, fontWeight: "600", color: "#2B161B" },
   sessionBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   sessionBadgeText: { fontSize: 11, fontWeight: "700" },
 });

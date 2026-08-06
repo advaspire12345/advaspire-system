@@ -36,9 +36,9 @@ import {
   type RepeatFreq,
 } from "@/lib/localEvents";
 
-const COLORS = ["#615DFA", "#EF4444", "#F59E0B", "#10B981", "#23D2E2", "#EC4899"];
+const COLORS = ["#EC2127", "#EF4444", "#F59E0B", "#10B981", "#01A0E4", "#EC4899"];
 // Emojis a parent can pick to "sign" an event so it's recognisable on the calendar.
-const ICONS = ["🎉", "🎂", "🏫", "⚽", "🎨", "🎵", "📚", "🍽️", "✈️", "🏥", "🦷", "🎁"];
+const ICONS = ["🎉", "🎂", "🏫", "⚽", "🎨", "🎵", "📚", "🍽️", "✈️", "🏥", "🦷", "🎁", "💻", "🚀", "🧱", "♟️", "🎭", "🩰", "📸", "🗣️", "🎸", "🧶", "🍳", "🧘", "🩹", "🌱", "🪙", "🥋", "🏊", "🏹", "🛹", "📐", "🧪", "🧬", "⚗️", "🍎", "📜", "🌍", "🔤", "🛠️", "🏃", "🕊️", "🕌", "📊", "💼", "📈", "🎹"];
 const WEEKDAYS = [
   { key: 0, label: "Sun" },
   { key: 1, label: "Mon" },
@@ -100,6 +100,7 @@ export default function NewEventScreen() {
   const [title, setTitle] = useState("");
   const [color, setColor] = useState(COLORS[0]);
   const [icon, setIcon] = useState<string | null>(null);
+  const [iconsExpanded, setIconsExpanded] = useState(false);
   const [location, setLocation] = useState("");
   const nick = useNicknames();
 
@@ -225,13 +226,15 @@ export default function NewEventScreen() {
     }
   };
 
+  // When BOTH repeat and reminder are set, highlight their values in red.
+  const bothChanged = repeat !== "never" && reminder !== "none";
   const titleLabel = type === "birthday" ? "Whose birthday?" : type === "holiday" ? "Holiday name" : "Title";
   const titlePlaceholder =
     type === "birthday" ? "e.g. Sarah" : type === "holiday" ? "e.g. School holiday" : "e.g. Family trip";
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
-      <Stack.Screen options={{ title: editId ? "Edit event" : "New event", headerTintColor: "#615DFA" }} />
+      <Stack.Screen options={{ title: editId ? "Edit event" : "New event", headerTintColor: "#EC2127" }} />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.flex}
@@ -245,7 +248,7 @@ export default function NewEventScreen() {
                 const active = type === t.key;
                 return (
                   <Pressable key={t.key} style={[styles.typeCard, active && styles.typeCardActive]} onPress={() => setType(t.key)}>
-                    <Ionicons name={t.icon} size={22} color={active ? "#FFFFFF" : "#615DFA"} />
+                    <Ionicons name={t.icon} size={22} color={active ? "#FFFFFF" : "#01A0E4"} />
                     <Text style={[styles.typeText, active && styles.typeTextActive]}>{t.label}</Text>
                   </Pressable>
                 );
@@ -258,10 +261,36 @@ export default function NewEventScreen() {
                 value={title}
                 onChangeText={setTitle}
                 placeholder={titlePlaceholder}
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor="#999999"
                 style={styles.input}
               />
             </Card>
+
+            {/* Who is this for — a general/parent event if none picked. */}
+            {children.length > 0 ? (
+              <Card>
+                <Label>Who is this for</Label>
+                <View style={styles.chipWrap}>
+                  <Pressable
+                    style={[styles.assignChip, assignedTo.length === 0 && styles.assignChipActive]}
+                    onPress={() => setAssignedTo([])}
+                  >
+                    <Ionicons name="people-outline" size={15} color={assignedTo.length === 0 ? "#FFFFFF" : "#01A0E4"} />
+                    <Text style={[styles.assignChipText, assignedTo.length === 0 && styles.assignChipTextActive]}>Everyone</Text>
+                  </Pressable>
+                  {children.map((c) => {
+                    const on = assignedTo.includes(c.id);
+                    return (
+                      <Pressable key={c.id} style={[styles.assignChip, on && styles.assignChipActive]} onPress={() => toggleChild(c.id)}>
+                        {on ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+                        <Text style={[styles.assignChipText, on && styles.assignChipTextActive]}>{nick.label(c.id, c.name)}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.hint}>{assignedTo.length === 0 ? "Shows for the whole family." : "Only shows when this child is selected in the filter."}</Text>
+              </Card>
+            ) : null}
 
             {/* EVENT: from/to + repeat + reminder */}
             {type === "event" ? (
@@ -280,11 +309,11 @@ export default function NewEventScreen() {
                 </Card>
 
                 <Card>
-                  <RowButton icon="repeat-outline" label="Repeat" value={repeat === "custom" ? "Custom" : repeatLabel(repeat)} onPress={() => setRepeatOpen(true)} />
+                  <RowButton icon="repeat-outline" label="Repeat" value={repeat === "custom" ? "Custom" : repeatLabel(repeat)} onPress={() => setRepeatOpen(true)} highlight={bothChanged} />
                   {repeat !== "never" ? (
                     <RowButton icon="stop-circle-outline" label="End repeat" value={endRepeatSummary(endRepeat)} onPress={() => setEndRepeatOpen(true)} divider />
                   ) : null}
-                  <RowButton icon="notifications-outline" label="Reminder" value={reminderLabel(reminder)} onPress={() => setReminderOpen(true)} divider />
+                  <RowButton icon="notifications-outline" label="Reminder" value={reminderLabel(reminder)} onPress={() => setReminderOpen(true)} divider highlight={bothChanged} />
                 </Card>
               </>
             ) : null}
@@ -310,9 +339,9 @@ export default function NewEventScreen() {
                 <Card>
                   <RowButton icon="notifications-outline" label="Reminder" value={reminderLabel(reminder)} onPress={() => setReminderOpen(true)} />
                   <View style={[styles.row, styles.rowDivider]}>
-                    <Ionicons name="alarm-outline" size={20} color="#615DFA" />
+                    <Ionicons name="alarm-outline" size={20} color="#EC2127" />
                     <Text style={styles.rowLabel}>Alarm reminder</Text>
-                    <Switch value={alarm} onValueChange={setAlarm} trackColor={{ true: "#615DFA" }} />
+                    <Switch value={alarm} onValueChange={setAlarm} trackColor={{ true: "#EC2127" }} />
                   </View>
                 </Card>
               </>
@@ -325,50 +354,28 @@ export default function NewEventScreen() {
                 value={location}
                 onChangeText={setLocation}
                 placeholder="e.g. Advaspire centre, home, clinic"
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor="#999999"
                 style={styles.input}
               />
               <Text style={styles.hint}>We&apos;ll warn you if this overlaps with something at a different place.</Text>
             </Card>
-
-            {/* Assign to children — a general/parent event if none picked. */}
-            {children.length > 0 ? (
-              <Card>
-                <Label>Assign to</Label>
-                <View style={styles.chipWrap}>
-                  <Pressable
-                    style={[styles.assignChip, assignedTo.length === 0 && styles.assignChipActive]}
-                    onPress={() => setAssignedTo([])}
-                  >
-                    <Ionicons name="people-outline" size={15} color={assignedTo.length === 0 ? "#FFFFFF" : "#615DFA"} />
-                    <Text style={[styles.assignChipText, assignedTo.length === 0 && styles.assignChipTextActive]}>Everyone</Text>
-                  </Pressable>
-                  {children.map((c) => {
-                    const on = assignedTo.includes(c.id);
-                    return (
-                      <Pressable key={c.id} style={[styles.assignChip, on && styles.assignChipActive]} onPress={() => toggleChild(c.id)}>
-                        {on ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
-                        <Text style={[styles.assignChipText, on && styles.assignChipTextActive]}>{nick.label(c.id, c.name)}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <Text style={styles.hint}>{assignedTo.length === 0 ? "Shows for the whole family." : "Only shows when this child is selected in the filter."}</Text>
-              </Card>
-            ) : null}
 
             {/* Sign the event with an emoji so it's easy to spot on the calendar. */}
             <Card>
               <Label>Icon (optional)</Label>
               <View style={styles.iconRow}>
                 <Pressable onPress={() => setIcon(null)} style={[styles.iconChip, icon === null && styles.iconChipActive]}>
-                  <Ionicons name="ban-outline" size={18} color={icon === null ? "#615DFA" : "#9CA3AF"} />
+                  <Ionicons name="ban-outline" size={18} color={icon === null ? "#EC2127" : "#999999"} />
                 </Pressable>
-                {ICONS.map((e) => (
+                {(iconsExpanded ? ICONS : ICONS.slice(0, 11)).map((e) => (
                   <Pressable key={e} onPress={() => setIcon(e)} style={[styles.iconChip, icon === e && styles.iconChipActive]}>
                     <Text style={styles.iconEmoji}>{e}</Text>
                   </Pressable>
                 ))}
+                <Pressable onPress={() => setIconsExpanded((v) => !v)} style={styles.iconMore}>
+                  <Ionicons name={iconsExpanded ? "chevron-up" : "chevron-down"} size={16} color="#EC2127" />
+                  <Text style={styles.iconMoreText}>{iconsExpanded ? "Less" : "More"}</Text>
+                </Pressable>
               </View>
             </Card>
 
@@ -376,7 +383,9 @@ export default function NewEventScreen() {
               <Label>Color</Label>
               <View style={styles.colorRow}>
                 {COLORS.map((c) => (
-                  <Pressable key={c} onPress={() => setColor(c)} style={[styles.colorDot, { backgroundColor: c }, color === c && styles.colorDotActive]} />
+                  <Pressable key={c} onPress={() => setColor(c)} style={[styles.colorWrap, color === c && { borderColor: c }]}>
+                    <View style={[styles.colorDot, { backgroundColor: c }]} />
+                  </Pressable>
                 ))}
               </View>
             </Card>
@@ -476,18 +485,18 @@ function Label({ children, style }: { children: React.ReactNode; style?: object 
 function PickerButton({ icon, label, onPress, flex }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; flex?: number }) {
   return (
     <Pressable style={({ pressed }) => [styles.pickerButton, flex ? { flex } : null, pressed && styles.pressed]} onPress={onPress}>
-      <Ionicons name={icon} size={18} color="#615DFA" />
+      <Ionicons name={icon} size={18} color="#EC2127" />
       <Text style={styles.pickerButtonText} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
-function RowButton({ icon, label, value, onPress, divider }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string; onPress: () => void; divider?: boolean }) {
+function RowButton({ icon, label, value, onPress, divider, highlight }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string; onPress: () => void; divider?: boolean; highlight?: boolean }) {
   return (
     <Pressable style={({ pressed }) => [styles.row, divider && styles.rowDivider, pressed && styles.pressed]} onPress={onPress}>
-      <Ionicons name={icon} size={20} color="#615DFA" />
+      <Ionicons name={icon} size={20} color={highlight ? "#EC2127" : "#EC2127"} />
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue} numberOfLines={1}>{value}</Text>
-      <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+      <Text style={[styles.rowValue, highlight && styles.rowValueHot]} numberOfLines={1}>{value}</Text>
+      <Ionicons name="chevron-forward" size={16} color="#999999" />
     </Pressable>
   );
 }
@@ -495,11 +504,11 @@ function Stepper({ value, min, max, onChange }: { value: number; min: number; ma
   return (
     <View style={styles.stepper}>
       <Pressable style={styles.stepperBtn} onPress={() => onChange(Math.max(min, value - 1))}>
-        <Ionicons name="remove" size={20} color="#615DFA" />
+        <Ionicons name="remove" size={20} color="#EC2127" />
       </Pressable>
       <Text style={styles.stepperValue}>{value}</Text>
       <Pressable style={styles.stepperBtn} onPress={() => onChange(Math.min(max, value + 1))}>
-        <Ionicons name="add" size={20} color="#615DFA" />
+        <Ionicons name="add" size={20} color="#EC2127" />
       </Pressable>
     </View>
   );
@@ -539,7 +548,7 @@ function RepeatModal({ value, onClose, onPick }: { value: RepeatFreq; onClose: (
       {REPEAT_OPTIONS.map((f) => (
         <Pressable key={f} style={sheetStyles.optionRow} onPress={() => onPick(f)}>
           <Text style={sheetStyles.optionText}>{f === "custom" ? "Custom…" : repeatLabel(f)}</Text>
-          {value === f ? <Ionicons name="checkmark" size={20} color="#615DFA" /> : null}
+          {value === f ? <Ionicons name="checkmark" size={20} color="#EC2127" /> : null}
         </Pressable>
       ))}
     </SheetShell>
@@ -607,7 +616,7 @@ function CustomRepeatModal({ value, onClose, onDone }: { value: CustomRecurrence
                 {ORDINALS.map((o) => (
                   <Pressable key={o.key} style={sheetStyles.optionRow} onPress={() => set({ monthWeekOrdinals: toggle(c.monthWeekOrdinals, o.key) })}>
                     <Text style={sheetStyles.optionText}>{o.label}</Text>
-                    {c.monthWeekOrdinals.includes(o.key) ? <Ionicons name="checkmark" size={18} color="#615DFA" /> : null}
+                    {c.monthWeekOrdinals.includes(o.key) ? <Ionicons name="checkmark" size={18} color="#EC2127" /> : null}
                   </Pressable>
                 ))}
               </View>
@@ -615,12 +624,12 @@ function CustomRepeatModal({ value, onClose, onDone }: { value: CustomRecurrence
                 <Text style={sheetStyles.groupLabel}>Day</Text>
                 <Pressable style={sheetStyles.optionRow} onPress={() => set({ monthWeekDays: c.monthWeekDays.includes(7) ? [] : [7] })}>
                   <Text style={sheetStyles.optionText}>Every day</Text>
-                  {c.monthWeekDays.includes(7) ? <Ionicons name="checkmark" size={18} color="#615DFA" /> : null}
+                  {c.monthWeekDays.includes(7) ? <Ionicons name="checkmark" size={18} color="#EC2127" /> : null}
                 </Pressable>
                 {WEEKDAYS.map((w) => (
                   <Pressable key={w.key} style={sheetStyles.optionRow} onPress={() => set({ monthWeekDays: toggle(c.monthWeekDays.filter((x) => x !== 7), w.key) })}>
                     <Text style={sheetStyles.optionText}>{w.label}</Text>
-                    {c.monthWeekDays.includes(w.key) ? <Ionicons name="checkmark" size={18} color="#615DFA" /> : null}
+                    {c.monthWeekDays.includes(w.key) ? <Ionicons name="checkmark" size={18} color="#EC2127" /> : null}
                   </Pressable>
                 ))}
               </View>
@@ -663,12 +672,12 @@ function EndRepeatModal({ value, onClose, onDone }: { value: EndRepeat; onClose:
         {(["never", "onDate", "count"] as const).map((m) => (
           <Pressable key={m} style={sheetStyles.optionRow} onPress={() => setMode(m)}>
             <Text style={sheetStyles.optionText}>{m === "never" ? "Never" : m === "onDate" ? "On a date" : "After a number of times"}</Text>
-            {mode === m ? <Ionicons name="checkmark" size={20} color="#615DFA" /> : null}
+            {mode === m ? <Ionicons name="checkmark" size={20} color="#EC2127" /> : null}
           </Pressable>
         ))}
         {mode === "onDate" ? (
           <Pressable style={[styles.pickerButton, { marginTop: 12 }]} onPress={() => setDateOpen(true)}>
-            <Ionicons name="calendar-outline" size={18} color="#615DFA" />
+            <Ionicons name="calendar-outline" size={18} color="#EC2127" />
             <Text style={styles.pickerButtonText}>{formatHumanDate(date)}</Text>
           </Pressable>
         ) : null}
@@ -700,12 +709,12 @@ function ReminderModal({ value, onClose, onDone }: { value: Reminder; onClose: (
       {REMINDER_PRESETS.map((r) => (
         <Pressable key={String(r)} style={sheetStyles.optionRow} onPress={() => { setCustomMode(false); onDone(r); }}>
           <Text style={sheetStyles.optionText}>{reminderLabel(r)}</Text>
-          {!customMode && value === r ? <Ionicons name="checkmark" size={20} color="#615DFA" /> : null}
+          {!customMode && value === r ? <Ionicons name="checkmark" size={20} color="#EC2127" /> : null}
         </Pressable>
       ))}
       <Pressable style={sheetStyles.optionRow} onPress={() => setCustomMode(true)}>
         <Text style={sheetStyles.optionText}>Custom…</Text>
-        {customMode ? <Ionicons name="checkmark" size={20} color="#615DFA" /> : null}
+        {customMode ? <Ionicons name="checkmark" size={20} color="#EC2127" /> : null}
       </Pressable>
       {customMode ? (
         <View style={[sheetStyles.everyRow, { marginTop: 12 }]}>
@@ -760,11 +769,11 @@ function DatePickerModal({ initial, onClose, onPick }: { initial: string; onClos
         <View style={pickerStyles.handle} />
         <View style={pickerStyles.header}>
           <Pressable onPress={() => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1))} style={pickerStyles.headerNav}>
-            <Ionicons name="chevron-back" size={18} color="#615DFA" />
+            <Ionicons name="chevron-back" size={18} color="#EC2127" />
           </Pressable>
           <Text style={pickerStyles.headerTitle}>{monthLabel}</Text>
           <Pressable onPress={() => setView(new Date(view.getFullYear(), view.getMonth() + 1, 1))} style={pickerStyles.headerNav}>
-            <Ionicons name="chevron-forward" size={18} color="#615DFA" />
+            <Ionicons name="chevron-forward" size={18} color="#EC2127" />
           </Pressable>
         </View>
         <View style={pickerStyles.weekdays}>
@@ -850,69 +859,72 @@ function TimePickerModal({ initial, onClose, onPick }: { initial: string; onClos
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
   flex: { flex: 1 },
   scroll: { padding: 16, gap: 14, paddingBottom: 48 },
   typeRow: { flexDirection: "row", gap: 10 },
   typeCard: {
     flex: 1, backgroundColor: "#FFFFFF", borderRadius: 16, paddingVertical: 16, alignItems: "center", gap: 6,
-    shadowColor: "#0F172A", shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 1,
+    shadowColor: "#2B161B", shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 1,
   },
-  typeCardActive: { backgroundColor: "#615DFA" },
+  typeCardActive: { backgroundColor: "#EC2127" },
   typeText: { fontSize: 13, fontWeight: "700", color: "#374151" },
   typeTextActive: { color: "#FFFFFF" },
   card: {
     backgroundColor: "#FFFFFF", padding: 18, borderRadius: 16, gap: 8,
-    shadowColor: "#0F172A", shadowOpacity: 0.04, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 1,
+    shadowColor: "#2B161B", shadowOpacity: 0.04, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 1,
   },
-  label: { fontSize: 11, fontWeight: "700", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.6 },
-  hint: { fontSize: 12, color: "#9CA3AF", marginTop: 6 },
-  input: { borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: "#111827", backgroundColor: "#F9FAFB" },
+  label: { fontSize: 11, fontWeight: "700", color: "#666666", textTransform: "uppercase", letterSpacing: 0.6 },
+  hint: { fontSize: 12, color: "#999999", marginTop: 6 },
+  input: { borderBottomWidth: 1, borderBottomColor: "#EAE3E5", paddingHorizontal: 2, paddingVertical: 10, fontSize: 16, color: "#2B161B" },
   fromToRow: { flexDirection: "row", gap: 10 },
   pickerButton: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: "#F9FAFB" },
-  pickerButtonText: { flex: 1, fontSize: 14, color: "#111827", fontWeight: "600" },
+  pickerButtonText: { flex: 1, fontSize: 14, color: "#2B161B", fontWeight: "600" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14 },
   rowDivider: { borderTopWidth: 1, borderTopColor: "#F3F4F6" },
-  rowLabel: { fontSize: 15, color: "#111827", fontWeight: "600" },
-  rowValue: { flex: 1, textAlign: "right", fontSize: 14, color: "#6B7280", marginRight: 4 },
+  rowLabel: { fontSize: 15, color: "#2B161B", fontWeight: "600" },
+  rowValue: { flex: 1, textAlign: "right", fontSize: 14, color: "#666666", marginRight: 4 },
+  rowValueHot: { color: "#EC2127", fontWeight: "700" },
   segment: { flexDirection: "row", gap: 8, marginTop: 4 },
   segmentButton: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: "#F3F4F6", alignItems: "center" },
-  segmentButtonActive: { backgroundColor: "#615DFA" },
+  segmentButtonActive: { backgroundColor: "#EC2127" },
   segmentText: { fontSize: 13, fontWeight: "700", color: "#374151" },
   segmentTextActive: { color: "#FFFFFF" },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   chip: { minWidth: 40, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: "#F3F4F6", alignItems: "center" },
   chipWide: { minWidth: 52 },
-  chipActive: { backgroundColor: "#615DFA" },
+  chipActive: { backgroundColor: "#EC2127" },
   chipText: { fontSize: 13, fontWeight: "700", color: "#374151" },
   chipTextActive: { color: "#FFFFFF" },
   assignChip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, backgroundColor: "#F3F4F6", borderWidth: 1, borderColor: "#E5E7EB" },
-  assignChipActive: { backgroundColor: "#615DFA", borderColor: "#615DFA" },
+  assignChipActive: { backgroundColor: "#EC2127", borderColor: "#EC2127" },
   assignChipText: { fontSize: 13, fontWeight: "700", color: "#374151" },
   assignChipTextActive: { color: "#FFFFFF" },
   stepper: { flexDirection: "row", alignItems: "center", gap: 16, backgroundColor: "#F3F4F6", borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
   stepperBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
-  stepperValue: { fontSize: 18, fontWeight: "800", color: "#0F172A", minWidth: 28, textAlign: "center" },
-  iconRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  stepperValue: { fontSize: 18, fontWeight: "800", color: "#2B161B", minWidth: 28, textAlign: "center" },
+  iconRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4, alignItems: "center" },
   iconChip: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "transparent" },
-  iconChipActive: { borderColor: "#615DFA", backgroundColor: "#EEF2FF" },
+  iconChipActive: { borderColor: "#EC2127", backgroundColor: "#EAF7FD" },
+  iconMore: { flexDirection: "row", alignItems: "center", gap: 3, height: 44, paddingHorizontal: 12, borderRadius: 12, backgroundColor: "#FDECED" },
+  iconMoreText: { fontSize: 12, fontWeight: "700", color: "#EC2127" },
   iconEmoji: { fontSize: 22 },
   colorRow: { flexDirection: "row", gap: 12, marginTop: 4 },
-  colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 3, borderColor: "transparent" },
-  colorDotActive: { borderColor: "#FFFFFF", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 4, elevation: 2 },
-  submit: { marginTop: 6, height: 54, borderRadius: 14, backgroundColor: "#615DFA", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, shadowColor: "#615DFA", shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
-  submitDisabled: { backgroundColor: "#9CA3AF", shadowOpacity: 0 },
+  colorWrap: { width: 42, height: 42, borderRadius: 21, borderWidth: 2, borderColor: "transparent", alignItems: "center", justifyContent: "center" },
+  colorDot: { width: 30, height: 30, borderRadius: 15 },
+  submit: { marginTop: 6, height: 54, borderRadius: 14, backgroundColor: "#EC2127", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, shadowColor: "#EC2127", shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
+  submitDisabled: { backgroundColor: "#999999", shadowOpacity: 0 },
   submitText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
   pressed: { opacity: 0.85 },
 });
 
 const sheetStyles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, marginBottom: 4 },
-  cancel: { fontSize: 15, color: "#6B7280", fontWeight: "600", width: 48 },
-  done: { fontSize: 15, color: "#615DFA", fontWeight: "800", width: 48, textAlign: "right" },
-  groupLabel: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.8, marginTop: 16, marginBottom: 4 },
+  cancel: { fontSize: 15, color: "#666666", fontWeight: "600", width: 48 },
+  done: { fontSize: 15, color: "#EC2127", fontWeight: "800", width: 48, textAlign: "right" },
+  groupLabel: { fontSize: 11, fontWeight: "800", color: "#999999", textTransform: "uppercase", letterSpacing: 0.8, marginTop: 16, marginBottom: 4 },
   optionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  optionText: { fontSize: 15, color: "#111827", fontWeight: "600" },
+  optionText: { fontSize: 15, color: "#2B161B", fontWeight: "600" },
   everyRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
   everyLabel: { fontSize: 15, color: "#374151", fontWeight: "600" },
   twoCol: { flexDirection: "row", gap: 16 },
@@ -924,36 +936,36 @@ const pickerStyles = StyleSheet.create({
   handle: { width: 40, height: 4, backgroundColor: "#E5E7EB", borderRadius: 2, alignSelf: "center", marginBottom: 8 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 },
   headerNav: { width: 36, height: 36, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 16, fontWeight: "800", color: "#0F172A", textAlign: "center" },
+  headerTitle: { fontSize: 16, fontWeight: "800", color: "#2B161B", textAlign: "center" },
   weekdays: { flexDirection: "row", marginTop: 8, marginBottom: 4 },
-  weekdayLabel: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "800", color: "#9CA3AF" },
+  weekdayLabel: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "800", color: "#999999" },
   row: { flexDirection: "row" },
   cell: { flex: 1, aspectRatio: 1, margin: 2, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   cellEmpty: { flex: 1, aspectRatio: 1, margin: 2 },
-  cellSelected: { backgroundColor: "#615DFA" },
-  cellToday: { borderWidth: 1.5, borderColor: "#615DFA" },
+  cellSelected: { backgroundColor: "#EC2127" },
+  cellToday: { borderWidth: 1.5, borderColor: "#EC2127" },
   cellText: { fontSize: 14, fontWeight: "700", color: "#1F2937" },
   cellTextSelected: { color: "#FFFFFF" },
-  cellTextToday: { color: "#615DFA" },
+  cellTextToday: { color: "#EC2127" },
   actions: { flexDirection: "row", gap: 12, marginTop: 16 },
   cancelButton: { flex: 1, height: 48, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
   cancelText: { fontSize: 15, fontWeight: "700", color: "#374151" },
-  confirmButton: { flex: 1, height: 48, borderRadius: 12, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center" },
+  confirmButton: { flex: 1, height: 48, borderRadius: 12, backgroundColor: "#EC2127", alignItems: "center", justifyContent: "center" },
   confirmText: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
 });
 
 const timeStyles = StyleSheet.create({
   preview: { alignItems: "center", paddingVertical: 16 },
-  previewText: { fontSize: 32, fontWeight: "800", color: "#0F172A", letterSpacing: -0.6 },
-  sectionLabel: { fontSize: 11, fontWeight: "800", color: "#6B7280", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 8, marginBottom: 8 },
+  previewText: { fontSize: 32, fontWeight: "800", color: "#2B161B", letterSpacing: -0.6 },
+  sectionLabel: { fontSize: 11, fontWeight: "800", color: "#666666", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 8, marginBottom: 8 },
   scrollRow: { gap: 8, paddingHorizontal: 4 },
   numberChip: { minWidth: 48, height: 44, paddingHorizontal: 12, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
-  numberChipActive: { backgroundColor: "#615DFA" },
+  numberChipActive: { backgroundColor: "#EC2127" },
   numberChipText: { fontSize: 16, fontWeight: "800", color: "#374151" },
   numberChipTextActive: { color: "#FFFFFF" },
   periodRow: { flexDirection: "row", gap: 8, marginTop: 16 },
   periodButton: { flex: 1, height: 44, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
-  periodButtonActive: { backgroundColor: "#615DFA" },
+  periodButtonActive: { backgroundColor: "#EC2127" },
   periodText: { fontSize: 14, fontWeight: "800", color: "#374151" },
-  periodTextActive: { color: "#615DFA" },
+  periodTextActive: { color: "#EC2127" },
 });

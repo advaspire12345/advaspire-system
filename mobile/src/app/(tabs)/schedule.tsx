@@ -151,7 +151,7 @@ const EVENT_TYPE_META: Record<EventEntry["eventType"], { label: string; color: s
   holiday: { label: "Holiday", color: "#EF4444" },
   activity: { label: "Activity", color: "#10B981" },
   competition: { label: "Competition", color: "#F59E0B" },
-  own_schedule: { label: "My event", color: "#615DFA" },
+  own_schedule: { label: "My event", color: "#EC2127" },
 };
 
 function eventOccursOn(e: EventEntry, dateKey: string): boolean {
@@ -261,6 +261,8 @@ type DayItem = {
   attended?: boolean; // class only: already marked (attendance exists)
   studentId?: string; // class only: which child (for the child filter)
   childColor?: string; // fixed per-child colour (WHO) — used for the card's left bar
+  dots?: string[]; // grouped class only: one colour per sibling in the shared class
+  members?: { studentId: string; name: string; color: string; sessions: number | null; attended: boolean; reschedule?: { enrollmentId: string; studentId: string; courseName: string | null; date: string } }[]; // grouped class: per-child so the detail can reschedule each
   icon?: string; // local event only: emoji the parent picked to "sign" it
   location?: string; // where it happens (centre/branch for classes, free text for events) — used for clash detection
   assignedTo?: string[]; // local event only: child ids it's for ([] = general)
@@ -276,7 +278,7 @@ export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
 
   const settings = useSettings();
-  const [view, setView] = useState<ViewMode>("week"); // weekly-focused by default
+  const [view, setView] = useState<ViewMode>("month"); // month-focused: show the full calendar grid
   const [month, setMonth] = useState<Date>(startOfMonth(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [searchOpen, setSearchOpen] = useState(false);
@@ -456,7 +458,7 @@ export default function CalendarScreen() {
       endDate: (e.end_date as string | null) ?? null,
       startTime: (e.start_time as string | null) ?? null,
       endTime: (e.end_time as string | null) ?? null,
-      color: (e.color as string) ?? "#615DFA",
+      color: (e.color as string) ?? "#EC2127",
       isRecurring: !!e.is_recurring,
       isBounded: !!e.is_bounded,
       recurringDays: ((e.recurring_days as string[] | null) ?? []).map((d) => String(d).toLowerCase()),
@@ -493,7 +495,7 @@ export default function CalendarScreen() {
       const wd = WEEKDAYS_FULL[d.getDay()];
       const todayK = ymd(new Date());
       const isPast = dateKey < todayK;
-      const GREY = "#9CA3AF";
+      const GREY = "#999999";
       const items: DayItem[] = [];
       for (const e of localEvents.filter((ev) => localEventOccursOn(ev, dateKey))) {
         // Child filter: general events (no assignedTo) always show; assigned ones
@@ -517,33 +519,50 @@ export default function CalendarScreen() {
       const t0 = new Date(); t0.setHours(0, 0, 0, 0);
       const tomorrow = new Date(t0); tomorrow.setDate(tomorrow.getDate() + 1);
       const oneMonth = new Date(t0); oneMonth.setMonth(oneMonth.getMonth() + 1);
+      // Group siblings in the SAME class (same course + start time + centre) into one
+      // 🤖 entry with a colour dot per child. Single-child classes render as before.
+      const classGroups = new Map<string, {
+        time: number | null; timeLabel: string; courseName: string | null; location: string | undefined;
+        members: NonNullable<DayItem["members"]>;
+      }>();
       for (const c of enrollments.filter((en) => en.scheduleDays.includes(wd))) {
         if (childFilter.length && !childFilter.includes(c.studentId)) continue; // child filter
         const at = attToday.find((a) => a.studentId === c.studentId && a.courseName === c.courseName);
         const editable = !at && d.getTime() >= tomorrow.getTime() && d.getTime() <= oneMonth.getTime();
-        // Custom colour override wins over the system palette; nickname over full name.
         const cColor = nick.color(c.studentId) ?? childColorFor(children, c.studentId);
+        const key = `${c.courseName ?? ""}|${c.startTime ?? ""}|${c.branchId ?? ""}`;
+        const g = classGroups.get(key) ?? {
+          time: toMinutes(c.startTime), timeLabel: fmt12(c.startTime) ?? "Class",
+          courseName: c.courseName, location: c.branchId ? `branch:${c.branchId}` : undefined, members: [],
+        };
+        g.members.push({
+          studentId: c.studentId, name: nick.raw(c.studentId) ?? c.studentName, color: cColor,
+          sessions: c.sessions, attended: !!at,
+          reschedule: editable ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: dateKey } : undefined,
+        });
+        classGroups.set(key, g);
+      }
+      for (const [key, g] of classGroups) {
+        const single = g.members.length === 1;
+        const m0 = g.members[0];
+        const allAttended = g.members.every((m) => m.attended);
         items.push({
-          id: `cl-${c.enrollmentId}-${dateKey}`,
-          time: toMinutes(c.startTime),
-          endMin: null,
-          timeLabel: fmt12(c.startTime) ?? "Class",
-          title: nick.raw(c.studentId) ?? c.studentName,
-          subtitle: `${c.courseName ?? "Class"}${at ? ` · ${cap(at.status)}` : ""}`,
-          // WHO colour: the child's fixed colour. Attended/past → grey. Session
-          // balance is shown as a tag (sessionTag), not via card colour.
-          color: at || isPast ? GREY : cColor,
-          childColor: cColor,
+          id: `cl-${key}-${dateKey}`,
+          time: g.time, endMin: null, timeLabel: g.timeLabel,
+          title: single ? m0.name : (g.courseName ?? "Class"),
+          subtitle: single ? `${g.courseName ?? "Class"}${m0.attended ? " · Marked" : ""}` : `${g.members.length} children`,
+          color: allAttended || isPast ? GREY : single ? m0.color : GENERAL_COLOR,
+          childColor: single ? m0.color : undefined,
+          dots: single ? undefined : g.members.map((m) => m.color),
           kind: "class",
           dateKey,
-          sessions: c.sessions,
-          attended: !!at,
-          studentId: c.studentId,
-          // Classes at the same centre share a location key → they never "clash"
-          // (siblings are together). Prefix distinguishes from event locations.
-          location: c.branchId ? `branch:${c.branchId}` : undefined,
+          sessions: single ? m0.sessions : null,
+          attended: allAttended,
+          studentId: single ? m0.studentId : undefined,
+          location: g.location,
           past: isPast,
-          reschedule: editable ? { enrollmentId: c.enrollmentId, studentId: c.studentId, courseName: c.courseName, date: dateKey } : undefined,
+          reschedule: single ? m0.reschedule : undefined,
+          members: single ? undefined : g.members,
         });
       }
       items.sort((a, b) => (a.time ?? -1) - (b.time ?? -1));
@@ -893,7 +912,7 @@ export default function CalendarScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
-        <ActivityIndicator color="#615DFA" />
+        <ActivityIndicator color="#EC2127" />
       </SafeAreaView>
     );
   }
@@ -902,34 +921,37 @@ export default function CalendarScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {/* Compact child filter sits beside the "Schedule" title (small chips).
           Colour = which child; tap to filter, tap "All" to clear. */}
-      <TopBar
-        title="Schedule"
-        center={
-          settings.showFilter && children.length > 1 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.miniFilterRow}>
-              <Pressable onPress={() => setChildFilter([])} style={[styles.miniChip, childFilter.length === 0 && styles.miniChipActive]}>
-                <Ionicons name="people" size={13} color={childFilter.length === 0 ? "#FFFFFF" : "#6B7280"} />
+      <TopBar crumb="Family Calendar" />
+
+      <View style={styles.page}>
+      {/* Member filter (moved out of the app bar into the body) */}
+      {settings.showFilter && children.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.miniFilterRow}>
+          <Pressable onPress={() => setChildFilter([])} style={[styles.memberChip, childFilter.length === 0 && styles.memberChipOn]}>
+            <View style={[styles.memberAv, { backgroundColor: childFilter.length === 0 ? "#FFFFFF" : "#EAF7FD" }]}>
+              <Ionicons name="people" size={12} color={childFilter.length === 0 ? "#EC2127" : "#666666"} />
+            </View>
+            <Text style={[styles.memberName, childFilter.length === 0 && styles.memberNameOn]}>Everyone</Text>
+          </Pressable>
+          {children.map((c) => {
+            const on = childFilter.includes(c.id);
+            const cc = nick.color(c.id) ?? childColorFor(children, c.id);
+            const nm = nick.label(c.id, c.name);
+            return (
+              <Pressable
+                key={c.id}
+                onPress={() => setChildFilter((prev) => (prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id]))}
+                style={[styles.memberChip, on && styles.memberChipOn]}
+              >
+                <View style={[styles.memberAv, { backgroundColor: cc }]}>
+                  <Text style={styles.memberAvText}>{nm.charAt(0).toUpperCase()}</Text>
+                </View>
+                <Text style={[styles.memberName, on && styles.memberNameOn]} numberOfLines={1}>{nm}</Text>
               </Pressable>
-              {children.map((c) => {
-                const on = childFilter.includes(c.id);
-                const cc = nick.color(c.id) ?? childColorFor(children, c.id);
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => setChildFilter((prev) => (prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id]))}
-                    style={[styles.miniChip, { backgroundColor: on ? cc : "#EEF0F6" }, on && { borderColor: cc }]}
-                  >
-                    <View style={[styles.miniChipDot, { backgroundColor: on ? "#FFFFFF" : cc }]} />
-                    <Text style={[styles.miniChipText, on && styles.miniChipTextActive]} numberOfLines={1}>
-                      {nick.label(c.id, c.name)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          ) : undefined
-        }
-      />
+            );
+          })}
+        </ScrollView>
+      ) : null}
 
       {/* View tabs */}
       <View style={styles.tabs}>
@@ -940,15 +962,20 @@ export default function CalendarScreen() {
         ))}
       </View>
 
-      {/* Header: title + today + search (swipe/drag to navigate — no arrows) */}
+      {/* Header: title + Today (yellow) + prev/next + search */}
       <View style={styles.header}>
         <Text style={styles.headerTitle} numberOfLines={1}>{periodTitle}</Text>
         <Pressable onPress={goToday} style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}>
-          <Ionicons name="today-outline" size={14} color="#615DFA" />
-          <Text style={styles.todayText}>Today</Text>
+          <Text style={styles.todayText}>TODAY</Text>
+        </Pressable>
+        <Pressable onPress={() => shift(-1)} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
+          <Ionicons name="chevron-back" size={16} color="#666666" />
+        </Pressable>
+        <Pressable onPress={() => shift(1)} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
+          <Ionicons name="chevron-forward" size={16} color="#666666" />
         </Pressable>
         <Pressable onPress={() => setSearchOpen(true)} style={({ pressed }) => [styles.navButton, pressed && styles.pressed]}>
-          <Ionicons name="search" size={18} color="#615DFA" />
+          <Ionicons name="search" size={16} color="#EC2127" />
         </Pressable>
       </View>
 
@@ -1074,7 +1101,7 @@ export default function CalendarScreen() {
           off the drop-target hit-testing). */}
       {movingItem ? (
         <View style={styles.moveBanner}>
-          <Ionicons name="move" size={15} color="#615DFA" />
+          <Ionicons name="move" size={15} color="#EC2127" />
           <Text style={styles.moveBannerText} numberOfLines={2}>Moving “{movingItem.title}” — drop on a day, or tap a day (change month first for another month)</Text>
           <Pressable onPress={() => { setMovingItem(null); setHoverKey(null); }} hitSlop={8}><Text style={styles.moveBannerCancel}>Cancel</Text></Pressable>
         </View>
@@ -1092,6 +1119,7 @@ export default function CalendarScreen() {
           <Text style={styles.floatPillText} numberOfLines={1}>{movingItem.title}</Text>
         </Animated.View>
       ) : null}
+      </View>
     </SafeAreaView>
   );
 }
@@ -1172,7 +1200,15 @@ function GridPill({
 }) {
   return (
     <Pressable onPress={() => onPickDay(day)} style={[styles.pill, { backgroundColor: item.color + "22", borderLeftColor: item.color }, picked && styles.pillPicked]}>
-      <Text style={[styles.pillText, { color: item.color }]} numberOfLines={1}>{item.kind === "class" ? "🤖 " : item.icon ? `${item.icon} ` : ""}{item.title}</Text>
+      {item.dots ? (
+        <View style={styles.pillRow}>
+          <Text style={[styles.pillText, { color: item.color }]}>🤖</Text>
+          <ClassDots colors={item.dots} size={6} />
+          <Text style={[styles.pillText, { color: item.color, flex: 1 }]} numberOfLines={1}>{item.title}</Text>
+        </View>
+      ) : (
+        <Text style={[styles.pillText, { color: item.color }]} numberOfLines={1}>{item.kind === "class" ? "🤖 " : item.icon ? `${item.icon} ` : ""}{item.title}</Text>
+      )}
     </Pressable>
   );
 }
@@ -1323,6 +1359,15 @@ function MonthPager({
 }
 
 // ── Quick-view / simple-edit half sheet (tap an event in the week grid) ──────
+// Row of colour dots — one per sibling — for a grouped robotics class.
+function ClassDots({ colors, size = 8 }: { colors: string[]; size?: number }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+      {colors.map((c, i) => <View key={i} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c }} />)}
+    </View>
+  );
+}
+
 // One event's compact content (no modal chrome) — used as a page in the swipeable
 // half-sheet. Title already carries the child's nickname (set in buildDayItems).
 function QuickCard({ item, onEdit, onDelete, onReschedule }: {
@@ -1334,8 +1379,9 @@ function QuickCard({ item, onEdit, onDelete, onReschedule }: {
   const isClass = item.kind === "class";
   const isLocal = item.kind === "local" && !!item.localId;
   const sign = isClass ? "🤖" : item.icon ?? null;
-  // Robotics classes read "Robotic class (child)"; other events keep their title.
-  const displayTitle = isClass ? `Robotic class (${item.title})` : item.title;
+  // Robotics classes read "Robotic class (child)"; grouped siblings read
+  // "Robotic class (course)" with dots; other events keep their title.
+  const displayTitle = isClass ? `Robotic class${item.members ? "" : ` (${item.title})`}` : item.title;
   const dateLabel = item.dateKey
     ? new Date(item.dateKey + "T00:00:00").toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long" })
     : "";
@@ -1350,8 +1396,11 @@ function QuickCard({ item, onEdit, onDelete, onReschedule }: {
       <View style={[styles.qBar, { backgroundColor: item.color }]} />
       <View style={styles.sheetHeaderRow}>
         <View style={styles.flex}>
-          <Text style={styles.sheetTitle} numberOfLines={1}>{sign ? `${sign} ` : ""}{displayTitle}</Text>
-          <Text style={styles.sheetSub} numberOfLines={1}>{item.subtitle}</Text>
+          <View style={styles.titleDotRow}>
+            <Text style={styles.sheetTitle} numberOfLines={1}>{sign ? `${sign} ` : ""}{displayTitle}</Text>
+            {item.dots ? <ClassDots colors={item.dots} /> : null}
+          </View>
+          <Text style={styles.sheetSub} numberOfLines={1}>{item.members ? `${item.members.map((m) => m.name).join(", ")}` : item.subtitle}</Text>
         </View>
         {tag ? (
           <View style={[styles.sessTag, tag.ok ? styles.sessTagOk : styles.sessTagLow]}>
@@ -1360,23 +1409,38 @@ function QuickCard({ item, onEdit, onDelete, onReschedule }: {
         ) : null}
       </View>
 
-      <View style={styles.qMetaRow}><Ionicons name="calendar-outline" size={16} color="#615DFA" /><Text style={styles.qMetaText}>{dateLabel}</Text></View>
-      <View style={styles.qMetaRow}><Ionicons name="time-outline" size={16} color="#615DFA" /><Text style={styles.qMetaText}>{item.timeLabel ?? "All day"}</Text></View>
+      <View style={styles.qMetaRow}><Ionicons name="calendar-outline" size={16} color="#EC2127" /><Text style={styles.qMetaText}>{dateLabel}</Text></View>
+      <View style={styles.qMetaRow}><Ionicons name="time-outline" size={16} color="#EC2127" /><Text style={styles.qMetaText}>{item.timeLabel ?? "All day"}</Text></View>
       {locationLabel ? (
-        <View style={styles.qMetaRow}><Ionicons name="location-outline" size={16} color="#615DFA" /><Text style={styles.qMetaText}>{locationLabel}</Text></View>
+        <View style={styles.qMetaRow}><Ionicons name="location-outline" size={16} color="#EC2127" /><Text style={styles.qMetaText}>{locationLabel}</Text></View>
       ) : null}
       {isClass && item.sessions != null ? (
         <View style={styles.qMetaRow}>
-          <Ionicons name="ticket-outline" size={16} color="#615DFA" />
+          <Ionicons name="ticket-outline" size={16} color="#EC2127" />
           <Text style={styles.qMetaText}>
             {item.sessions > 0 ? `${item.sessions} session${item.sessions === 1 ? "" : "s"} left` : item.sessions === 0 ? "No sessions left" : `${-item.sessions} session${item.sessions === -1 ? "" : "s"} over`}
           </Text>
         </View>
       ) : null}
 
-      {/* Actions: classes → Reschedule only; local events → Edit + Delete. */}
+      {/* Actions: classes → Reschedule (grouped = per child); local events → Edit + Delete. */}
       {isClass ? (
-        item.reschedule ? (
+        item.members ? (
+          <View style={styles.qMembers}>
+            {item.members.map((m) => (
+              <View key={m.studentId} style={styles.qMemberRow}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: m.color }} />
+                <Text style={styles.qMemberName} numberOfLines={1}>{m.name}</Text>
+                {m.sessions != null ? <Text style={styles.qMemberSess}>{m.sessions > 0 ? `${m.sessions} left` : m.sessions === 0 ? "0 left" : `${-m.sessions} over`}</Text> : null}
+                {m.reschedule ? (
+                  <Pressable style={styles.qMemberBtn} onPress={() => onReschedule(m.reschedule!)}>
+                    <Ionicons name="repeat" size={13} color="#EC2127" /><Text style={styles.qMemberBtnText}>Reschedule</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : item.reschedule ? (
           <View style={styles.qActions}>
             <Pressable style={[styles.qBtn, styles.qBtnPrimary]} onPress={() => onReschedule(item.reschedule!)}>
               <Ionicons name="repeat" size={17} color="#FFFFFF" />
@@ -1396,7 +1460,7 @@ function QuickCard({ item, onEdit, onDelete, onReschedule }: {
           </Pressable>
         </View>
       ) : (
-        <View style={styles.qMetaRow}><Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" /><Text style={styles.qNote}>Added by your school — view only.</Text></View>
+        <View style={styles.qMetaRow}><Ionicons name="lock-closed-outline" size={14} color="#999999" /><Text style={styles.qNote}>Added by your school — view only.</Text></View>
       )}
     </View>
   );
@@ -1445,9 +1509,9 @@ function QuickSheetPager({ list, index, width, onIndex, onClose, onEdit, onDelet
         </ScrollView>
         {list.length > 1 ? (
           <View style={styles.qpHint}>
-            <Ionicons name="chevron-back" size={13} color="#9CA3AF" />
+            <Ionicons name="chevron-back" size={13} color="#999999" />
             <Text style={styles.qpHintText}>{index + 1} of {list.length} · swipe</Text>
-            <Ionicons name="chevron-forward" size={13} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={13} color="#999999" />
           </View>
         ) : null}
       </View>
@@ -1531,7 +1595,7 @@ function RescheduleSheet({
         <View style={styles.sheetHandle} />
         <View style={styles.sheetHeaderRow}>
           {onBack ? (
-            <Pressable onPress={onBack} hitSlop={8} style={styles.sheetBack}><Ionicons name="chevron-back" size={22} color="#615DFA" /></Pressable>
+            <Pressable onPress={onBack} hitSlop={8} style={styles.sheetBack}><Ionicons name="chevron-back" size={22} color="#EC2127" /></Pressable>
           ) : null}
           <View style={styles.flex}>
             <Text style={styles.sheetTitle}>🤖 Reschedule class</Text>
@@ -1539,11 +1603,11 @@ function RescheduleSheet({
               {studentName || "…"} · {target.courseName || "Class"} · from {new Date(target.date + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" })}
             </Text>
           </View>
-          <Pressable onPress={onClose} hitSlop={8} style={styles.sheetClose}><Ionicons name="close" size={20} color="#6B7280" /></Pressable>
+          <Pressable onPress={onClose} hitSlop={8} style={styles.sheetClose}><Ionicons name="close" size={20} color="#666666" /></Pressable>
         </View>
 
         {loading ? (
-          <View style={styles.sheetLoading}><ActivityIndicator color="#615DFA" /></View>
+          <View style={styles.sheetLoading}><ActivityIndicator color="#EC2127" /></View>
         ) : err ? (
           <Text style={styles.sheetErr}>{err}</Text>
         ) : (
@@ -1568,35 +1632,51 @@ function RescheduleSheet({
             ) : slotsForDate.length === 0 ? (
               <Text style={styles.sheetHelp}>No class slots run on this weekday. Try another day.</Text>
             ) : (
-              <View style={styles.rsSlots}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rsSlots}>
                 {slotsForDate.map((s) => {
                   const on = selSlot?.id === s.id;
                   return (
                     <Pressable key={s.id} style={[styles.rsSlot, on && styles.rsSlotOn]} onPress={() => setSelSlot(s)}>
-                      <Text style={[styles.rsSlotTime, on && styles.rsOnText]}>{fmt12(s.time)}</Text>
-                      <Text style={[styles.rsSlotDur, on && styles.rsOnText]}>{s.duration} min</Text>
+                      <Text style={[styles.rsSlotTime, on && styles.rsSlotOnText]}>{fmt12(s.time)}</Text>
+                      <Text style={[styles.rsSlotDur, on && styles.rsSlotOnText]}>{s.duration} min</Text>
                       {s.limitStudent > 0 ? (
                         <View style={[styles.rsCap, on && styles.rsCapOn]}>
-                          <Ionicons name="people" size={10} color={on ? "#FFFFFF" : "#615DFA"} />
-                          <Text style={[styles.rsCapText, on && styles.rsOnText]}>Up to {s.limitStudent}</Text>
+                          <Ionicons name="people" size={10} color={on ? "#FDC049" : "#EC2127"} />
+                          <Text style={[styles.rsCapText, on && styles.rsSlotOnText]}>Up to {s.limitStudent}</Text>
                         </View>
                       ) : null}
                     </Pressable>
                   );
                 })}
-              </View>
+              </ScrollView>
             )}
             <Text style={styles.sheetNote}>Only 24h+ ahead can be moved, so today and tomorrow aren&apos;t shown. A full slot won&apos;t be offered once online rescheduling is live.</Text>
           </ScrollView>
         )}
 
         <Pressable style={[styles.rsConfirm, !canConfirm && styles.rsConfirmOff]} onPress={confirm} disabled={!canConfirm}>
-          <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+          <Ionicons name="checkmark" size={20} color="#FFFFFF" />
           <Text style={styles.rsConfirmText}>Confirm reschedule</Text>
         </Pressable>
       </View>
     </Modal>
   );
+}
+
+// Duration label from an item's start/end minutes (e.g. "1h", "1h 30m", "45m").
+function fmtDuration(it: DayItem): string | null {
+  if (it.time == null || it.endMin == null) return null;
+  const m = it.endMin - it.time;
+  if (m <= 0) return null;
+  const h = Math.floor(m / 60), mm = m % 60;
+  return h > 0 ? (mm ? `${h}h ${mm}m` : `${h}h`) : `${mm}m`;
+}
+// Agenda sub-line: the clean details (subtitle already carries the branch/place
+// name) + duration. NB: do NOT use it.location — it's an internal normalised key
+// ("place:…") used for clash detection, not a display string.
+function agendaSubLine(it: DayItem): string {
+  const dur = fmtDuration(it);
+  return [it.subtitle, dur].filter(Boolean).join(" · ");
 }
 
 // ── Day agenda list ──
@@ -1636,9 +1716,10 @@ function DayAgenda({
                   <View style={styles.flex}>
                     <View style={styles.agendaTitleRow}>
                       {isClass ? <Text style={styles.robot}>🤖</Text> : it.icon ? <Text style={styles.robot}>{it.icon}</Text> : null}
+                      {it.dots ? <ClassDots colors={it.dots} size={7} /> : null}
                       <Text style={[styles.agendaTitle, it.past && styles.agendaTextMuted]} numberOfLines={1}>{isClass ? `Robotic class (${it.title})` : it.title}</Text>
                     </View>
-                    <Text style={[styles.agendaSub, it.past && styles.agendaTextMuted]} numberOfLines={1}>{it.subtitle}</Text>
+                    <Text style={[styles.agendaSub, it.past && styles.agendaTextMuted]} numberOfLines={1}>{agendaSubLine(it)}</Text>
                   </View>
                   {it.past && isClass ? (
                     <View style={styles.attendedTag}><Text style={styles.attendedTagText}>{it.attended ? "Attended" : "Done"}</Text></View>
@@ -1649,7 +1730,7 @@ function DayAgenda({
                   ) : null}
                   {it.reschedule ? (
                     <Pressable style={({ pressed }) => [styles.moveButton, pressed && styles.pressed]} onPress={() => onReschedule(it.reschedule!.enrollmentId, it.reschedule!.date, it.reschedule!.studentId, it.reschedule!.courseName)}>
-                      <Ionicons name="repeat" size={15} color="#615DFA" />
+                      <Ionicons name="repeat" size={15} color="#EC2127" />
                       <Text style={styles.moveText}>Reschedule</Text>
                     </Pressable>
                   ) : null}
@@ -1673,6 +1754,16 @@ function DayAgenda({
             );
           })
         )}
+        {items.length > 0 ? (
+          <View style={styles.legend}>
+            {[["Class", "#EC2127"], ["Other child", "#01A0E4"], ["Family", "#FDC049"], ["Centre event", "#2B161B"]].map(([label, col]) => (
+              <View key={label} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: col }]} />
+                <Text style={styles.legendText}>{label}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -1728,14 +1819,14 @@ function DayCard({ day, onPrev, onNext }: { day: Date; onPrev: () => void; onNex
   return (
     <View style={styles.dayCard}>
       <Pressable onPress={onPrev} hitSlop={10} style={({ pressed }) => [styles.dayCardNav, pressed && styles.pressed]}>
-        <Ionicons name="chevron-back" size={20} color="#615DFA" />
+        <Ionicons name="chevron-back" size={20} color="#EC2127" />
       </Pressable>
       <View style={styles.dayCardCenter}>
         <Text style={styles.dayCardWd}>{day.toLocaleDateString("en-MY", { weekday: "long" })}</Text>
         <Text style={styles.dayCardDate}>{day.toLocaleDateString("en-MY", { day: "numeric", month: "long", year: "numeric" })}</Text>
       </View>
       <Pressable onPress={onNext} hitSlop={10} style={({ pressed }) => [styles.dayCardNav, pressed && styles.pressed]}>
-        <Ionicons name="chevron-forward" size={20} color="#615DFA" />
+        <Ionicons name="chevron-forward" size={20} color="#EC2127" />
       </Pressable>
     </View>
   );
@@ -2011,7 +2102,8 @@ function WeekTimeGrid({
                       style={[styles.wgEvent, { top, height, left, width: w, backgroundColor: it.color + "22", borderLeftColor: it.color }, ghost?.id === it.id && { opacity: 0.25 }]}
                       onPress={() => onOpenEvent(it)}
                     >
-                      <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={cols > 2 ? 1 : 2}>{it.kind === "class" ? "🤖 " : it.icon ? `${it.icon} ` : ""}{it.title}</Text>
+                      {it.dots ? <View style={styles.pillRow}><Text style={[styles.wgEventTitle, { color: it.color }]}>🤖</Text><ClassDots colors={it.dots} size={5} /></View> : null}
+                      <Text style={[styles.wgEventTitle, { color: it.color }]} numberOfLines={cols > 2 ? 1 : 2}>{it.dots ? "Robotic class" : `${it.kind === "class" ? "🤖 " : it.icon ? `${it.icon} ` : ""}${it.title}`}</Text>
                       {height > 30 && cols < 3 ? <Text style={styles.wgEventTime} numberOfLines={1}>{it.timeLabel}</Text> : null}
                     </Pressable>
                   );
@@ -2062,18 +2154,18 @@ function DetailCard({ item, onClose, onEdit, onDelete, onReschedule }: {
       </View>
       <View style={styles.detailBody}>
         <View style={styles.detailRow}>
-          <Ionicons name="calendar-outline" size={18} color="#615DFA" />
+          <Ionicons name="calendar-outline" size={18} color="#EC2127" />
           <Text style={styles.detailRowLabel}>Date</Text>
           <Text style={styles.detailRowValue}>{dateLabel}</Text>
         </View>
         <View style={styles.detailRow}>
-          <Ionicons name="time-outline" size={18} color="#615DFA" />
+          <Ionicons name="time-outline" size={18} color="#EC2127" />
           <Text style={styles.detailRowLabel}>Time</Text>
           <Text style={styles.detailRowValue}>{item.time == null ? "All day" : item.timeLabel ?? ""}</Text>
         </View>
         {tag ? (
           <View style={styles.detailRow}>
-            <Ionicons name="ticket-outline" size={18} color="#615DFA" />
+            <Ionicons name="ticket-outline" size={18} color="#EC2127" />
             <Text style={styles.detailRowLabel}>Sessions</Text>
             <View style={[styles.sessTag, tag.ok ? styles.sessTagOk : styles.sessTagLow]}>
               <Text style={[styles.sessTagText, { color: tag.ok ? "#065F46" : "#991B1B" }]}>{tag.text}</Text>
@@ -2082,26 +2174,26 @@ function DetailCard({ item, onClose, onEdit, onDelete, onReschedule }: {
         ) : null}
         {isClass && !canEditSlot ? (
           <View style={styles.detailNote}>
-            <Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" />
+            <Ionicons name="lock-closed-outline" size={14} color="#999999" />
             <Text style={styles.detailNoteText}>Class slots can only be changed at least a day ahead and within a month — this one is outside that window.</Text>
           </View>
         ) : null}
         {!editable && !isClass ? (
           <View style={styles.detailNote}>
-            <Ionicons name="lock-closed-outline" size={14} color="#9CA3AF" />
+            <Ionicons name="lock-closed-outline" size={14} color="#999999" />
             <Text style={styles.detailNoteText}>Added by your school — view only.</Text>
           </View>
         ) : null}
         <View style={styles.detailSwipe}>
-          <Ionicons name="chevron-back" size={14} color="#9CA3AF" />
+          <Ionicons name="chevron-back" size={14} color="#999999" />
           <Text style={styles.detailSwipeText}>swipe for other events</Text>
-          <Ionicons name="chevron-forward" size={14} color="#9CA3AF" />
+          <Ionicons name="chevron-forward" size={14} color="#999999" />
         </View>
       </View>
       {editable ? (
         <View style={styles.detailActions}>
           <Pressable style={[styles.detailBtn, styles.detailEdit]} onPress={() => localId && onEdit(localId)}>
-            <Ionicons name="create-outline" size={18} color="#615DFA" />
+            <Ionicons name="create-outline" size={18} color="#EC2127" />
             <Text style={styles.detailEditText}>Edit</Text>
           </Pressable>
           <Pressable style={[styles.detailBtn, styles.detailDelete]} onPress={() => localId && onDelete(localId)}>
@@ -2112,7 +2204,7 @@ function DetailCard({ item, onClose, onEdit, onDelete, onReschedule }: {
       ) : canEditSlot ? (
         <View style={styles.detailActions}>
           <Pressable style={[styles.detailBtn, styles.detailEdit, styles.flex]} onPress={() => item.reschedule && onReschedule(item.reschedule)}>
-            <Ionicons name="swap-horizontal" size={18} color="#615DFA" />
+            <Ionicons name="swap-horizontal" size={18} color="#EC2127" />
             <Text style={styles.detailEditText}>Change slot</Text>
           </Pressable>
         </View>
@@ -2196,7 +2288,7 @@ function CascadeItem({ item, index, onTapPick, dragProps }: { item: DayItem; ind
             <Text style={styles.menuItemTitle} numberOfLines={1}>{item.title}</Text>
             <Text style={styles.menuItemSub} numberOfLines={1}>{item.timeLabel ?? "All day"}{item.subtitle ? ` · ${item.subtitle}` : ""}</Text>
           </View>
-          <Ionicons name="reorder-three" size={18} color="#9CA3AF" />
+          <Ionicons name="reorder-three" size={18} color="#999999" />
         </Pressable>
       </GestureDetector>
     </Animated.View>
@@ -2263,8 +2355,8 @@ function SearchModal({
       <SafeAreaView style={styles.searchSafe} edges={["top"]}>
         <View style={styles.searchHeader}>
           <View style={styles.searchBox}>
-            <Ionicons name="search" size={18} color="#9CA3AF" />
-            <TextInput value={q} onChangeText={setQ} placeholder="Search events" placeholderTextColor="#9CA3AF" style={styles.searchInput} autoFocus />
+            <Ionicons name="search" size={18} color="#999999" />
+            <TextInput value={q} onChangeText={setQ} placeholder="Search events" placeholderTextColor="#999999" style={styles.searchInput} autoFocus />
           </View>
           <Pressable onPress={onClose} hitSlop={8}><Text style={styles.searchCancel}>Cancel</Text></Pressable>
         </View>
@@ -2277,7 +2369,7 @@ function SearchModal({
                 <Text style={styles.searchTitle} numberOfLines={1}>{r.title}</Text>
                 <Text style={styles.searchSub}>{r.sub} · {new Date(r.date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+              <Ionicons name="chevron-forward" size={16} color="#999999" />
             </Pressable>
           ))}
         </ScrollView>
@@ -2287,31 +2379,39 @@ function SearchModal({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
+  safe: { flex: 1, backgroundColor: "#FFFFFF" },
+  page: { flex: 1, backgroundColor: "#F7F3F5" },
   flex: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
-  tabs: { flexDirection: "row", marginHorizontal: 16, backgroundColor: "#EEF0F6", borderRadius: 12, padding: 4, gap: 4 },
-  miniFilterRow: { gap: 6, alignItems: "center", paddingRight: 4 },
-  miniChip: { flexDirection: "row", alignItems: "center", gap: 4, height: 28, paddingHorizontal: 8, borderRadius: 14, backgroundColor: "#EEF0F6", borderWidth: 1.5, borderColor: "transparent" },
-  miniChipActive: { backgroundColor: "#615DFA" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F7F3F5" },
+  tabs: { flexDirection: "row", marginHorizontal: 16, backgroundColor: "#FFFFFF", borderRadius: 12, padding: 4, gap: 4, shadowColor: "#000000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  filterScroll: { flexGrow: 0, flexShrink: 0 },
+  miniFilterRow: { gap: 8, alignItems: "center", paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
+  memberChip: { flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 7, paddingRight: 14, paddingVertical: 7, borderRadius: 999, backgroundColor: "#FFFFFF", shadowColor: "#000000", shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  memberChipOn: { backgroundColor: "#2B161B" },
+  memberAv: { width: 28, height: 28, borderRadius: 999, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  memberAvText: { fontSize: 13, fontWeight: "800", color: "#FFFFFF" },
+  memberName: { fontSize: 13, fontWeight: "600", color: "#2B161B" },
+  memberNameOn: { color: "#FFFFFF" },
+  miniChip: { flexDirection: "row", alignItems: "center", gap: 4, height: 28, paddingHorizontal: 8, borderRadius: 14, backgroundColor: "#EAF7FD", borderWidth: 1.5, borderColor: "transparent" },
+  miniChipActive: { backgroundColor: "#EC2127" },
   miniChipDot: { width: 8, height: 8, borderRadius: 4 },
-  miniChipText: { fontSize: 12, fontWeight: "700", color: "#4B5563", maxWidth: 74 },
+  miniChipText: { fontSize: 12, fontWeight: "700", color: "#666666", maxWidth: 74 },
   miniChipTextActive: { color: "#FFFFFF" },
-  tab: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: "center" },
-  tabActive: { backgroundColor: "#FFFFFF", shadowColor: "#0F172A", shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-  tabText: { fontSize: 13, fontWeight: "700", color: "#6B7280" },
-  tabTextActive: { color: "#615DFA" },
+  tab: { flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: "center" },
+  tabActive: { backgroundColor: "#EC2127" },
+  tabText: { fontSize: 13, fontWeight: "700", color: "#666666" },
+  tabTextActive: { color: "#FFFFFF" },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
-  navButton: { width: 36, height: 36, borderRadius: 12, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", shadowColor: "#0F172A", shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
-  headerTitle: { flex: 1, fontSize: 18, fontWeight: "800", color: "#0F172A", letterSpacing: -0.3 },
-  todayButton: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, height: 36, borderRadius: 12, backgroundColor: "#EEF2FF", justifyContent: "center" },
-  todayText: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
+  navButton: { width: 34, height: 34, borderRadius: 11, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center", shadowColor: "#2B161B", shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  headerTitle: { flex: 1, fontSize: 17, fontWeight: "600", color: "#2B161B", letterSpacing: -0.3 },
+  todayButton: { alignItems: "center", justifyContent: "center", paddingHorizontal: 12, height: 34, borderRadius: 11, backgroundColor: "#FDC049" },
+  todayText: { fontSize: 11, fontWeight: "800", color: "#2B161B", letterSpacing: 0.8 },
   pressed: { opacity: 0.7 },
   errorCard: { marginHorizontal: 16, marginBottom: 8, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
   errorText: { color: "#991B1B", fontSize: 13 },
   bannerWrap: { paddingHorizontal: 16, marginBottom: 8 },
   weekdays: { flexDirection: "row", paddingHorizontal: 8, marginBottom: 2 },
-  weekdayLabel: { flex: 1, textAlign: "center", fontSize: 10, fontWeight: "800", color: "#9CA3AF", letterSpacing: 0.6, textTransform: "uppercase" },
+  weekdayLabel: { flex: 1, textAlign: "center", fontSize: 10, fontWeight: "800", color: "#999999", letterSpacing: 0.6, textTransform: "uppercase" },
   grid: { paddingHorizontal: 6 },
   gridFill: { paddingHorizontal: 6, flex: 1 },
   gridRow: { flexDirection: "row" },
@@ -2319,159 +2419,172 @@ const styles = StyleSheet.create({
   // cells get taller while their contents keep natural size (no stretch)
   gridRowFill: { flexDirection: "row", flexBasis: ROW_H, flexGrow: 1, flexShrink: 0 },
   cell: { flex: 1, margin: 1.5, borderRadius: 10, backgroundColor: "#FFFFFF", paddingTop: 4, paddingHorizontal: 3 },
-  cellSelected: { borderWidth: 1.5, borderColor: "#615DFA" },
+  cellSelected: { borderWidth: 1.5, borderColor: "#EC2127" },
   cellTarget: { backgroundColor: "#DCFCE7", borderWidth: 1, borderColor: "#86EFAC" },
   cellHover: { backgroundColor: "#86EFAC", borderWidth: 1.5, borderColor: "#16A34A" },
   cellDateWrap: { alignSelf: "flex-start", minWidth: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
-  cellTodayWrap: { backgroundColor: "#615DFA" },
-  cellDate: { fontSize: 12, fontWeight: "700", color: "#374151" },
+  cellTodayWrap: { backgroundColor: "#EC2127" },
+  cellDate: { fontSize: 12, fontWeight: "700", color: "#666666" },
   cellDateToday: { color: "#FFFFFF" },
-  cellDateSel: { color: "#615DFA" },
+  cellDateSel: { color: "#EC2127" },
   cellDim: { color: "#D1D5DB" },
   pills: { marginTop: 2, gap: 2, flex: 1, overflow: "hidden" },
   pill: { borderLeftWidth: 2, borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1 },
-  pillPicked: { borderWidth: 1.5, borderColor: "#615DFA", opacity: 0.6 },
+  pillPicked: { borderWidth: 1.5, borderColor: "#EC2127", opacity: 0.6 },
   pillText: { fontSize: 9, fontWeight: "700" },
-  moveBanner: { position: "absolute", left: 12, right: 12, bottom: 24, zIndex: 50, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, shadowColor: "#0F172A", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  pillRow: { flexDirection: "row", alignItems: "center", gap: 3 },
+  moveBanner: { position: "absolute", left: 12, right: 12, bottom: 24, zIndex: 50, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderWidth: 1, borderColor: "#C7D2FE", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, shadowColor: "#2B161B", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   moveBannerText: { flex: 1, fontSize: 12, fontWeight: "700", color: "#4338CA", lineHeight: 16 },
-  moveBannerCancel: { fontSize: 13, fontWeight: "800", color: "#615DFA" },
+  moveBannerCancel: { fontSize: 13, fontWeight: "800", color: "#EC2127" },
   floatPill: { position: "absolute", top: 0, left: 0, minWidth: 90, maxWidth: 150, borderLeftWidth: 3, borderRadius: 8, backgroundColor: "#FFFFFF", paddingHorizontal: 8, paddingVertical: 6, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 10, zIndex: 100 },
-  floatPillText: { fontSize: 11, fontWeight: "800", color: "#0F172A" },
+  floatPillText: { fontSize: 11, fontWeight: "800", color: "#2B161B" },
   menuBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.28)" },
-  menuCard: { position: "absolute", backgroundColor: "#FFFFFF", borderRadius: 16, padding: 8, shadowColor: "#0F172A", shadowOpacity: 0.22, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 14 },
-  menuCardTitle: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6, paddingHorizontal: 6, paddingTop: 2, paddingBottom: 6 },
+  menuCard: { position: "absolute", backgroundColor: "#FFFFFF", borderRadius: 16, padding: 8, shadowColor: "#2B161B", shadowOpacity: 0.22, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 14 },
+  menuCardTitle: { fontSize: 10, fontWeight: "800", color: "#999999", textTransform: "uppercase", letterSpacing: 0.6, paddingHorizontal: 6, paddingTop: 2, paddingBottom: 6 },
   menuItem: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, paddingHorizontal: 6, borderRadius: 10 },
   menuBar: { width: 4, height: 30, borderRadius: 2 },
-  menuItemTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  menuItemSub: { fontSize: 11, color: "#6B7280", marginTop: 1 },
-  pillMore: { fontSize: 11, fontWeight: "800", color: "#9CA3AF", marginTop: -2, paddingLeft: 2 },
+  menuItemTitle: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  menuItemSub: { fontSize: 11, color: "#666666", marginTop: 1 },
+  pillMore: { fontSize: 11, fontWeight: "800", color: "#999999", marginTop: -2, paddingLeft: 2 },
   handleWrap: { alignItems: "center", paddingVertical: 14 },
   handleBar: { width: 56, height: 6, borderRadius: 3, backgroundColor: "#D1D5DB" },
   agenda: { flex: 1 },
-  agendaDate: { fontSize: 14, fontWeight: "800", color: "#0F172A", paddingHorizontal: 16, marginBottom: 8 },
+  agendaDate: { fontSize: 14, fontWeight: "800", color: "#2B161B", paddingHorizontal: 16, marginBottom: 8 },
   agendaList: { paddingHorizontal: 16, paddingBottom: 100, gap: 10 },
-  agendaEmpty: { fontSize: 13, color: "#9CA3AF", textAlign: "center", paddingVertical: 24 },
-  dayCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 4, marginBottom: 8, backgroundColor: "#FFFFFF", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 8, shadowColor: "#0F172A", shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  legend: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: "#F0EAEC" },
+  legendItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+  legendDot: { width: 9, height: 9, borderRadius: 3 },
+  legendText: { fontSize: 11, fontWeight: "600", color: "#666666" },
+  agendaEmpty: { fontSize: 13, color: "#999999", textAlign: "center", paddingVertical: 24 },
+  dayCard: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 4, marginBottom: 8, backgroundColor: "#FFFFFF", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 8, shadowColor: "#2B161B", shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   dayCardNav: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
   dayCardCenter: { flex: 1, alignItems: "center" },
-  dayCardWd: { fontSize: 12, fontWeight: "800", color: "#615DFA", textTransform: "uppercase", letterSpacing: 0.8 },
-  dayCardDate: { fontSize: 18, fontWeight: "800", color: "#0F172A", marginTop: 2 },
+  dayCardWd: { fontSize: 12, fontWeight: "800", color: "#EC2127", textTransform: "uppercase", letterSpacing: 0.8 },
+  dayCardDate: { fontSize: 18, fontWeight: "800", color: "#2B161B", marginTop: 2 },
   demoChip: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
-  demoChipText: { flex: 1, fontSize: 13, fontWeight: "700", color: "#615DFA" },
+  demoChipText: { flex: 1, fontSize: 13, fontWeight: "700", color: "#EC2127" },
   // week time-grid
   wgRoot: { backgroundColor: "#FFFFFF" },
-  wgAllDayLabel: { fontSize: 8, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", textAlign: "right", paddingRight: 6 },
-  wgHeader: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: "#EEF0F6" },
-  wgHeaderWd: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase" },
+  wgAllDayLabel: { fontSize: 8, fontWeight: "800", color: "#999999", textTransform: "uppercase", textAlign: "right", paddingRight: 6 },
+  wgHeader: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: "#EAF7FD" },
+  wgHeaderWd: { fontSize: 10, fontWeight: "800", color: "#999999", textTransform: "uppercase" },
   wgHeaderNumWrap: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", marginTop: 2 },
-  wgHeaderTodayWrap: { backgroundColor: "#615DFA" },
-  wgHeaderNum: { fontSize: 13, fontWeight: "800", color: "#0F172A" },
+  wgHeaderTodayWrap: { backgroundColor: "#EC2127" },
+  wgHeaderNum: { fontSize: 13, fontWeight: "800", color: "#2B161B" },
   wgHeaderNumToday: { color: "#FFFFFF" },
-  wgAllDay: { flexDirection: "row", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: "#EEF0F6", backgroundColor: "#FBFBFE" },
+  wgAllDay: { flexDirection: "row", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: "#EAF7FD", backgroundColor: "#FBFBFE" },
   wgAllDayChip: { borderLeftWidth: 3, borderRadius: 5, paddingHorizontal: 4, paddingVertical: 3 },
   wgAllDayText: { fontSize: 9, fontWeight: "800" },
-  wgHourLabel: { fontSize: 9, fontWeight: "700", color: "#9CA3AF", textAlign: "right", paddingRight: 6, marginTop: -6 },
+  wgHourLabel: { fontSize: 9, fontWeight: "700", color: "#999999", textAlign: "right", paddingRight: 6, marginTop: -6 },
   wgCell: { borderBottomWidth: 1, borderBottomColor: "#F5F5F8", alignItems: "center", justifyContent: "center" },
-  wgPlus: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", shadowColor: "#615DFA", shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+  wgPlus: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#EC2127", alignItems: "center", justifyContent: "center", shadowColor: "#EC2127", shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
   wgEvent: { position: "absolute", borderLeftWidth: 3, borderRadius: 6, paddingHorizontal: 3, paddingTop: 2, overflow: "hidden" },
   wgGhost: { position: "absolute", left: 2, right: 2, borderWidth: 2, borderStyle: "dashed", borderRadius: 6, paddingHorizontal: 3, paddingTop: 2, zIndex: 5 },
   wgEventTitle: { fontSize: 9, fontWeight: "800" },
-  wgEventTime: { fontSize: 8, color: "#6B7280", marginTop: 1 },
+  wgEventTime: { fontSize: 8, color: "#666666", marginTop: 1 },
   // Collapsed "many events" block: a segmented colour strip + a count badge.
   wgCluster: { position: "absolute", borderRadius: 6, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E5E7EB", overflow: "hidden" },
   wgClusterStrip: { flexDirection: "row", height: 5, width: "100%" },
   wgClusterSeg: { flex: 1, height: 5 },
   wgClusterBody: { flex: 1, alignItems: "center", justifyContent: "center", gap: 2, paddingHorizontal: 2 },
-  wgClusterBadge: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
+  wgClusterBadge: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "#EC2127", alignItems: "center", justifyContent: "center", paddingHorizontal: 4 },
   wgClusterBadgeText: { fontSize: 10, fontWeight: "800", color: "#FFFFFF" },
-  wgClusterLabel: { fontSize: 7, fontWeight: "700", color: "#9CA3AF" },
+  wgClusterLabel: { fontSize: 7, fontWeight: "700", color: "#999999" },
   // event detail modal
-  detailRoot: { flex: 1, backgroundColor: "#F6F6FB" },
+  detailRoot: { flex: 1, backgroundColor: "#F7F3F5" },
   detailHeader: { paddingTop: 64, paddingBottom: 28, paddingHorizontal: 24 },
   detailCloseBtn: { position: "absolute", top: 56, right: 16, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
   detailKind: { fontSize: 12, fontWeight: "800", color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: 1 },
   detailTitle: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", marginTop: 6, letterSpacing: -0.4 },
   detailBody: { padding: 20, gap: 4 },
   detailRow: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#FFFFFF", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 8 },
-  detailRowLabel: { fontSize: 13, color: "#6B7280", fontWeight: "700", width: 44 },
-  detailRowValue: { flex: 1, fontSize: 14, color: "#111827", fontWeight: "700", textAlign: "right" },
+  detailRowLabel: { fontSize: 13, color: "#666666", fontWeight: "700", width: 44 },
+  detailRowValue: { flex: 1, fontSize: 14, color: "#2B161B", fontWeight: "700", textAlign: "right" },
   detailNote: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4, paddingVertical: 8 },
-  detailNoteText: { flex: 1, fontSize: 12, color: "#9CA3AF", fontWeight: "600", lineHeight: 17 },
+  detailNoteText: { flex: 1, fontSize: 12, color: "#999999", fontWeight: "600", lineHeight: 17 },
   detailSwipe: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 12 },
-  detailSwipeText: { fontSize: 11, color: "#9CA3AF", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
+  detailSwipeText: { fontSize: 11, color: "#999999", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
   detailActions: { flexDirection: "row", gap: 12, padding: 20, marginTop: "auto" },
   detailBtn: { height: 52, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   detailEdit: { flex: 1, backgroundColor: "#EEF2FF" },
-  detailEditText: { fontSize: 15, fontWeight: "800", color: "#615DFA" },
+  detailEditText: { fontSize: 15, fontWeight: "800", color: "#EC2127" },
   detailDelete: { flex: 1, backgroundColor: "#EF4444" },
   detailDeleteText: { fontSize: 15, fontWeight: "800", color: "#FFFFFF" },
-  agendaItem: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, shadowColor: "#0F172A", shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  agendaItem: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, shadowColor: "#2B161B", shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   agendaItemClash: { borderWidth: 1.5, borderColor: "#FCD34D" },
-  agendaItemPast: { backgroundColor: "#F9FAFB", shadowOpacity: 0 },
-  agendaTime: { width: 64, fontSize: 11, fontWeight: "700", color: "#6B7280" },
+  agendaItemPast: { backgroundColor: "#F7F3F5", shadowOpacity: 0 },
+  agendaTime: { width: 64, fontSize: 11, fontWeight: "700", color: "#666666" },
   agendaBar: { width: 4, alignSelf: "stretch", borderRadius: 2 },
   agendaTitleRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   robot: { fontSize: 14 },
-  agendaTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  agendaSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
-  agendaTextMuted: { color: "#9CA3AF" },
+  agendaTitle: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  agendaSub: { fontSize: 12, color: "#666666", marginTop: 2 },
+  agendaTextMuted: { color: "#999999" },
   attendedTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, marginRight: 4, backgroundColor: "#E5E7EB" },
-  attendedTagText: { fontSize: 11, fontWeight: "800", color: "#6B7280" },
+  attendedTagText: { fontSize: 11, fontWeight: "800", color: "#666666" },
   clashWarn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFBEB", borderRadius: 12, borderWidth: 1, borderColor: "#FDE68A", paddingHorizontal: 12, paddingVertical: 10, marginTop: 6, marginLeft: 12 },
   clashWarnText: { fontSize: 12, fontWeight: "600", color: "#92400E", lineHeight: 16 },
   clashFix: { backgroundColor: "#F59E0B", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
   clashFixText: { fontSize: 12, fontWeight: "800", color: "#FFFFFF" },
   moveButton: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#EEF2FF", borderRadius: 8 },
-  moveText: { fontSize: 13, fontWeight: "700", color: "#615DFA" },
+  moveText: { fontSize: 13, fontWeight: "700", color: "#EC2127" },
   // Reschedule bottom sheet
   sheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.5)" },
   sheet: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28 },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: "#E5E7EB", alignSelf: "center", marginBottom: 10 },
   sheetHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 8 },
-  sheetTitle: { fontSize: 17, fontWeight: "800", color: "#0F172A" },
-  sheetSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  sheetTitle: { fontSize: 17, fontWeight: "800", color: "#2B161B" },
+  sheetSub: { fontSize: 12, color: "#666666", marginTop: 2 },
   sheetClose: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
   sheetBack: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
   sheetLoading: { paddingVertical: 40, alignItems: "center" },
   sheetErr: { fontSize: 13, color: "#991B1B", paddingVertical: 20, textAlign: "center" },
-  sheetStep: { fontSize: 12, fontWeight: "800", color: "#615DFA", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 14, marginBottom: 6 },
-  sheetHelp: { fontSize: 13, color: "#6B7280", paddingVertical: 10 },
-  sheetNote: { fontSize: 11, color: "#9CA3AF", lineHeight: 16, marginTop: 12 },
+  sheetStep: { fontSize: 12, fontWeight: "800", color: "#EC2127", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 14, marginBottom: 6 },
+  sheetHelp: { fontSize: 13, color: "#666666", paddingVertical: 10 },
+  sheetNote: { fontSize: 11, color: "#999999", lineHeight: 16, marginTop: 12 },
   rsDate: { width: 60, paddingVertical: 9, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center" },
-  rsDateOn: { backgroundColor: "#615DFA" },
-  rsDateWd: { fontSize: 11, fontWeight: "600", color: "#6B7280" },
-  rsDateNum: { fontSize: 19, fontWeight: "800", color: "#111827", marginVertical: 1 },
-  rsDateMo: { fontSize: 10, color: "#6B7280" },
+  rsDateOn: { backgroundColor: "#EC2127" },
+  rsDateWd: { fontSize: 11, fontWeight: "600", color: "#666666" },
+  rsDateNum: { fontSize: 19, fontWeight: "800", color: "#2B161B", marginVertical: 1 },
+  rsDateMo: { fontSize: 10, color: "#666666" },
   rsOnText: { color: "#FFFFFF" },
-  rsSlots: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  rsSlotOnText: { color: "#FDC049" },
+  rsSlots: { flexDirection: "row", gap: 8, paddingVertical: 4, paddingRight: 8 },
   rsSlot: { paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "#F3F4F6", borderRadius: 12, borderWidth: 1.5, borderColor: "transparent", minWidth: 96, alignItems: "center" },
-  rsSlotOn: { backgroundColor: "#615DFA", borderColor: "#615DFA" },
-  rsSlotTime: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  rsSlotDur: { fontSize: 11, color: "#6B7280", marginTop: 2 },
+  rsSlotOn: { backgroundColor: "#2B161B", borderColor: "#2B161B" },
+  rsSlotTime: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  rsSlotDur: { fontSize: 11, color: "#666666", marginTop: 2 },
   rsCap: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 6, backgroundColor: "#EEF2FF", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   rsCapOn: { backgroundColor: "rgba(255,255,255,0.25)" },
-  rsCapText: { fontSize: 10, fontWeight: "800", color: "#615DFA" },
-  rsConfirm: { marginTop: 16, height: 52, borderRadius: 14, backgroundColor: "#615DFA", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  rsCapText: { fontSize: 10, fontWeight: "800", color: "#EC2127" },
+  rsConfirm: { marginTop: 16, height: 52, borderRadius: 14, backgroundColor: "#EC2127", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   rsConfirmOff: { opacity: 0.45 },
   rsConfirmText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
   // Quick-view sheet
   qBar: { height: 4, borderRadius: 2, marginBottom: 12 },
   qMetaRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
-  qMetaText: { fontSize: 14, color: "#374151", fontWeight: "600" },
+  qMetaText: { fontSize: 14, color: "#666666", fontWeight: "600" },
   qActions: { flexDirection: "row", gap: 10, marginTop: 14 },
+  titleDotRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  qMembers: { marginTop: 12, gap: 8 },
+  qMemberRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  qMemberName: { flex: 1, fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  qMemberSess: { fontSize: 12, fontWeight: "700", color: "#666666" },
+  qMemberBtn: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: "#EEF0FF" },
+  qMemberBtnText: { fontSize: 12, fontWeight: "800", color: "#EC2127" },
   qBtn: { flex: 1, height: 48, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
-  qBtnPrimary: { backgroundColor: "#615DFA" },
+  qBtnPrimary: { backgroundColor: "#EC2127" },
   qBtnPrimaryText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
   qBtnDanger: { backgroundColor: "#FEE2E2" },
   qBtnDangerText: { color: "#DC2626", fontSize: 14, fontWeight: "800" },
   qBtnGhost: { backgroundColor: "#EEF2FF" },
-  qBtnGhostText: { color: "#615DFA", fontSize: 14, fontWeight: "800" },
-  qNote: { fontSize: 13, color: "#9CA3AF", fontStyle: "italic" },
+  qBtnGhostText: { color: "#EC2127", fontSize: 14, fontWeight: "800" },
+  qNote: { fontSize: 13, color: "#999999", fontStyle: "italic" },
   // Swipeable half-sheet pager
   qpSheet: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10, paddingBottom: 20 },
   qpCard: { paddingHorizontal: 16, paddingTop: 4, gap: 2 },
   qpHint: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingTop: 8 },
-  qpHintText: { fontSize: 12, fontWeight: "700", color: "#9CA3AF" },
+  qpHintText: { fontSize: 12, fontWeight: "700", color: "#999999" },
   sessTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, marginRight: 4 },
   sessTagOk: { backgroundColor: "#D1FAE5" },
   sessTagLow: { backgroundColor: "#FEE2E2" },
@@ -2479,23 +2592,23 @@ const styles = StyleSheet.create({
   yearScroll: { padding: 12, paddingBottom: 100 },
   yearGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   miniMonth: { width: "31%", backgroundColor: "#FFFFFF", borderRadius: 12, padding: 8, marginBottom: 12 },
-  miniTitle: { fontSize: 12, fontWeight: "800", color: "#615DFA", marginBottom: 4, textAlign: "center" },
+  miniTitle: { fontSize: 12, fontWeight: "800", color: "#EC2127", marginBottom: 4, textAlign: "center" },
   miniRow: { flexDirection: "row" },
   miniCell: { flex: 1, alignItems: "center", justifyContent: "center", height: 16 },
-  miniDay: { fontSize: 7, color: "#374151", fontWeight: "600" },
-  miniToday: { color: "#FFFFFF", backgroundColor: "#615DFA", borderRadius: 6, width: 12, height: 12, textAlign: "center", overflow: "hidden", lineHeight: 12 },
+  miniDay: { fontSize: 7, color: "#666666", fontWeight: "600" },
+  miniToday: { color: "#FFFFFF", backgroundColor: "#EC2127", borderRadius: 6, width: 12, height: 12, textAlign: "center", overflow: "hidden", lineHeight: 12 },
   miniDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: "#F59E0B", marginTop: 1 },
   miniDotEmpty: { width: 3, height: 3, marginTop: 1 },
-  fab: { position: "absolute", right: 20, bottom: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center", shadowColor: "#615DFA", shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
+  fab: { position: "absolute", right: 20, bottom: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: "#EC2127", alignItems: "center", justifyContent: "center", shadowColor: "#EC2127", shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
   fabPressed: { opacity: 0.85, transform: [{ scale: 0.96 }] },
-  searchSafe: { flex: 1, backgroundColor: "#F6F6FB" },
+  searchSafe: { flex: 1, backgroundColor: "#F7F3F5" },
   searchHeader: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
   searchBox: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFFFF", borderRadius: 12, paddingHorizontal: 12, height: 44 },
-  searchInput: { flex: 1, fontSize: 15, color: "#111827" },
-  searchCancel: { fontSize: 15, color: "#615DFA", fontWeight: "700" },
+  searchInput: { flex: 1, fontSize: 15, color: "#2B161B" },
+  searchCancel: { fontSize: 15, color: "#EC2127", fontWeight: "700" },
   searchList: { padding: 16, gap: 10 },
   searchRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 12, padding: 14 },
   searchDot: { width: 10, height: 10, borderRadius: 5 },
-  searchTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  searchSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  searchTitle: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  searchSub: { fontSize: 12, color: "#666666", marginTop: 2 },
 });

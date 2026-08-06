@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { SwipeBackView } from "@/components/SwipeBackView";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/auth";
 import { useCachedQuery } from "@/hooks/useCachedQuery";
@@ -53,6 +54,7 @@ function formatRM(n: number): string {
 export default function ProgramDetailScreen() {
   const { user } = useAuth();
   const userId = user?.id;
+  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const fetchDetail = async (): Promise<ProgramDetail> => {
@@ -189,15 +191,15 @@ export default function ProgramDetailScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
-        <Stack.Screen options={{ title: "Program", headerShown: true, headerTintColor: "#615DFA" }} />
-        <ActivityIndicator color="#615DFA" />
+        <Stack.Screen options={{ title: "Program", headerShown: true, headerTintColor: "#EC2127" }} />
+        <ActivityIndicator color="#EC2127" />
       </SafeAreaView>
     );
   }
   if (error && !data) {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
-        <Stack.Screen options={{ title: "Program", headerShown: true, headerTintColor: "#615DFA" }} />
+        <Stack.Screen options={{ title: "Program", headerShown: true, headerTintColor: "#EC2127" }} />
         <Text style={styles.errText}>Couldn&apos;t load this program. Please check your connection.</Text>
       </SafeAreaView>
     );
@@ -215,7 +217,8 @@ export default function ProgramDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
-      <Stack.Screen options={{ title: data.name, headerShown: true, headerTintColor: "#615DFA" }} />
+      <Stack.Screen options={{ title: data.name, headerShown: true, headerTintColor: "#EC2127" }} />
+      <SwipeBackView onBack={() => router.back()} style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Hero */}
         {data.cover ? (
@@ -248,7 +251,7 @@ export default function ProgramDetailScreen() {
             <Section title="Requirements">
               {requirements.map((r, i) => (
                 <View key={i} style={styles.bulletRow}>
-                  <Ionicons name="ellipse" size={7} color="#9CA3AF" style={{ marginTop: 6, marginHorizontal: 5 }} />
+                  <Ionicons name="ellipse" size={7} color="#999999" style={{ marginTop: 6, marginHorizontal: 5 }} />
                   <Text style={styles.bulletText}>{r}</Text>
                 </View>
               ))}
@@ -282,7 +285,7 @@ export default function ProgramDetailScreen() {
               {branches.map((b) => (
                 <View key={b.branchId} style={styles.branchBlock}>
                   <View style={styles.branchHead}>
-                    <Ionicons name="location" size={14} color="#615DFA" />
+                    <Ionicons name="location" size={14} color="#EC2127" />
                     <Text style={styles.branchName}>{b.branchName}</Text>
                   </View>
                   {b.slots.length ? (
@@ -314,7 +317,7 @@ export default function ProgramDetailScreen() {
                           {l.thumb ? (
                             <Image source={{ uri: l.thumb }} style={styles.lessonThumb} />
                           ) : (
-                            <View style={[styles.lessonThumb, styles.lessonThumbFallback]}><Ionicons name="play-circle" size={22} color="#615DFA" /></View>
+                            <View style={[styles.lessonThumb, styles.lessonThumbFallback]}><Ionicons name="play-circle" size={22} color="#EC2127" /></View>
                           )}
                           <Text style={styles.lessonTitle} numberOfLines={2}>{l.title}</Text>
                         </View>
@@ -349,6 +352,7 @@ export default function ProgramDetailScreen() {
           )}
         </View>
       </ScrollView>
+      </SwipeBackView>
     </SafeAreaView>
   );
 }
@@ -356,7 +360,7 @@ export default function ProgramDetailScreen() {
 function Fact({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   return (
     <View style={styles.fact}>
-      <Ionicons name={icon} size={13} color="#615DFA" />
+      <Ionicons name={icon} size={13} color="#EC2127" />
       <Text style={styles.factText}>{text}</Text>
     </View>
   );
@@ -371,49 +375,49 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB", padding: 24 },
-  errText: { fontSize: 14, color: "#6B7280", textAlign: "center" },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F7F3F5", padding: 24 },
+  errText: { fontSize: 14, color: "#666666", textAlign: "center" },
   flex: { flex: 1 },
   scroll: { paddingBottom: 120 },
-  hero: { width: "100%", height: 200, backgroundColor: "#EEF2FF" },
-  heroFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#615DFA" },
+  hero: { width: "100%", height: 200, backgroundColor: "#EAF7FD" },
+  heroFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#EC2127" },
   body: { padding: 16, gap: 4 },
-  title: { fontSize: 24, fontWeight: "800", color: "#0F172A", letterSpacing: -0.4 },
+  title: { fontSize: 24, fontWeight: "800", color: "#2B161B", letterSpacing: -0.4 },
   factRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
-  fact: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#EEF2FF", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
-  factText: { fontSize: 11, fontWeight: "700", color: "#615DFA" },
+  fact: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#EAF7FD", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  factText: { fontSize: 11, fontWeight: "700", color: "#EC2127" },
   desc: { fontSize: 14, color: "#374151", lineHeight: 21, marginTop: 12 },
   section: { marginTop: 22 },
-  sectionTitle: { fontSize: 17, fontWeight: "800", color: "#0F172A", marginBottom: 10 },
+  sectionTitle: { fontSize: 17, fontWeight: "800", color: "#2B161B", marginBottom: 10 },
   bulletRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 8 },
   bulletText: { flex: 1, fontSize: 14, color: "#374151", lineHeight: 20 },
-  muted: { fontSize: 13, color: "#9CA3AF", fontStyle: "italic" },
+  muted: { fontSize: 13, color: "#999999", fontStyle: "italic" },
   branchBlock: { backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#F0F0F6" },
   branchHead: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
-  branchName: { fontSize: 14, fontWeight: "800", color: "#111827" },
+  branchName: { fontSize: 14, fontWeight: "800", color: "#2B161B" },
   slotWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   slotChip: { alignItems: "center", backgroundColor: "#F3F4F6", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, minWidth: 74 },
-  slotDay: { fontSize: 12, fontWeight: "800", color: "#615DFA" },
+  slotDay: { fontSize: 12, fontWeight: "800", color: "#EC2127" },
   slotTime: { fontSize: 12, color: "#374151", marginTop: 2, fontWeight: "600" },
   currSection: { backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#F0F0F6" },
-  currTitle: { fontSize: 14, fontWeight: "800", color: "#111827" },
-  currDesc: { fontSize: 12, color: "#6B7280", marginTop: 3, lineHeight: 17 },
+  currTitle: { fontSize: 14, fontWeight: "800", color: "#2B161B" },
+  currDesc: { fontSize: 12, color: "#666666", marginTop: 3, lineHeight: 17 },
   lessonRow: { gap: 10, paddingVertical: 10 },
   lessonCard: { width: 120 },
-  lessonThumb: { width: 120, height: 72, borderRadius: 10, backgroundColor: "#EEF2FF" },
+  lessonThumb: { width: 120, height: 72, borderRadius: 10, backgroundColor: "#EAF7FD" },
   lessonThumbFallback: { alignItems: "center", justifyContent: "center" },
   lessonTitle: { fontSize: 11, color: "#374151", fontWeight: "600", marginTop: 5, lineHeight: 15 },
   instrRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: "#F0F0F6" },
-  instrAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#EEF2FF" },
-  instrAvatarFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#615DFA" },
+  instrAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#EAF7FD" },
+  instrAvatarFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#EC2127" },
   instrInitial: { color: "#FFFFFF", fontSize: 19, fontWeight: "800" },
-  instrName: { fontSize: 15, fontWeight: "800", color: "#111827" },
-  instrRole: { fontSize: 12, color: "#615DFA", fontWeight: "700", marginTop: 2 },
+  instrName: { fontSize: 15, fontWeight: "800", color: "#2B161B" },
+  instrRole: { fontSize: 12, color: "#EC2127", fontWeight: "700", marginTop: 2 },
   pkgCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#F0F0F6" },
-  pkgType: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  pkgType: { fontSize: 15, fontWeight: "800", color: "#2B161B" },
   pkgMeta: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2 },
-  pkgMetaText: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
-  pkgPrice: { fontSize: 17, fontWeight: "800", color: "#615DFA" },
-  enrolNote: { fontSize: 12, color: "#6B7280", lineHeight: 17, marginTop: 4, fontStyle: "italic" },
+  pkgMetaText: { fontSize: 12, color: "#666666", fontWeight: "600" },
+  pkgPrice: { fontSize: 17, fontWeight: "800", color: "#EC2127" },
+  enrolNote: { fontSize: 12, color: "#666666", lineHeight: 17, marginTop: 4, fontStyle: "italic" },
 });

@@ -40,17 +40,26 @@ function timeSince(iso: string): string {
   return new Date(iso).toLocaleDateString("en-MY", { day: "numeric", month: "short" });
 }
 
-const TYPE_ICONS: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
-  payment: { icon: "card", color: "#615DFA" },
-  attendance: { icon: "checkmark-circle", color: "#22C55E" },
-  exam: { icon: "school", color: "#F59E0B" },
-  reminder: { icon: "alarm", color: "#23D2E2" },
-  reschedule: { icon: "swap-horizontal", color: "#FB06D4" },
-  adcoin: { icon: "logo-bitcoin", color: "#92400E" },
-};
+type IconMeta = { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string };
+const ATTENDANCE: IconMeta = { icon: "checkmark", color: "#0F8B3C", bg: "#E7F7EE" };   // light-green · green tick
+const PAYMENT: IconMeta = { icon: "wallet", color: "#EC2127", bg: "#FDECED" };         // pink · red wallet
+const CERT: IconMeta = { icon: "ribbon", color: "#B57614", bg: "#FEF0D6" };            // light-yellow · dark-yellow award
+const HOLIDAY: IconMeta = { icon: "calendar", color: "#666666", bg: "#F5F5F5" };       // grey · grey calendar
+const PERSON: IconMeta = { icon: "person-add", color: "#01A0E4", bg: "#EAF7FD" };      // blue · person
+const SWAP: IconMeta = { icon: "swap-horizontal", color: "#01A0E4", bg: "#EAF7FD" };   // blue · swap
+const DEFAULT_META: IconMeta = { icon: "notifications", color: "#666666", bg: "#F5F5F5" };
 
-function iconFor(type: string) {
-  return TYPE_ICONS[type] ?? { icon: "notifications", color: "#6B7280" };
+// The `type` strings come from the web app (e.g. child_attendance_marked,
+// payment_due, pool_low_sessions, student_added, trial_added). Match by keyword.
+function iconFor(type: string): IconMeta {
+  const t = (type || "").toLowerCase();
+  if (t.includes("attendance")) return ATTENDANCE;
+  if (t.includes("payment") || t.includes("topup") || t.includes("session") || t.includes("pool") || t.includes("invoice") || t.includes("renew")) return PAYMENT;
+  if (t.includes("exam") || t.includes("cert") || t.includes("award") || t.includes("result")) return CERT;
+  if (t.includes("holiday")) return HOLIDAY;
+  if (t.includes("reschedul") || t.includes("switch") || t.includes("transfer")) return SWAP;
+  if (t.includes("student") || t.includes("trial") || t.includes("added") || t.includes("enrol")) return PERSON;
+  return DEFAULT_META;
 }
 
 type InboxData = {
@@ -184,7 +193,7 @@ export default function InboxScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.center} edges={["top"]}>
-        <ActivityIndicator color="#615DFA" />
+        <ActivityIndicator color="#EC2127" />
       </SafeAreaView>
     );
   }
@@ -193,7 +202,7 @@ export default function InboxScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Inbox</Text>
+          <Text style={styles.title}>Notifications</Text>
           <Text style={styles.subtitle}>
             {unreadCount > 0 ? `${unreadCount} unread` : "All caught up"}
           </Text>
@@ -221,23 +230,23 @@ export default function InboxScreen() {
         style={({ pressed }) => [styles.transfersBanner, pressed && styles.pressed]}
         onPress={() => router.push("/transfers")}
       >
-        <View style={[styles.iconWrap, { backgroundColor: "#FB06D420" }]}>
-          <Ionicons name="swap-horizontal" size={20} color="#FB06D4" />
+        <View style={styles.transfersIcon}>
+          <Ionicons name="swap-horizontal" size={20} color="#2B161B" />
         </View>
         <View style={styles.bannerBody}>
-          <Text style={styles.bannerTitle}>Session transfers</Text>
-          <Text style={styles.bannerSubtitle}>
+          <Text style={styles.transfersTitle}>Session transfers</Text>
+          <Text style={styles.transfersSub}>
             {pendingTransferCount > 0
               ? `${pendingTransferCount} pending your confirmation`
               : "Move sessions between siblings"}
           </Text>
         </View>
         {pendingTransferCount > 0 ? (
-          <View style={styles.bannerBadge}>
-            <Text style={styles.bannerBadgeText}>{pendingTransferCount}</Text>
+          <View style={styles.notiPill}>
+            <Text style={styles.notiPillText}>{pendingTransferCount} NEW</Text>
           </View>
         ) : (
-          <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.6)" />
         )}
       </Pressable>
 
@@ -245,7 +254,7 @@ export default function InboxScreen() {
         data={items}
         keyExtractor={(n) => n.id}
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#615DFA" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#EC2127" />}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="notifications-off-outline" size={48} color="#D1D5DB" />
@@ -263,7 +272,7 @@ export default function InboxScreen() {
               style={({ pressed }) => [styles.card, isUnread && styles.cardUnread, pressed && styles.pressed]}
               onPress={() => onItemPress(item)}
             >
-              <View style={[styles.iconWrap, { backgroundColor: meta.color + "20" }]}>
+              <View style={[styles.iconWrap, { backgroundColor: meta.bg }]}>
                 <Ionicons name={meta.icon} size={20} color={meta.color} />
               </View>
               <View style={styles.cardBody}>
@@ -289,8 +298,8 @@ export default function InboxScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F6F6FB" },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#F7F3F5" },
   header: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -299,23 +308,25 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
-  title: { fontSize: 24, fontWeight: "800", color: "#111827" },
-  subtitle: { fontSize: 14, color: "#6B7280", marginTop: 2 },
+  title: { fontSize: 24, fontWeight: "800", color: "#2B161B" },
+  subtitle: { fontSize: 14, color: "#666666", marginTop: 2 },
   markAllButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 999,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#F0DADC",
   },
   pressed: { opacity: 0.85 },
-  markAllText: { fontSize: 12, fontWeight: "700", color: "#615DFA" },
+  markAllText: { fontSize: 12, fontWeight: "700", color: "#EC2127" },
   errorCard: { marginHorizontal: 16, marginBottom: 12, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
   errorText: { color: "#991B1B", fontSize: 13 },
   bannerWrap: { paddingHorizontal: 16, marginBottom: 12 },
   list: { padding: 16, paddingTop: 0, gap: 8 },
   empty: { padding: 48, alignItems: "center", gap: 8 },
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#2B161B" },
+  emptyText: { fontSize: 14, color: "#666666", textAlign: "center", maxWidth: 280 },
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
@@ -323,7 +334,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
   },
-  cardUnread: { backgroundColor: "#FFFFFF", borderLeftWidth: 3, borderLeftColor: "#615DFA" },
+  cardUnread: { backgroundColor: "#FFFFFF", borderLeftWidth: 3, borderLeftColor: "#EC2127" },
   iconWrap: {
     width: 40,
     height: 40,
@@ -334,29 +345,34 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1 },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 6 },
   cardTitle: { fontSize: 14, color: "#374151", flex: 1, fontWeight: "500" },
-  cardTitleUnread: { fontWeight: "700", color: "#111827" },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#615DFA", marginTop: 4 },
-  cardBodyText: { fontSize: 13, color: "#6B7280", marginTop: 4, lineHeight: 18 },
-  timestamp: { fontSize: 11, color: "#9CA3AF", marginTop: 6 },
+  cardTitleUnread: { fontWeight: "700", color: "#2B161B" },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#EC2127", marginTop: 4 },
+  cardBodyText: { fontSize: 13, color: "#666666", marginTop: 4, lineHeight: 18 },
+  timestamp: { fontSize: 11, color: "#999999", marginTop: 6 },
   transfersBanner: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#2B161B",
     padding: 14,
     marginHorizontal: 16,
     marginBottom: 12,
-    borderRadius: 12,
+    borderRadius: 18,
   },
+  transfersIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: "#FDC049", alignItems: "center", justifyContent: "center" },
+  transfersTitle: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
+  transfersSub: { fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 },
+  notiPill: { backgroundColor: "#EC2127", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  notiPillText: { fontSize: 10, fontWeight: "800", color: "#FFFFFF", letterSpacing: 0.5 },
   bannerBody: { flex: 1 },
-  bannerTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  bannerSubtitle: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  bannerTitle: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  bannerSubtitle: { fontSize: 12, color: "#666666", marginTop: 2 },
   bannerBadge: {
     minWidth: 24,
     height: 24,
     paddingHorizontal: 8,
     borderRadius: 12,
-    backgroundColor: "#FB06D4",
+    backgroundColor: "#01A0E4",
     alignItems: "center",
     justifyContent: "center",
   },

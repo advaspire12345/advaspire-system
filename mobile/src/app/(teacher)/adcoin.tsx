@@ -8,6 +8,7 @@ import { mobileApi } from "@/lib/api";
 import { TeacherTopBar } from "@/components/TeacherTopBar";
 
 type Student = { id: string; name: string; code: string | null; photo: string | null; balance: number };
+type Ranked = Student & { rank: number };
 const QUICK = [5, 10, 20, 50];
 
 export default function TeacherAdcoin() {
@@ -28,7 +29,7 @@ export default function TeacherAdcoin() {
     setLoading(true);
     const [{ data: me }, { data: studs }] = await Promise.all([
       supabase.from("users").select("adcoin_balance").eq("id", staff.id).maybeSingle(),
-      supabase.from("students").select("id, name, student_id, photo, adcoin_balance").eq("branch_id", staff.branchId).is("deleted_at", null).order("name"),
+      supabase.from("students").select("id, name, student_id, photo, adcoin_balance").eq("branch_id", staff.branchId).is("deleted_at", null).order("adcoin_balance", { ascending: false, nullsFirst: false }),
     ]);
     setBalance(Number((me as { adcoin_balance?: number } | null)?.adcoin_balance ?? 0));
     setStudents((studs ?? []).map((s) => ({ id: s.id as string, name: (s.name as string) ?? "Student", code: (s.student_id as string | null) ?? null, photo: (s.photo as string | null) ?? null, balance: Number(s.adcoin_balance ?? 0) })));
@@ -38,7 +39,9 @@ export default function TeacherAdcoin() {
   useEffect(() => { load(); }, [load]);
 
   const q = query.trim().toLowerCase();
-  const filtered = useMemo(() => (q ? students.filter((s) => s.name.toLowerCase().includes(q) || (s.code ?? "").toLowerCase().includes(q)) : students), [students, q]);
+  // Rank everyone by adcoin (highest first); keep each student's overall rank when filtering.
+  const ranked = useMemo<Ranked[]>(() => [...students].sort((a, b) => b.balance - a.balance).map((s, i) => ({ ...s, rank: i + 1 })), [students]);
+  const filtered = useMemo(() => (q ? ranked.filter((s) => s.name.toLowerCase().includes(q) || (s.code ?? "").toLowerCase().includes(q)) : ranked), [ranked, q]);
   const amt = Math.floor(Number(amount) || 0);
   const canSend = !!selected && amt > 0 && balance != null && amt <= balance && password.length > 0 && !sending;
 
@@ -88,6 +91,7 @@ export default function TeacherAdcoin() {
             <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
               {filtered.length === 0 ? <Text style={styles.empty}>No students found.</Text> : filtered.map((s) => (
                 <Pressable key={s.id} style={styles.pickRow} onPress={() => setSelected(s)}>
+                  <RankBadge rank={s.rank} />
                   <Avatar name={s.name} photo={s.photo} />
                   <View style={styles.flex}><Text style={styles.pickName} numberOfLines={1}>{s.name}</Text><Text style={styles.pickSub}>{s.code ? `#${s.code} · ` : ""}{s.balance} adcoin</Text></View>
                   <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
@@ -133,6 +137,20 @@ function Avatar({ name, photo }: { name: string; photo: string | null }) {
   return <View style={[styles.avatar, styles.avatarFallback]}><Text style={styles.avatarInitial}>{(name?.[0] ?? "?").toUpperCase()}</Text></View>;
 }
 
+const RANK_STYLE: Record<number, { bg: string; fg: string }> = {
+  1: { bg: "#FEF3C7", fg: "#B45309" }, // gold
+  2: { bg: "#E5E7EB", fg: "#4B5563" }, // silver
+  3: { bg: "#FDE7D3", fg: "#9A3412" }, // bronze
+};
+function RankBadge({ rank }: { rank: number }) {
+  const s = RANK_STYLE[rank];
+  return (
+    <View style={[styles.rankBadge, s ? { backgroundColor: s.bg } : styles.rankBadgePlain]}>
+      <Text style={[styles.rankText, s ? { color: s.fg } : styles.rankTextPlain]}>{rank}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F8FA" },
   flex: { flex: 1 },
@@ -151,6 +169,10 @@ const styles = StyleSheet.create({
   pickRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: "#EEF0F6" },
   pickName: { fontSize: 15, fontWeight: "800", color: "#111827" },
   pickSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  rankBadge: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  rankBadgePlain: { backgroundColor: "#F3F4F6" },
+  rankText: { fontSize: 12, fontWeight: "800" },
+  rankTextPlain: { color: "#9CA3AF" },
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#E5E7EB" },
   avatarFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#FEF3C7" },
   avatarInitial: { fontSize: 18, fontWeight: "800", color: "#CA8A04" },

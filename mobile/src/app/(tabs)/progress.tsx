@@ -11,10 +11,9 @@ import {
   Text,
   TextInput,
   View,
-  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { TopBar } from "@/components/TopBar";
 import { OfflineBanner } from "@/components/OfflineBanner";
@@ -23,8 +22,21 @@ import { useCachedQuery } from "@/hooks/useCachedQuery";
 import { useProgressBadge } from "@/contexts/progressBadge";
 import { useNicknames } from "@/contexts/nicknames";
 import { supabase } from "@/lib/supabase";
+import { MediaGallery, type MediaItem } from "@/components/MediaGallery";
+import { C, cardShadow, cardShadowLg } from "@/theme/tech";
 
-type Child = { id: string; name: string; photo: string | null };
+const WD3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MO3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function longDay(iso: string): string {
+  const d = new Date(iso + (iso.length === 10 ? "T00:00:00" : ""));
+  return `${WD3[d.getDay()]}, ${d.getDate()} ${MO3[d.getMonth()]} ${d.getFullYear()}`;
+}
+function shortFullDate(iso: string): string {
+  const d = new Date(iso + (iso.length === 10 ? "T00:00:00" : ""));
+  return `${d.getDate()} ${MO3[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+type Child = { id: string; name: string; photo: string | null; adcoinBalance: number };
 type Activity = { lesson: string; mission: string };
 type AttendanceRow = {
   id: string;
@@ -35,6 +47,7 @@ type AttendanceRow = {
   instructorName: string | null;
   adcoin: number;
   projectPhotos: string[] | null;
+  media: MediaItem[]; // all photos + videos for the session (per-lesson + legacy)
   courseName: string | null;
 };
 type Certification = {
@@ -57,12 +70,31 @@ type LedgerRow = {
   courseName: string | null;
 };
 
-type Section = "attendance" | "certifications" | "ledger";
+type Section = "lessons" | "results" | "skills" | "gallery";
+
+// Derived from lesson_ratings (effort/knowledge/behaviour, 0–5) averaged over all
+// rated lessons. count = how many lessons were rated (0 = no data yet).
+type Skills = { problem: number; logical: number; teamwork: number; count: number };
+
+type AsmtMeta = { title: string | null; total_marks: number | null; pass_pct: number | null; distinction_pct: number | null };
+
+// Latest marked assessment (from assessment_attempts + assessments) for the Results tab.
+type Assessment = {
+  title: string;
+  score: number;          // final_score
+  total: number;          // total_marks
+  passPct: number;
+  distinctionPct: number;
+  parts: { label: string; value: number; max: number; color: string }[];
+} | null;
 
 type ProgressData = {
-  attendance: AttendanceRow[];
+  attendance: AttendanceRow[];  // ALL statuses (present + absent) newest-first
   certifications: Certification[];
   ledger: LedgerRow[];
+  skills: Skills;
+  assessment: Assessment;
+  attStats: { present: number; missed: number; rate: number };
 };
 
 function formatDate(iso: string): string {
@@ -89,15 +121,18 @@ function isRecent(iso: string): boolean {
 export default function ProgressScreen() {
   const { user } = useAuth();
   const userId = user?.id;
-  const { studentId: paramStudentId } = useLocalSearchParams<{ studentId?: string }>();
+  const { studentId: paramStudentId, section: paramSection } = useLocalSearchParams<{ studentId?: string; section?: string }>();
   const { markSeen } = useProgressBadge();
   const nick = useNicknames();
+  const router = useRouter();
   // Opening Progress clears the "new" dot on the tab.
   useFocusEffect(useCallback(() => { markSeen(); }, [markSeen]));
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [nickEditFor, setNickEditFor] = useState<Child | null>(null);
-  const [section, setSection] = useState<Section>("attendance");
-  const [photoViewer, setPhotoViewer] = useState<string[] | null>(null);
+  const [section, setSection] = useState<Section>(
+    (["lessons", "results", "skills", "gallery"] as const).includes(paramSection as Section) ? (paramSection as Section) : "lessons",
+  );
+  const [gallery, setGallery] = useState<{ items: MediaItem[]; index: number } | null>(null);
   const [certPreview, setCertPreview] = useState<Certification | null>(null);
 
   // Stage 1: the parent's children (rarely changes, cached for offline).
@@ -111,12 +146,12 @@ export default function ProgressScreen() {
     if (!parentRow) return [];
     const { data: links } = await supabase
       .from("parent_students")
-      .select("student:students!inner(id, name, photo, deleted_at)")
+      .select("student:students!inner(id, name, photo, adcoin_balance, deleted_at)")
       .eq("parent_id", parentRow.id);
     return (links ?? [])
-      .map((l) => l.student as unknown as { id: string; name: string; photo: string | null; deleted_at: string | null })
+      .map((l) => l.student as unknown as { id: string; name: string; photo: string | null; adcoin_balance: number | null; deleted_at: string | null })
       .filter((s) => s && !s.deleted_at)
-      .map((s) => ({ id: s.id, name: s.name, photo: s.photo }));
+      .map((s) => ({ id: s.id, name: s.name, photo: s.photo, adcoinBalance: Number(s.adcoin_balance ?? 0) }));
   };
 
   const childrenQuery = useCachedQuery<Child[]>(
@@ -139,7 +174,7 @@ export default function ProgressScreen() {
 
   // Stage 2: attendance + certifications for the selected child (cached per child).
   const fetchProgress = async (): Promise<ProgressData> => {
-    const [{ data: att, error: attErr }, { data: exams, error: examErr }, { data: resched, error: reschedErr }] = await Promise.all([
+    const [{ data: att, error: attErr }, { data: exams, error: examErr }, { data: resched, error: reschedErr }, { data: ratingRows }, { data: assessRows }] = await Promise.all([
       supabase
         .from("attendance")
         .select(`
@@ -154,9 +189,8 @@ export default function ProgressScreen() {
           enrollment:enrollments!inner(student_id, course:courses(name))
         `)
         .eq("enrollment.student_id", selectedChildId!)
-        .eq("status", "present")
         .order("date", { ascending: false })
-        .limit(50),
+        .limit(60),
       // Certificates live in the `certificates` table keyed directly by
       // student_id (not via examinations/enrollment). Best-effort: parents
       // may lack RLS read access, so its failure must NOT block attendance.
@@ -172,11 +206,35 @@ export default function ProgressScreen() {
         .select("id, original_date, original_slot_time, new_date, new_slot_day, new_slot_time, created_at, course:courses(name)")
         .eq("student_id", selectedChildId!)
         .order("created_at", { ascending: false }),
+      // Per-lesson skill ratings (effort/knowledge/behaviour, 0–5) — averaged for
+      // the Skills sub-tab. Best-effort; empty until trainers start rating.
+      supabase
+        .from("lesson_ratings")
+        .select("effort, knowledge, behaviour")
+        .eq("student_id", selectedChildId!),
+      // Latest MARKED assessment for the Results tab. Best-effort.
+      supabase
+        .from("assessment_attempts")
+        .select("final_score, part_a_score, part_b_marks, part_c_marks, marked_at, assessment:assessments(title, level, total_marks, pass_pct, distinction_pct)")
+        .eq("student_id", selectedChildId!)
+        .not("final_score", "is", null)
+        .order("marked_at", { ascending: false })
+        .limit(1),
     ]);
     if (attErr) throw attErr;
 
     const attendance: AttendanceRow[] = (att ?? []).map((a) => {
       const enr = a.enrollment as unknown as { course: { name: string } | null } | null;
+      // The instructor attaches media PER LESSON inside the activities JSON
+      // ({ lesson, photos[], video }). Older sessions kept photos on the row's
+      // project_photos column. Gather everything into one photo+video list.
+      const rawActs = (a.activities as { photos?: string[]; video?: string | null }[] | null) ?? [];
+      const media: MediaItem[] = [];
+      for (const act of rawActs) {
+        for (const p of act?.photos ?? []) if (p && !media.some((m) => m.url === p)) media.push({ type: "photo", url: p });
+        if (act?.video && !media.some((m) => m.url === act.video)) media.push({ type: "video", url: act.video });
+      }
+      for (const p of (a.project_photos as string[] | null) ?? []) if (p && !media.some((m) => m.url === p)) media.push({ type: "photo", url: p });
       return {
         id: a.id as string,
         date: a.date as string,
@@ -186,6 +244,7 @@ export default function ProgressScreen() {
         instructorName: (a.instructor_name as string | null) ?? null,
         adcoin: Number(a.adcoin ?? 0),
         projectPhotos: (a.project_photos as string[] | null) ?? null,
+        media,
         courseName: enr?.course?.name ?? null,
       };
     });
@@ -214,7 +273,46 @@ export default function ProgressScreen() {
       };
     });
 
-    return { attendance, certifications, ledger };
+    // Skills = average of each rating dimension across all rated lessons.
+    const rr = (ratingRows ?? []) as { effort: number | null; knowledge: number | null; behaviour: number | null }[];
+    const avg = (key: "effort" | "knowledge" | "behaviour") => {
+      const vals = rr.map((r) => Number(r[key] ?? 0)).filter((n) => n > 0);
+      return vals.length ? vals.reduce((s, n) => s + n, 0) / vals.length : 0;
+    };
+    const skills: Skills = { problem: avg("effort"), logical: avg("knowledge"), teamwork: avg("behaviour"), count: rr.length };
+
+    // Attendance stats (all statuses).
+    const present = attendance.filter((a) => a.status === "present").length;
+    const missed = attendance.filter((a) => a.status === "absent").length;
+    const attStats = { present, missed, rate: present + missed > 0 ? Math.round((present / (present + missed)) * 100) : 0 };
+
+    // Latest marked assessment → Results card.
+    const sumJson = (j: unknown): number => {
+      if (Array.isArray(j)) return j.reduce((s: number, v) => s + Number(v ?? 0), 0);
+      if (j && typeof j === "object") return Object.values(j as Record<string, unknown>).reduce((s: number, v) => s + Number(v ?? 0), 0);
+      return 0;
+    };
+    let assessment: Assessment = null;
+    const a0 = (assessRows ?? [])[0] as unknown as { final_score: number | null; part_a_score: number | null; part_b_marks: unknown; part_c_marks: unknown; assessment: AsmtMeta | AsmtMeta[] | null } | undefined;
+    if (a0) {
+      const asmt = Array.isArray(a0.assessment) ? a0.assessment[0] ?? null : a0.assessment;
+      const pa = Number(a0.part_a_score ?? 0), pb = sumJson(a0.part_b_marks), pc = sumJson(a0.part_c_marks);
+      const maxPart = Math.max(1, pa, pb, pc);
+      assessment = {
+        title: asmt?.title ?? "Assessment",
+        score: Number(a0.final_score ?? 0),
+        total: Number(asmt?.total_marks ?? 100),
+        passPct: Number(asmt?.pass_pct ?? 50),
+        distinctionPct: Number(asmt?.distinction_pct ?? 80),
+        parts: [
+          { label: "Part A", value: pa, max: maxPart, color: C.red },
+          { label: "Part B", value: pb, max: maxPart, color: C.blue },
+          { label: "Part C", value: pc, max: maxPart, color: C.ink },
+        ],
+      };
+    }
+
+    return { attendance, certifications, ledger, skills, assessment, attStats };
   };
 
   const dataQuery = useCachedQuery<ProgressData>(
@@ -229,6 +327,11 @@ export default function ProgressScreen() {
   const attendance = dataQuery.data?.attendance ?? [];
   const certifications = dataQuery.data?.certifications ?? [];
   const ledger = dataQuery.data?.ledger ?? [];
+  const skills = dataQuery.data?.skills ?? { problem: 0, logical: 0, teamwork: 0, count: 0 };
+  const assessment = dataQuery.data?.assessment ?? null;
+  const attStats = dataQuery.data?.attStats ?? { present: 0, missed: 0, rate: 0 };
+  const presentLessons = useMemo(() => attendance.filter((a) => a.status === "present"), [attendance]);
+  const absentLessons = useMemo(() => attendance.filter((a) => a.status === "absent"), [attendance]);
   const newThisWeek = useMemo(() => attendance.filter((a) => isRecent(a.date)).length, [attendance]);
   const isStale = childrenQuery.isStale || dataQuery.isStale;
   const updatedAt = dataQuery.updatedAt ?? childrenQuery.updatedAt;
@@ -248,234 +351,90 @@ export default function ProgressScreen() {
 
   if (loadingChildren) {
     return (
-      <SafeAreaView style={styles.safe} edges={["top"]}>
-        <TopBar title="Progress" />
-        <View style={styles.center}>
-          <ActivityIndicator color="#615DFA" />
-        </View>
+      <SafeAreaView style={t3.safe} edges={["top"]}>
+        <TopBar crumb="Progress" />
+        <View style={t3.centerBody}><ActivityIndicator color={C.red} /></View>
       </SafeAreaView>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
-      <TopBar title="Progress" />
-
-      {/* Child picker (horizontal scroll handles any number of children) */}
+  const header = (
+    <View>
       {children.length > 1 ? (
-        <View style={styles.pickerWrap}>
-          <Text style={styles.pickerLabel}>
-            {children.length} children · tap to switch
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.childPicker}
-            contentContainerStyle={styles.childPickerContent}
-          >
-            {children.map((c) => {
-              const isActive = c.id === selectedChildId;
-              return (
-                <Pressable
-                  key={c.id}
-                  style={[styles.childChip, isActive && styles.childChipActive]}
-                  onPress={() => setSelectedChildId(c.id)}
-                >
-                  <View>
-                    {c.photo ? (
-                      <Image source={{ uri: c.photo }} style={styles.childChipAvatar} />
-                    ) : (
-                      <View
-                        style={[
-                          styles.childChipAvatar,
-                          isActive ? styles.childChipAvatarFallbackActive : styles.childChipAvatarFallback,
-                        ]}
-                      >
-                        <Text style={[styles.childChipInitial, isActive && { color: "#FFFFFF" }]}>
-                          {c.name.charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={[styles.colorDotSmall, { backgroundColor: childColorOf(c.id) }]} />
-                  </View>
-                  <Text style={[styles.childChipName, isActive && styles.childChipNameActive]} numberOfLines={1}>
-                    {nick.label(c.id, c.name)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {/* Selected child hero */}
-      {selectedChild ? (
-        <View style={styles.heroCard}>
-          <View>
-            {selectedChild.photo ? (
-              <Image source={{ uri: selectedChild.photo }} style={styles.heroAvatar} />
-            ) : (
-              <View style={[styles.heroAvatar, styles.heroAvatarFallback]}>
-                <Text style={styles.heroAvatarInitial}>{selectedChild.name.charAt(0).toUpperCase()}</Text>
-              </View>
-            )}
-            <View style={[styles.colorDotBig, { backgroundColor: childColorOf(selectedChild.id) }]} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heroEyebrow}>Viewing progress for</Text>
-            <View style={styles.heroNameRow}>
-              <View style={{ flexShrink: 1 }}>
-                <Text style={styles.heroName} numberOfLines={1}>
-                  {nick.raw(selectedChild.id) ?? selectedChild.name}
-                </Text>
-                {/* Keep the real name visible (smaller) once a nickname is set. */}
-                {nick.raw(selectedChild.id) ? (
-                  <Text style={styles.heroRealName} numberOfLines={1}>{selectedChild.name}</Text>
-                ) : null}
-              </View>
-              <Pressable onPress={() => setNickEditFor(selectedChild)} hitSlop={8} style={styles.heroPen}>
-                <Ionicons name="pencil" size={13} color="#FFFFFF" />
-              </Pressable>
-            </View>
-            <View style={styles.heroStats}>
-              {newThisWeek > 0 ? (
-                <View style={[styles.heroStat, styles.heroStatNew]}>
-                  <Text style={styles.heroStatText}>🎉 {newThisWeek} new this week</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={t3.chipRow}>
+          {children.map((c) => {
+            const on = c.id === selectedChildId;
+            const nm = nick.raw(c.id) ?? c.name;
+            return (
+              <Pressable key={c.id} onPress={() => setSelectedChildId(c.id)} style={[t3.chip, on && t3.chipOn]}>
+                <View style={[t3.chipAv, on ? t3.chipAvOn : t3.chipAvOff]}>
+                  {c.photo ? <Image source={{ uri: c.photo }} style={t3.chipAvImg} /> : <Text style={[t3.chipAvText, { color: on ? "#FFFFFF" : C.red }]}>{nm.charAt(0).toUpperCase()}</Text>}
                 </View>
-              ) : null}
-              <View style={styles.heroStat}>
-                <Ionicons name="ribbon-outline" size={12} color="#FFFFFF" />
-                <Text style={styles.heroStatText}>{certifications.length} certs</Text>
-              </View>
-              <View style={styles.heroStat}>
-                <Ionicons name="calendar-outline" size={12} color="#FFFFFF" />
-                <Text style={styles.heroStatText}>{attendance.length} sessions</Text>
-              </View>
+                <Text style={[t3.chipName, on && t3.chipNameOn]} numberOfLines={1}>{nm}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+
+      {selectedChild ? (
+        <View style={t3.filePanel}>
+          <View style={t3.fileTopRow}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={t3.fileEyebrow}>PROGRESS FILE</Text>
+              <Text style={t3.fileName} numberOfLines={1}>{nick.raw(selectedChild.id) ?? selectedChild.name}</Text>
             </View>
+            <Pressable onPress={() => setNickEditFor(selectedChild)} hitSlop={8} style={t3.filePen}><Ionicons name="pencil" size={13} color="rgba(255,255,255,0.7)" /></Pressable>
+          </View>
+          <View style={t3.fileStats}>
+            <View style={t3.fileStat}><Text style={t3.fileStatNum}>{certifications.length}</Text><Text style={t3.fileStatLabel}>CERTIFICATES</Text></View>
+            <View style={t3.fileDivider} />
+            <View style={t3.fileStat}><Text style={t3.fileStatNum}>{attStats.present}</Text><Text style={t3.fileStatLabel}>SESSIONS DONE</Text></View>
+            <View style={t3.fileDivider} />
+            <View style={t3.fileStat}><Text style={[t3.fileStatNum, { color: C.yellow }]}>{attStats.rate}%</Text><Text style={t3.fileStatLabel}>ATTENDANCE</Text></View>
           </View>
         </View>
       ) : null}
 
-      {/* Section switcher */}
-      <View style={styles.sectionSwitcher}>
-        <Pressable
-          style={[styles.sectionTab, section === "attendance" && styles.sectionTabActive]}
-          onPress={() => setSection("attendance")}
-        >
-          <Ionicons
-            name="calendar"
-            size={14}
-            color={section === "attendance" ? "#FFFFFF" : "#6B7280"}
-          />
-          <Text style={[styles.sectionTabText, section === "attendance" && styles.sectionTabTextActive]}>
-            Attendance
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.sectionTab, section === "certifications" && styles.sectionTabActive]}
-          onPress={() => setSection("certifications")}
-        >
-          <Ionicons
-            name="ribbon"
-            size={14}
-            color={section === "certifications" ? "#FFFFFF" : "#6B7280"}
-          />
-          <Text style={[styles.sectionTabText, section === "certifications" && styles.sectionTabTextActive]}>
-            Certs
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.sectionTab, section === "ledger" && styles.sectionTabActive]}
-          onPress={() => setSection("ledger")}
-        >
-          <Ionicons
-            name="swap-horizontal"
-            size={14}
-            color={section === "ledger" ? "#FFFFFF" : "#6B7280"}
-          />
-          <Text style={[styles.sectionTabText, section === "ledger" && styles.sectionTabTextActive]}>
-            Ledger
-          </Text>
-        </Pressable>
-      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={t3.segRow} style={t3.segScroll}>
+        {([["lessons", "LESSONS"], ["results", "RESULTS"], ["skills", "SKILLS"], ["gallery", "GALLERY"]] as [Section, string][]).map(([key, label]) => (
+          <Pressable key={key} style={[t3.seg2, section === key && t3.seg2On]} onPress={() => setSection(key)}>
+            <Text style={[t3.seg2Text, section === key && t3.seg2TextOn]}>{label}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
 
-      {errorMessage ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
-      ) : null}
+      {errorMessage ? <View style={t3.errBox}><Text style={t3.errText}>{errorMessage}</Text></View> : null}
+      {isStale ? <View style={t3.bannerPad}><OfflineBanner updatedAt={updatedAt} /></View> : null}
+    </View>
+  );
 
-      {isStale ? (
-        <View style={styles.bannerWrap}>
-          <OfflineBanner updatedAt={updatedAt} />
-        </View>
-      ) : null}
-
-      {section === "attendance" ? (
-        <FlatList
-          data={attendance}
-          keyExtractor={(r) => r.id}
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={dataQuery.refetch} tintColor="#615DFA" />}
-          ListEmptyComponent={
-            loadingData ? (
-              <View style={styles.center}><ActivityIndicator color="#615DFA" /></View>
-            ) : (
-              <View style={styles.empty}>
-                <Text style={styles.emptyTitle}>No attendance yet</Text>
-                <Text style={styles.emptyText}>Records appear here once your child attends their first class.</Text>
-              </View>
-            )
-          }
-          renderItem={({ item }) => <AttendanceCard row={item} onPhoto={setPhotoViewer} />}
-        />
-      ) : section === "certifications" ? (
-        <FlatList
-          data={certifications}
-          keyExtractor={(c) => c.id}
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={dataQuery.refetch} tintColor="#615DFA" />}
-          ListEmptyComponent={
-            loadingData ? (
-              <View style={styles.center}><ActivityIndicator color="#615DFA" /></View>
-            ) : (
-              <View style={styles.empty}>
-                <Ionicons name="ribbon-outline" size={48} color="#D1D5DB" />
-                <Text style={styles.emptyTitle}>No certifications yet</Text>
-                <Text style={styles.emptyText}>Certifications appear here when your child passes an exam.</Text>
-              </View>
-            )
-          }
-          renderItem={({ item }) => <CertCard cert={item} onPress={() => setCertPreview(item)} />}
-        />
-      ) : (
-        <FlatList
-          data={ledger}
-          keyExtractor={(r) => r.id}
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={dataQuery.refetch} tintColor="#615DFA" />}
-          ListHeaderComponent={
-            ledger.length > 0 ? (
-              <View style={styles.ledgerNote}>
-                <Ionicons name="shield-checkmark" size={15} color="#065F46" />
-                <Text style={styles.ledgerNoteText}>Rescheduling a class <Text style={{ fontWeight: "800" }}>moves</Text> it — no session credit is used up.</Text>
-              </View>
-            ) : null
-          }
-          ListEmptyComponent={
-            loadingData ? (
-              <View style={styles.center}><ActivityIndicator color="#615DFA" /></View>
-            ) : (
-              <View style={styles.empty}>
-                <Ionicons name="swap-horizontal" size={48} color="#D1D5DB" />
-                <Text style={styles.emptyTitle}>No reschedules yet</Text>
-                <Text style={styles.emptyText}>When you move a class to another day, it&apos;ll be logged here so you can see the class credit was kept, not lost.</Text>
-              </View>
-            )
-          }
-          renderItem={({ item }) => <LedgerCard row={item} />}
-        />
-      )}
+  return (
+    <SafeAreaView style={t3.safe} edges={["top"]}>
+      <TopBar crumb="Progress File" />
+      <ScrollView style={t3.body} contentContainerStyle={t3.listPad} showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={dataQuery.refetch} tintColor={C.red} />}>
+        {header}
+        {loadingData ? (
+          <View style={t3.centerPad}><ActivityIndicator color={C.red} /></View>
+        ) : section === "lessons" ? (
+          <LessonsTab
+            present={presentLessons}
+            absent={absentLessons}
+            summary={`${attStats.present} attended · ${attStats.missed} missed · ${attStats.rate}% rate`}
+            childName={selectedChild ? (nick.raw(selectedChild.id) ?? selectedChild.name) : ""}
+            onHeatmap={() => selectedChild && router.push({ pathname: "/attendance-summary", params: { child: selectedChild.id, name: nick.raw(selectedChild.id) ?? selectedChild.name } } as unknown as Href)}
+            onFeedback={(r) => router.push({ pathname: "/lesson/[id]", params: { id: r.id } } as unknown as Href)}
+            onOpenMedia={(items, i) => setGallery({ items, index: i })}
+          />
+        ) : section === "results" ? (
+          <ResultsTab assessment={assessment} certifications={certifications} onCert={setCertPreview} />
+        ) : section === "skills" ? (
+          <SkillsPanel skills={skills} attended={attStats.present} certs={certifications.length} />
+        ) : (
+          <GalleryTab present={presentLessons} onOpenMedia={(items, i) => setGallery({ items, index: i })} />
+        )}
+      </ScrollView>
 
       {nickEditFor ? (
         <NicknameModal
@@ -484,7 +443,12 @@ export default function ProgressScreen() {
           onClose={() => setNickEditFor(null)}
         />
       ) : null}
-      {photoViewer ? <PhotoViewer uris={photoViewer} onClose={() => setPhotoViewer(null)} /> : null}
+      <MediaGallery
+        key={gallery ? `${gallery.items[0]?.url ?? ""}:${gallery.index}` : "none"}
+        items={gallery?.items ?? null}
+        index={gallery?.index ?? 0}
+        onClose={() => setGallery(null)}
+      />
       {certPreview ? (
         <CertPreview
           cert={certPreview}
@@ -518,7 +482,7 @@ function NicknameModal({ child, systemColor, onClose }: { child: Child; systemCo
           value={value}
           onChangeText={setValue}
           placeholder={child.name.split(" ")[0]}
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor="#999999"
           style={styles.nickInput}
           maxLength={24}
         />
@@ -553,7 +517,7 @@ function LedgerCard({ row }: { row: LedgerRow }) {
   return (
     <View style={styles.card}>
       <View style={styles.ledgerHead}>
-        <View style={styles.ledgerIcon}><Ionicons name="swap-horizontal" size={16} color="#615DFA" /></View>
+        <View style={styles.ledgerIcon}><Ionicons name="swap-horizontal" size={16} color="#EC2127" /></View>
         <Text style={styles.ledgerCourse} numberOfLines={1}>{row.courseName ?? "Class"}</Text>
         <View style={styles.ledgerKeptPill}>
           <Ionicons name="checkmark-circle" size={12} color="#065F46" />
@@ -566,10 +530,10 @@ function LedgerCard({ row }: { row: LedgerRow }) {
           <Text style={styles.ledgerColDate}>{shortDate(row.originalDate)}</Text>
           {row.originalTime ? <Text style={styles.ledgerColTime}>{time12(row.originalTime)}</Text> : null}
         </View>
-        <Ionicons name="arrow-forward" size={18} color="#9CA3AF" />
+        <Ionicons name="arrow-forward" size={18} color="#999999" />
         <View style={styles.ledgerCol}>
           <Text style={styles.ledgerColLabel}>To</Text>
-          <Text style={[styles.ledgerColDate, { color: "#615DFA" }]}>{shortDate(row.newDate)}</Text>
+          <Text style={[styles.ledgerColDate, { color: "#EC2127" }]}>{shortDate(row.newDate)}</Text>
           {row.newTime ? <Text style={styles.ledgerColTime}>{time12(row.newTime)}</Text> : null}
         </View>
       </View>
@@ -578,92 +542,256 @@ function LedgerCard({ row }: { row: LedgerRow }) {
   );
 }
 
-function AttendanceCard({ row, onPhoto }: { row: AttendanceRow; onPhoto: (uris: string[]) => void }) {
+function AttendanceCard({ row, index, onOpenMedia }: { row: AttendanceRow; index: number; onOpenMedia: (items: MediaItem[], index: number) => void }) {
   const activities = row.activities ?? [];
   const fallback = row.lastActivity ? [{ lesson: row.lastActivity, mission: "" }] : [];
   const displayed = activities.length > 0 ? activities : fallback;
-  const photos = row.projectPhotos ?? [];
-  const hasPhoto = photos.length > 0;
-  const recent = isRecent(row.date);
-  const built = displayed.find((a) => a.lesson)?.lesson ?? null;
-  // Every row is a button (press feedback); a row with photo(s) opens the viewer.
+  const media = row.media ?? [];
+  const hasMedia = media.length > 0;
+  const photoCount = media.filter((m) => m.type === "photo").length;
+  const videoCount = media.filter((m) => m.type === "video").length;
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, styles.cardButton, recent && styles.cardRecent, pressed && styles.cardPressed]}
-      onPress={hasPhoto ? () => onPhoto(photos) : undefined}
+      style={({ pressed }) => [t3.attCard, pressed && hasMedia && t3.pressedCard]}
+      onPress={hasMedia ? () => onOpenMedia(media, 0) : undefined}
     >
-      {/* Recent sessions get an achievement banner — the "completed today" moment. */}
-      {recent ? (
-        <View style={styles.achieveBanner}>
-          <Text style={styles.achieveText} numberOfLines={2}>
-            🎉 {row.courseName ? `${row.courseName}: ` : ""}{built ? `built ${built}` : "attended a session"}
-          </Text>
-          <View style={styles.newTag}><Text style={styles.newTagText}>NEW</Text></View>
-        </View>
-      ) : null}
-      {/* Date/course on the left · work done on the right (no status badge —
-          this list only shows present sessions). */}
-      <View style={styles.cardTop}>
-        <View style={styles.cardLeft}>
-          <Text style={styles.cardDate}>{formatDate(row.date)}</Text>
-          {row.courseName ? <Text style={styles.cardSub}>{row.courseName}</Text> : null}
-        </View>
-        {displayed.length > 0 ? (
-          <View style={styles.workCol}>
-            <Text style={styles.workLabel}>Work done</Text>
-            {displayed.map((a, i) => (
-              <View key={i} style={styles.workItem}>
-                {a.lesson ? <Text style={styles.workLesson} numberOfLines={2}>{a.lesson}</Text> : null}
-                {a.mission ? <Text style={styles.workMission} numberOfLines={2}>{a.mission}</Text> : null}
-              </View>
-            ))}
-          </View>
-        ) : null}
+      <View style={t3.attTop}>
+        <Text style={t3.attDate}>{longDay(row.date)}</Text>
+        {row.adcoin > 0 ? <View style={t3.coinTag}><Text style={t3.coinTagText}>+{row.adcoin}</Text></View> : null}
       </View>
-
-      {(hasPhoto || row.adcoin > 0 || row.instructorName) ? (
-        <View style={styles.cardFooter}>
-          {hasPhoto ? (
-            <View style={styles.photoNotice}>
-              <Ionicons name="image" size={14} color="#615DFA" />
-              <Text style={styles.photoNoticeText}>
-                {photos.length > 1 ? `${photos.length} photos · Tap to view` : "Photo · Tap to view"}
-              </Text>
+      {(row.courseName || row.instructorName) ? (
+        <Text style={t3.attSub}>{[row.courseName, row.instructorName].filter(Boolean).join(" · ")}</Text>
+      ) : null}
+      {displayed.length > 0 ? (
+        <>
+          <View style={t3.attDivider} />
+          <Text style={t3.workLabel}>WORK DONE</Text>
+          {displayed.map((a, i) => (
+            <View key={i} style={i > 0 ? { marginTop: 9 } : undefined}>
+              {a.lesson ? (
+                <View style={t3.workRow}>
+                  <View style={t3.tagLesson}><Text style={t3.tagLessonText}>LESSON</Text></View>
+                  <Text style={t3.workText}>{a.lesson}</Text>
+                </View>
+              ) : null}
+              {a.mission ? (
+                <View style={[t3.workRow, { marginTop: 7 }]}>
+                  <View style={t3.tagMission}><Text style={t3.tagMissionText}>MISSION</Text></View>
+                  <Text style={t3.workText}>{a.mission}</Text>
+                </View>
+              ) : null}
             </View>
-          ) : row.instructorName ? (
-            <Text style={styles.footerText}>By {row.instructorName}</Text>
-          ) : (
-            <View />
-          )}
-          {row.adcoin > 0 ? (
-            <View style={styles.adcoinBadge}>
-              <Ionicons name="logo-bitcoin" size={12} color="#92400E" />
-              <Text style={styles.adcoinText}>+{row.adcoin}</Text>
-            </View>
-          ) : null}
+          ))}
+        </>
+      ) : null}
+      {hasMedia ? (
+        <View style={t3.mediaRow}>
+          <Ionicons name={videoCount > 0 ? "videocam" : "image"} size={14} color={C.red} />
+          <Text style={t3.mediaRowText}>
+            {[photoCount > 0 ? `${photoCount} photo${photoCount > 1 ? "s" : ""}` : null, videoCount > 0 ? `${videoCount} video${videoCount > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ")} · tap to view
+          </Text>
         </View>
       ) : null}
     </Pressable>
   );
 }
 
-function CertCard({ cert, onPress }: { cert: Certification; onPress: () => void }) {
+// Skills sub-tab — bars derived from lesson_ratings averages + auto-awarded badges.
+function SkillsPanel({ skills, attended, certs }: { skills: Skills; attended: number; certs: number }) {
+  const bars: { label: string; value: number; color: string }[] = [
+    { label: "Problem solving", value: skills.problem, color: C.red },
+    { label: "Logical thinking", value: skills.logical, color: C.blue },
+    { label: "Teamwork", value: skills.teamwork, color: C.yellow },
+  ];
+  // Auto badges (no teacher entry): simple, transparent rules.
+  const badges: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; earned: boolean }[] = [
+    { key: "first", label: "First build", icon: "cube", color: C.red, earned: attended > 0 },
+    { key: "loop", label: "Loop master", icon: "repeat", color: C.blue, earned: skills.logical >= 4 },
+    { key: "cert", label: "Certified", icon: "ribbon", color: C.yellow, earned: certs > 0 },
+    { key: "regular", label: "Regular", icon: "calendar", color: C.green, earned: attended >= 8 },
+    { key: "maze", label: "Maze solver", icon: "git-branch", color: C.blue, earned: attended >= 12 },
+    { key: "allstar", label: "All-star", icon: "star", color: C.yellow, earned: skills.problem >= 4 && skills.logical >= 4 && skills.teamwork >= 4 },
+  ];
   return (
-    <Pressable style={({ pressed }) => [styles.certCard, pressed && styles.cardPressed]} onPress={onPress}>
-      <View style={styles.certIconWrap}>
-        <Ionicons name="ribbon" size={28} color="#F59E0B" />
+    <View>
+      <Text style={t3.skillsIntro}>What robotics is building — rated by the trainer each term.</Text>
+      <View style={t3.skillsCard}>
+        {skills.count === 0 ? (
+          <Text style={t3.skillsEmpty}>No skill ratings yet. Once the trainer rates a few lessons, {"\n"}the levels will show here.</Text>
+        ) : (
+          bars.map((b) => {
+            const level = Math.round(b.value);
+            return (
+              <View key={b.label} style={t3.skillRow}>
+                <View style={t3.skillTop}>
+                  <Text style={t3.skillLabel}>{b.label}</Text>
+                  <Text style={t3.skillLevel}>Level {level} of 5</Text>
+                </View>
+                <View style={t3.skillTrack}>
+                  <View style={[t3.skillFill, { width: `${Math.max(4, (b.value / 5) * 100)}%`, backgroundColor: b.color }]} />
+                </View>
+              </View>
+            );
+          })
+        )}
       </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.certTitle}>{cert.courseName ?? "Certificate"}</Text>
-        <View style={styles.certRow}>
-          {cert.grade ? <Text style={styles.certMark}>Grade {cert.grade}</Text> : null}
-          {cert.dateIssued ? (
-            <Text style={styles.certDate}>{new Date(cert.dateIssued).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</Text>
-          ) : null}
+
+      <View style={t3.badgeHead}>
+        <Text style={t3.badgeHeadText}>BADGES EARNED</Text>
+        <View style={t3.badgeHeadLine} />
+      </View>
+      <View style={t3.badgeGrid}>
+        {badges.map((bd) => (
+          <View key={bd.key} style={[t3.badgeCard, !bd.earned && t3.badgeCardOff]}>
+            <View style={[t3.badgeIcon, { backgroundColor: bd.earned ? bd.color : "#DDDDDD" }]}>
+              <Ionicons name={bd.icon} size={18} color="#FFFFFF" />
+            </View>
+            <Text style={[t3.badgeLabel, !bd.earned && t3.badgeLabelOff]}>{bd.label}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ── LESSONS tab ──
+function LessonsTab({ present, absent, summary, childName, onHeatmap, onFeedback, onOpenMedia }: {
+  present: AttendanceRow[]; absent: AttendanceRow[]; summary: string; childName: string;
+  onHeatmap: () => void; onFeedback: (r: AttendanceRow) => void; onOpenMedia: (items: MediaItem[], index: number) => void;
+}) {
+  return (
+    <View style={{ gap: 11, marginTop: 12 }}>
+      <Pressable style={t3.amCard} onPress={onHeatmap}>
+        <View style={t3.amIcon}><Ionicons name="calendar" size={19} color={C.blue} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={t3.amTitle}>Attendance & makeup</Text>
+          <Text style={t3.amSub}>{summary}</Text>
         </View>
-        {cert.code ? <Text style={styles.certNumber}>{cert.code}</Text> : null}
+        <Ionicons name="chevron-forward" size={16} color={C.red} />
+      </Pressable>
+      {present.length === 0 && absent.length === 0 ? (
+        <View style={t3.empty}><Text style={t3.emptyTitle}>No lessons yet</Text><Text style={t3.emptyText}>Lessons appear after the first class.</Text></View>
+      ) : null}
+      {present.map((r) => <LessonFeedCard key={r.id} row={r} childName={childName} onFeedback={onFeedback} onOpenMedia={onOpenMedia} />)}
+      {absent.map((r) => (
+        <View key={r.id} style={t3.absentCard}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={t3.absentDate}>{longDay(r.date)}</Text>
+            <Text style={t3.absentSub}>{childName} · makeup credit kept</Text>
+          </View>
+          <View style={t3.absentTag}><Text style={t3.absentTagText}>ABSENT</Text></View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function LessonFeedCard({ row, childName, onFeedback, onOpenMedia }: { row: AttendanceRow; childName: string; onFeedback: (r: AttendanceRow) => void; onOpenMedia: (items: MediaItem[], index: number) => void }) {
+  const acts = row.activities ?? (row.lastActivity ? [{ lesson: row.lastActivity, mission: "" }] : []);
+  const lesson = acts[0]?.lesson ?? row.lastActivity ?? "—";
+  const mission = acts[0]?.mission ?? "";
+  const media = row.media ?? [];
+  const photoCount = media.filter((m) => m.type === "photo").length;
+  return (
+    <Pressable style={({ pressed }) => [t3.lfCard, pressed && t3.pressedCard]} onPress={() => onFeedback(row)}>
+      <View style={t3.attTop}>
+        <Text style={t3.attDate}>{longDay(row.date)}</Text>
+        {row.adcoin > 0 ? <View style={t3.coinTag}><Text style={t3.coinTagText}>+{row.adcoin}</Text></View> : null}
       </View>
-      <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+      <View style={t3.lfWho}>
+        <View style={t3.lfDot} />
+        <Text style={t3.lfWhoText} numberOfLines={1}>{[childName, row.courseName, row.instructorName].filter(Boolean).join(" · ")}</Text>
+      </View>
+      <View style={t3.attDivider} />
+      <View style={t3.lfRow}><Text style={t3.lfTag}>LESSON</Text><Text style={t3.lfText}>{lesson}</Text></View>
+      {mission ? <View style={[t3.lfRow, { marginTop: 9 }]}><Text style={[t3.lfTag, { color: C.red }]}>MISSION</Text><Text style={t3.lfText}>{mission}</Text></View> : null}
+      <View style={t3.lfFoot}>
+        {media.length > 0 ? (
+          <Pressable style={t3.lfMedia} onPress={() => onOpenMedia(media, 0)}>
+            <Ionicons name="image" size={14} color={C.red} />
+            <Text style={t3.lfMediaText}>{photoCount || media.length} {photoCount === 1 ? "photo" : "photos"}</Text>
+          </Pressable>
+        ) : <View />}
+        <Text style={t3.lfReadFeedback}>READ FEEDBACK ›</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+// ── RESULTS tab ──
+function ResultsTab({ assessment, certifications, onCert }: { assessment: Assessment; certifications: Certification[]; onCert: (c: Certification) => void }) {
+  return (
+    <View style={{ gap: 11, marginTop: 12 }}>
+      {assessment ? (
+        <View style={t3.asmtCard}>
+          <Text style={t3.asmtEyebrow}>LATEST ASSESSMENT</Text>
+          <Text style={t3.asmtTitle}>{assessment.title}</Text>
+          <View style={t3.asmtScoreRow}>
+            <Text style={t3.asmtScore}>{assessment.score}</Text>
+            <View style={{ paddingBottom: 6 }}>
+              <View style={[t3.asmtPill, { backgroundColor: assessment.score >= assessment.distinctionPct ? C.yellow : C.greenChip }]}>
+                <Text style={[t3.asmtPillText, { color: assessment.score >= assessment.distinctionPct ? C.ink : C.green }]}>
+                  {assessment.score >= assessment.distinctionPct ? "DISTINCTION" : assessment.score >= assessment.passPct ? "PASS" : "SCORE"}
+                </Text>
+              </View>
+              <Text style={t3.asmtOf}>out of {assessment.total}</Text>
+            </View>
+          </View>
+          <View style={{ marginTop: 16, gap: 11 }}>
+            {assessment.parts.map((p) => (
+              <View key={p.label}>
+                <View style={t3.asmtBarTop}><Text style={t3.asmtBarLabel}>{p.label}</Text><Text style={t3.asmtBarVal}>{p.value}</Text></View>
+                <View style={t3.asmtTrack}><View style={[t3.asmtFill, { width: `${Math.max(4, (p.value / p.max) * 100)}%`, backgroundColor: p.color }]} /></View>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+      <View style={t3.badgeHead}><Text style={t3.badgeHeadText}>CERTIFICATES</Text><View style={t3.badgeHeadLine} /></View>
+      {certifications.length === 0 ? (
+        <View style={t3.empty}><Text style={t3.emptyTitle}>No certificates yet</Text><Text style={t3.emptyText}>Certificates appear when your child passes an exam.</Text></View>
+      ) : certifications.map((c, i) => <CertCard key={c.id} cert={c} index={i} onPress={() => onCert(c)} />)}
+    </View>
+  );
+}
+
+// ── GALLERY tab ──
+function GalleryTab({ present, onOpenMedia }: { present: AttendanceRow[]; onOpenMedia: (items: MediaItem[], index: number) => void }) {
+  const items = useMemo(() => {
+    const out: (MediaItem & { title: string })[] = [];
+    for (const r of present) for (const m of r.media ?? []) if (!out.some((x) => x.url === m.url)) out.push({ ...m, title: r.lastActivity ?? r.courseName ?? "Class" });
+    return out;
+  }, [present]);
+  if (!items.length) return <View style={t3.empty}><Ionicons name="images-outline" size={40} color={C.textMute} /><Text style={t3.emptyTitle}>No photos yet</Text><Text style={t3.emptyText}>Photos and builds the trainer shares appear here.</Text></View>;
+  return (
+    <View style={t3.galGrid}>
+      {items.map((m, i) => (
+        <Pressable key={i} style={t3.galCard} onPress={() => onOpenMedia(items, i)}>
+          {m.type === "photo" ? <Image source={{ uri: m.url }} style={t3.galThumb} /> : <View style={[t3.galThumb, t3.galVideo]}><Ionicons name="play-circle" size={34} color="#FFFFFF" /></View>}
+          <View style={t3.galBody}><Text style={t3.galTitle} numberOfLines={1}>{m.title}</Text></View>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function CertCard({ cert, onPress }: { cert: Certification; index: number; onPress: () => void }) {
+  const gradeColor = (cert.grade ?? "").toUpperCase().startsWith("A") ? C.red : C.blue;
+  const meta = [cert.code, cert.dateIssued ? shortFullDate(cert.dateIssued) : null].filter(Boolean).join(" · ");
+  return (
+    <Pressable style={({ pressed }) => [t3.certCard, pressed && t3.pressedCard]} onPress={onPress}>
+      <View style={t3.certTop}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={t3.certTitle} numberOfLines={2}>{cert.courseName ?? "Certificate"}</Text>
+          {meta ? <Text style={t3.certCode}>{meta}</Text> : null}
+        </View>
+        {cert.grade ? (
+          <View style={t3.certGradeWrap}>
+            <Text style={[t3.certGrade, { color: gradeColor }]}>{cert.grade}</Text>
+            <Text style={t3.certGradeLabel}>GRADE</Text>
+          </View>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -707,36 +835,11 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PhotoViewer({ uris, onClose }: { uris: string[]; onClose: () => void }) {
-  const { width, height } = useWindowDimensions();
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={[StyleSheet.absoluteFillObject, styles.photoModal]}>
-        {uris.length > 1 ? (
-          <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-            {uris.map((uri, i) => (
-              <View key={i} style={{ width, alignItems: "center", justifyContent: "center" }}>
-                <Image source={{ uri }} style={{ width, height: height * 0.8 }} resizeMode="contain" />
-              </View>
-            ))}
-          </ScrollView>
-        ) : (
-          <Image source={{ uri: uris[0] }} style={{ width, height: height * 0.8 }} resizeMode="contain" />
-        )}
-        <Pressable style={styles.photoClose} onPress={onClose} hitSlop={12}>
-          <Ionicons name="close" size={22} color="#FFFFFF" />
-        </Pressable>
-        {uris.length > 1 ? <Text style={styles.photoCount}>Swipe · {uris.length} photos</Text> : null}
-      </View>
-    </Modal>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F6F6FB" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   pickerWrap: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
-  pickerLabel: { fontSize: 10, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
+  pickerLabel: { fontSize: 10, fontWeight: "800", color: "#999999", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
   childPicker: { flexGrow: 0 },
   childPickerContent: { gap: 8, paddingRight: 12 },
   childChip: {
@@ -748,15 +851,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: "#FFFFFF",
-    shadowColor: "#0F172A",
+    shadowColor: "#2B161B",
     shadowOpacity: 0.05,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
   childChipActive: {
-    backgroundColor: "#615DFA",
-    shadowColor: "#615DFA",
+    backgroundColor: "#EC2127",
+    shadowColor: "#EC2127",
     shadowOpacity: 0.35,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -764,11 +867,11 @@ const styles = StyleSheet.create({
   },
   childChipAvatar: { width: 32, height: 32, borderRadius: 16 },
   colorDotSmall: { position: "absolute", right: -1, bottom: -1, width: 11, height: 11, borderRadius: 6, borderWidth: 2, borderColor: "#FFFFFF" },
-  colorDotBig: { position: "absolute", right: -2, bottom: -2, width: 16, height: 16, borderRadius: 8, borderWidth: 2.5, borderColor: "#0F172A" },
+  colorDotBig: { position: "absolute", right: -2, bottom: -2, width: 16, height: 16, borderRadius: 8, borderWidth: 2.5, borderColor: "#2B161B" },
   childChipAvatarFallback: { backgroundColor: "#E0E7FF", alignItems: "center", justifyContent: "center" },
   childChipAvatarFallbackActive: { backgroundColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center" },
-  childChipInitial: { color: "#615DFA", fontWeight: "800", fontSize: 13 },
-  childChipName: { fontSize: 13, fontWeight: "700", color: "#0F172A", maxWidth: 100 },
+  childChipInitial: { color: "#EC2127", fontWeight: "800", fontSize: 13 },
+  childChipName: { fontSize: 13, fontWeight: "700", color: "#2B161B", maxWidth: 100 },
   childChipNameActive: { color: "#FFFFFF" },
   heroCard: {
     flexDirection: "row",
@@ -778,15 +881,15 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 16,
     borderRadius: 20,
-    backgroundColor: "#0F172A",
-    shadowColor: "#0F172A",
+    backgroundColor: "#2B161B",
+    shadowColor: "#2B161B",
     shadowOpacity: 0.2,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 6,
   },
   heroAvatar: { width: 56, height: 56, borderRadius: 18 },
-  heroAvatarFallback: { backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center" },
+  heroAvatarFallback: { backgroundColor: "#EC2127", alignItems: "center", justifyContent: "center" },
   heroAvatarInitial: { color: "#FFFFFF", fontSize: 22, fontWeight: "800" },
   heroEyebrow: { fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: 1, fontWeight: "700" },
   heroNameRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 },
@@ -794,19 +897,19 @@ const styles = StyleSheet.create({
   heroRealName: { fontSize: 12, color: "rgba(255,255,255,0.7)", fontWeight: "600", marginTop: 1 },
   heroPen: { width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
   nickSheet: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
-  nickTitle: { fontSize: 18, fontWeight: "800", color: "#111827", marginTop: 4 },
-  nickSub: { fontSize: 13, color: "#6B7280", marginTop: 4, lineHeight: 18 },
-  nickLabel: { fontSize: 11, fontWeight: "800", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 16, marginBottom: 6 },
-  nickInput: { borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: "#111827", backgroundColor: "#F9FAFB" },
+  nickTitle: { fontSize: 18, fontWeight: "800", color: "#2B161B", marginTop: 4 },
+  nickSub: { fontSize: 13, color: "#666666", marginTop: 4, lineHeight: 18 },
+  nickLabel: { fontSize: 11, fontWeight: "800", color: "#666666", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 16, marginBottom: 6 },
+  nickInput: { borderWidth: 1, borderColor: "#DDDDDD", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: "#2B161B", backgroundColor: "#F7F3F5" },
   swatchRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   swatch: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: "transparent" },
-  swatchOn: { borderColor: "#0F172A" },
+  swatchOn: { borderColor: "#2B161B" },
   swatchAuto: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
   nickBtns: { flexDirection: "row", gap: 12, marginTop: 16 },
   nickBtn: { flex: 1, height: 48, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   nickBtnGhost: { backgroundColor: "#F3F4F6" },
-  nickBtnGhostText: { color: "#6B7280", fontSize: 15, fontWeight: "700" },
-  nickBtnPrimary: { backgroundColor: "#615DFA" },
+  nickBtnGhostText: { color: "#666666", fontSize: 15, fontWeight: "700" },
+  nickBtnPrimary: { backgroundColor: "#EC2127" },
   nickBtnPrimaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
   heroStats: { flexDirection: "row", gap: 8, marginTop: 8 },
   heroStat: {
@@ -827,7 +930,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     padding: 4,
-    shadowColor: "#0F172A",
+    shadowColor: "#2B161B",
     shadowOpacity: 0.04,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
@@ -842,50 +945,50 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
-  sectionTabActive: { backgroundColor: "#615DFA" },
-  sectionTabText: { fontSize: 13, fontWeight: "700", color: "#6B7280" },
+  sectionTabActive: { backgroundColor: "#EC2127" },
+  sectionTabText: { fontSize: 13, fontWeight: "700", color: "#666666" },
   sectionTabTextActive: { color: "#FFFFFF" },
   errorCard: { marginHorizontal: 16, marginBottom: 8, backgroundColor: "#FEE2E2", padding: 12, borderRadius: 12 },
   errorText: { color: "#991B1B", fontSize: 13 },
   bannerWrap: { paddingHorizontal: 16, marginBottom: 8 },
   list: { padding: 16, gap: 12 },
   empty: { padding: 48, alignItems: "center", gap: 8 },
-  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
-  emptyText: { fontSize: 14, color: "#6B7280", textAlign: "center", maxWidth: 280 },
-  card: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, shadowColor: "#615DFA", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#2B161B" },
+  emptyText: { fontSize: 14, color: "#666666", textAlign: "center", maxWidth: 280 },
+  card: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, shadowColor: "#EC2127", shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
   cardButton: { borderWidth: 1, borderColor: "#EEF0F6" },
   cardRecent: { borderColor: "#C7D2FE", borderWidth: 1.5 },
   cardPressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
   achieveBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#EEF2FF", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 12 },
   achieveText: { flex: 1, fontSize: 12, fontWeight: "800", color: "#3730A3" },
-  newTag: { backgroundColor: "#615DFA", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  newTag: { backgroundColor: "#EC2127", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   newTagText: { fontSize: 9, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0.5 },
   ledgerNote: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#F0FDF4", borderWidth: 1, borderColor: "#BBF7D0", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 4 },
   ledgerNoteText: { flex: 1, fontSize: 12, color: "#065F46", fontWeight: "600", lineHeight: 16 },
   ledgerHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
   ledgerIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" },
-  ledgerCourse: { flex: 1, fontSize: 14, fontWeight: "800", color: "#111827" },
+  ledgerCourse: { flex: 1, fontSize: 14, fontWeight: "800", color: "#2B161B" },
   ledgerKeptPill: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#D1FAE5", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   ledgerKeptText: { fontSize: 11, fontWeight: "800", color: "#065F46" },
   ledgerMoveRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   ledgerCol: { flex: 1, gap: 1 },
-  ledgerColLabel: { fontSize: 9, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6 },
-  ledgerColDate: { fontSize: 15, fontWeight: "800", color: "#111827" },
-  ledgerColTime: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
-  ledgerWhen: { fontSize: 11, color: "#9CA3AF", marginTop: 10, fontWeight: "600" },
+  ledgerColLabel: { fontSize: 9, fontWeight: "800", color: "#999999", textTransform: "uppercase", letterSpacing: 0.6 },
+  ledgerColDate: { fontSize: 15, fontWeight: "800", color: "#2B161B" },
+  ledgerColTime: { fontSize: 12, color: "#666666", fontWeight: "600" },
+  ledgerWhen: { fontSize: 11, color: "#999999", marginTop: 10, fontWeight: "600" },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   cardLeft: { flexShrink: 0, maxWidth: "45%" },
-  cardDate: { fontSize: 14, fontWeight: "700", color: "#111827" },
-  cardSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  cardDate: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  cardSub: { fontSize: 12, color: "#666666", marginTop: 2 },
   workCol: { flex: 1, alignItems: "flex-end", gap: 2 },
-  workLabel: { fontSize: 9, fontWeight: "800", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.6 },
+  workLabel: { fontSize: 9, fontWeight: "800", color: "#999999", textTransform: "uppercase", letterSpacing: 0.6 },
   workItem: { alignItems: "flex-end" },
-  workLesson: { fontSize: 13, color: "#111827", fontWeight: "700", textAlign: "right", lineHeight: 18 },
-  workMission: { fontSize: 12, color: "#615DFA", fontWeight: "600", textAlign: "right", lineHeight: 16 },
+  workLesson: { fontSize: 13, color: "#2B161B", fontWeight: "700", textAlign: "right", lineHeight: 18 },
+  workMission: { fontSize: 12, color: "#EC2127", fontWeight: "600", textAlign: "right", lineHeight: 16 },
   photoNotice: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#EEF2FF", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
-  photoNoticeText: { fontSize: 12, fontWeight: "700", color: "#615DFA" },
+  photoNoticeText: { fontSize: 12, fontWeight: "700", color: "#EC2127" },
   cardFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12 },
-  footerText: { fontSize: 12, color: "#9CA3AF" },
+  footerText: { fontSize: 12, color: "#999999" },
   adcoinBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#FEF3C7", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
   adcoinText: { fontSize: 12, fontWeight: "700", color: "#92400E" },
   certCard: {
@@ -895,34 +998,194 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    shadowColor: "#615DFA",
+    shadowColor: "#EC2127",
     shadowOpacity: 0.05,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
   certIconWrap: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#FEF3C7", alignItems: "center", justifyContent: "center" },
-  certTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
+  certTitle: { fontSize: 15, fontWeight: "700", color: "#2B161B" },
   certRow: { flexDirection: "row", gap: 12, marginTop: 4, alignItems: "center" },
-  certMark: { fontSize: 16, fontWeight: "800", color: "#615DFA" },
-  certDate: { fontSize: 12, color: "#6B7280" },
-  certNumber: { fontSize: 11, color: "#9CA3AF", marginTop: 4 },
+  certMark: { fontSize: 16, fontWeight: "800", color: "#EC2127" },
+  certDate: { fontSize: 12, color: "#666666" },
+  certNumber: { fontSize: 11, color: "#999999", marginTop: 4 },
   previewBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
   previewSheet: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#FFFFFF", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32 },
-  previewHandle: { width: 40, height: 4, backgroundColor: "#E5E7EB", borderRadius: 2, alignSelf: "center", marginBottom: 16 },
+  previewHandle: { width: 40, height: 4, backgroundColor: "#DDDDDD", borderRadius: 2, alignSelf: "center", marginBottom: 16 },
   previewHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
-  previewTitle: { fontSize: 18, fontWeight: "800", color: "#111827" },
+  previewTitle: { fontSize: 18, fontWeight: "800", color: "#2B161B" },
   previewBody: { gap: 4 },
   previewRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#F3F4F6" },
-  previewRowLabel: { fontSize: 13, color: "#6B7280" },
-  previewRowValue: { fontSize: 13, color: "#111827", fontWeight: "700", flex: 1, textAlign: "right", marginLeft: 16 },
+  previewRowLabel: { fontSize: 13, color: "#666666" },
+  previewRowValue: { fontSize: 13, color: "#2B161B", fontWeight: "700", flex: 1, textAlign: "right", marginLeft: 16 },
   previewImage: { width: "100%", height: 200, borderRadius: 8, marginTop: 16, backgroundColor: "#F3F4F6" },
-  previewButton: { marginTop: 16, height: 48, backgroundColor: "#615DFA", borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  previewButton: { marginTop: 16, height: 48, backgroundColor: "#EC2127", borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   previewButtonText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" },
-  previewPending: { marginTop: 16, fontSize: 13, color: "#9CA3AF", fontStyle: "italic", textAlign: "center" },
+  previewPending: { marginTop: 16, fontSize: 13, color: "#999999", fontStyle: "italic", textAlign: "center" },
   previewClose: { marginTop: 12, alignItems: "center", paddingVertical: 12 },
-  previewCloseText: { color: "#6B7280", fontSize: 14, fontWeight: "700" },
+  previewCloseText: { color: "#666666", fontSize: 14, fontWeight: "700" },
   photoModal: { backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center", zIndex: 999 },
   photoClose: { position: "absolute", top: 56, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   photoCount: { position: "absolute", bottom: 60, alignSelf: "center", color: "rgba(255,255,255,0.7)", fontSize: 12, fontWeight: "600" },
+});
+
+// ── Turn-3 "Brand-tech" styles (separate object so the legacy modal styles above
+// stay intact). ──
+const t3 = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: C.card },
+  body: { flex: 1, backgroundColor: C.bg },
+  centerBody: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.bg },
+  centerPad: { paddingVertical: 40, alignItems: "center" },
+  listPad: { paddingHorizontal: 14, paddingBottom: 28 },
+
+  // Child chips (Turn-4: maroon active / white inactive, sentence case)
+  chipRow: { flexDirection: "row", gap: 8, paddingTop: 14, paddingBottom: 12 },
+  chip: { flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 7, paddingRight: 14, paddingVertical: 7, borderRadius: 999, backgroundColor: C.card, ...cardShadow },
+  chipOn: { backgroundColor: C.ink },
+  chipAv: { width: 28, height: 28, borderRadius: 999, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  chipAvOn: { backgroundColor: "rgba(255,255,255,0.2)" },
+  chipAvOff: { backgroundColor: C.redChip },
+  chipAvImg: { width: "100%", height: "100%" },
+  chipAvText: { fontSize: 13, fontWeight: "700" },
+  chipName: { fontSize: 13, fontWeight: "600", color: C.ink },
+  chipNameOn: { color: "#FFFFFF" },
+
+  // PROGRESS maroon panel (no circuit texture in Turn-4)
+  filePanel: { backgroundColor: C.ink, borderRadius: 22, padding: 18, marginHorizontal: 0 },
+  fileRow: { flexDirection: "row", alignItems: "center", gap: 14 },
+  fileAvatar: { width: 56, height: 56, borderRadius: 18, backgroundColor: C.red, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  fileAvatarImg: { width: "100%", height: "100%" },
+  fileAvatarText: { fontSize: 23, fontWeight: "700", color: "#FFFFFF" },
+  fileEyebrow: { fontSize: 10, fontWeight: "700", letterSpacing: 2, color: C.yellow },
+  fileName: { fontSize: 20, fontWeight: "600", color: "#FFFFFF", letterSpacing: -0.4, marginTop: 4 },
+  fileTags: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 9 },
+  fileTag: { backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  fileTagText: { fontWeight: "500", fontSize: 11, color: "#FFFFFF" },
+  filePen: { width: 30, height: 30, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.14)", alignItems: "center", justifyContent: "center" },
+  // PROGRESS FILE 3-stat panel
+  fileTopRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  fileStats: { flexDirection: "row", marginTop: 17 },
+  fileStat: { flex: 1, paddingRight: 10 },
+  fileStatNum: { fontSize: 21, fontWeight: "800", color: "#FFFFFF" },
+  fileStatLabel: { fontSize: 8, fontWeight: "700", letterSpacing: 1.3, color: "rgba(255,255,255,0.55)", marginTop: 4 },
+  fileDivider: { width: 1, backgroundColor: "rgba(255,255,255,0.16)", marginRight: 14 },
+  // 4-segment scroll bar
+  segScroll: { flexGrow: 0, marginTop: 14 },
+  segRow: { flexDirection: "row", gap: 7 },
+  seg2: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, backgroundColor: C.card, ...cardShadow },
+  seg2On: { backgroundColor: C.red },
+  seg2Text: { fontSize: 11, fontWeight: "700", letterSpacing: 0.6, color: C.textDim },
+  seg2TextOn: { color: "#FFFFFF" },
+  // Attendance & makeup card
+  amCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: C.card, borderRadius: 18, padding: 15, ...cardShadow },
+  amIcon: { width: 38, height: 38, borderRadius: 11, backgroundColor: C.blueChip, alignItems: "center", justifyContent: "center" },
+  amTitle: { fontSize: 14, fontWeight: "600", color: C.ink },
+  amSub: { fontSize: 11, color: C.textDim, marginTop: 3 },
+  // Lesson feedback card
+  lfCard: { backgroundColor: C.card, borderRadius: 18, padding: 16, ...cardShadowLg },
+  lfWho: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 6 },
+  lfDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.red },
+  lfWhoText: { flex: 1, fontSize: 11, color: C.textDim },
+  lfRow: { flexDirection: "row", gap: 11, alignItems: "flex-start" },
+  lfTag: { width: 58, fontSize: 8, fontWeight: "700", letterSpacing: 1, color: C.textDim, paddingTop: 3 },
+  lfText: { flex: 1, fontSize: 14, color: C.ink, lineHeight: 20 },
+  lfFoot: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 14, paddingTop: 13, borderTopWidth: 1, borderTopColor: C.borderFaint },
+  lfMedia: { flexDirection: "row", alignItems: "center", gap: 6 },
+  lfMediaText: { fontSize: 12, fontWeight: "500", color: C.red },
+  lfReadFeedback: { fontSize: 10, fontWeight: "700", letterSpacing: 0.8, color: C.red },
+  absentCard: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: C.card, borderRadius: 18, padding: 16, ...cardShadow },
+  absentDate: { fontSize: 14, fontWeight: "600", color: "#8A8085" },
+  absentSub: { fontSize: 11, color: C.textDim, marginTop: 4 },
+  absentTag: { borderWidth: 1, borderColor: C.red, borderRadius: 3, paddingHorizontal: 7, paddingVertical: 4 },
+  absentTagText: { fontSize: 9, fontWeight: "700", letterSpacing: 1, color: C.red },
+  // Assessment (Results) card
+  asmtCard: { backgroundColor: C.card, borderRadius: 20, padding: 18, ...cardShadowLg },
+  asmtEyebrow: { fontSize: 9, fontWeight: "700", letterSpacing: 2, color: C.red },
+  asmtTitle: { fontSize: 18, fontWeight: "600", color: C.ink, letterSpacing: -0.3, marginTop: 9 },
+  asmtScoreRow: { flexDirection: "row", alignItems: "flex-end", gap: 13, marginTop: 14 },
+  asmtScore: { fontSize: 42, fontWeight: "800", letterSpacing: -1.8, color: C.ink, lineHeight: 42 },
+  asmtPill: { alignSelf: "flex-start", borderRadius: 3, paddingHorizontal: 8, paddingVertical: 4 },
+  asmtPillText: { fontSize: 9, fontWeight: "700", letterSpacing: 1 },
+  asmtOf: { fontSize: 11, color: C.textDim, marginTop: 7 },
+  asmtBarTop: { flexDirection: "row", justifyContent: "space-between" },
+  asmtBarLabel: { fontSize: 12, color: C.textDim },
+  asmtBarVal: { fontSize: 12, fontWeight: "700", color: C.ink },
+  asmtTrack: { height: 6, borderRadius: 3, backgroundColor: C.sunken, marginTop: 6, overflow: "hidden" },
+  asmtFill: { height: "100%", borderRadius: 3 },
+  // Gallery grid
+  galGrid: { flexDirection: "row", flexWrap: "wrap", gap: 11, marginTop: 12 },
+  galCard: { width: "47%", backgroundColor: C.card, borderRadius: 14, overflow: "hidden", ...cardShadow },
+  galThumb: { width: "100%", aspectRatio: 4 / 3, backgroundColor: C.sunken },
+  galVideo: { alignItems: "center", justifyContent: "center", backgroundColor: C.ink },
+  galBody: { padding: 11 },
+  galTitle: { fontSize: 13, fontWeight: "600", color: C.ink },
+
+  // Segmented control (white card, red active)
+  segWrap: { flexDirection: "row", backgroundColor: C.card, borderRadius: 16, padding: 4, marginTop: 12, ...cardShadow },
+  seg: { flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: "center" },
+  segOn: { backgroundColor: C.red },
+  segText: { fontSize: 13, fontWeight: "600", color: C.textDim },
+  segTextOn: { color: "#FFFFFF", fontWeight: "700" },
+
+  errBox: { backgroundColor: C.redChip, borderRadius: 14, padding: 12, marginTop: 12 },
+  errText: { color: C.red, fontSize: 13 },
+  bannerPad: { marginTop: 12 },
+
+  // Attendance card (clean white, no accent, soft shadow)
+  attCard: { backgroundColor: C.card, borderRadius: 20, padding: 17, marginTop: 11, ...cardShadow },
+  pressedCard: { opacity: 0.94 },
+  attTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
+  attDate: { fontSize: 14, fontWeight: "600", color: C.ink },
+  coinTag: { backgroundColor: C.yellow, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3 },
+  coinTagText: { fontWeight: "700", fontSize: 11, color: C.ink },
+  attSub: { fontSize: 12, color: C.textDim, marginTop: 3 },
+  attDivider: { height: 1, backgroundColor: C.borderFaint, marginVertical: 13 },
+  workLabel: { fontSize: 9, fontWeight: "700", letterSpacing: 1.6, color: C.textDim, marginBottom: 9 },
+  workRow: { flexDirection: "row", gap: 8, alignItems: "flex-start" },
+  tagLesson: { backgroundColor: C.ink, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  tagLessonText: { color: "#FFFFFF", fontSize: 8, fontWeight: "700", letterSpacing: 1 },
+  tagMission: { backgroundColor: C.blue, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  tagMissionText: { color: "#FFFFFF", fontSize: 8, fontWeight: "700", letterSpacing: 1 },
+  workText: { flex: 1, fontSize: 14, fontWeight: "500", color: C.ink, lineHeight: 20 },
+  mediaRow: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.redChip, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, marginTop: 12, alignSelf: "flex-start" },
+  mediaRowText: { fontSize: 12, fontWeight: "700", color: C.red },
+
+  // Certificate card (clean white, grade letter)
+  certCard: { backgroundColor: C.card, borderRadius: 20, padding: 18, marginTop: 11, ...cardShadow },
+  certTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  certTitle: { fontSize: 16, fontWeight: "600", color: C.ink, letterSpacing: -0.2 },
+  certCode: { fontSize: 11, color: C.textDim, marginTop: 6 },
+  certGradeWrap: { alignItems: "center" },
+  certGrade: { fontSize: 28, fontWeight: "800", lineHeight: 30 },
+  certGradeLabel: { fontSize: 8, fontWeight: "700", letterSpacing: 1.4, color: C.textMute, marginTop: 3 },
+  certBtns: { flexDirection: "row", gap: 8, marginTop: 16 },
+  certBtnGhost: { flex: 1, borderWidth: 1, borderColor: C.red, borderRadius: 12, minHeight: 42, alignItems: "center", justifyContent: "center" },
+  certBtnGhostText: { fontSize: 11, fontWeight: "700", letterSpacing: 1, color: C.red },
+  certBtnDark: { flex: 1, backgroundColor: C.red, borderRadius: 12, minHeight: 42, alignItems: "center", justifyContent: "center" },
+  certBtnDarkText: { fontSize: 11, fontWeight: "700", letterSpacing: 1, color: "#FFFFFF" },
+
+  empty: { alignItems: "center", gap: 8, paddingTop: 48, paddingHorizontal: 24 },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: C.ink },
+  emptyText: { fontSize: 13, color: C.textDim, textAlign: "center", lineHeight: 19 },
+
+  // Skills sub-tab
+  skillsIntro: { fontSize: 13, color: C.textDim, lineHeight: 20, marginTop: 12 },
+  skillsCard: { backgroundColor: C.card, borderRadius: 20, padding: 18, marginTop: 14, gap: 16, ...cardShadow },
+  skillsEmpty: { fontSize: 13, color: C.textMute, textAlign: "center", lineHeight: 19, paddingVertical: 10 },
+  skillRow: { gap: 8 },
+  skillTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  skillLabel: { fontSize: 14, fontWeight: "600", color: C.ink },
+  skillLevel: { fontSize: 11, color: C.textDim, fontWeight: "600" },
+  skillTrack: { height: 8, borderRadius: 4, backgroundColor: C.sunken, overflow: "hidden" },
+  skillFill: { height: "100%", borderRadius: 4 },
+  badgeHead: { flexDirection: "row", alignItems: "center", gap: 9, marginTop: 22 },
+  badgeHeadText: { fontSize: 10, fontWeight: "700", letterSpacing: 2.4, color: C.ink },
+  badgeHeadLine: { flex: 1, height: 1, backgroundColor: C.border },
+  badgeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
+  badgeCard: { width: "31%", backgroundColor: C.card, borderRadius: 16, paddingVertical: 15, paddingHorizontal: 8, alignItems: "center", ...cardShadow },
+  badgeCardOff: { opacity: 0.5 },
+  badgeIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
+  badgeLabel: { fontSize: 11, fontWeight: "600", color: C.ink, marginTop: 9, textAlign: "center" },
+  badgeLabelOff: { color: C.textDim },
 });

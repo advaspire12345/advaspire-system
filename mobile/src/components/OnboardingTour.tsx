@@ -10,10 +10,10 @@ type Step = { target?: string; icon: keyof typeof Ionicons.glyphMap; tint: strin
 // Steps with an optional `target` get a spotlight around that element; others
 // show a centered card.
 const STEPS: Step[] = [
-  { icon: "hand-left", tint: "#615DFA", title: "Welcome to Advaspire", body: "A quick tour of the main things you can do here. You can skip anytime." },
-  { target: "sessions", icon: "ticket", tint: "#0D9488", title: "Sessions left", body: "Your family's remaining class sessions at a glance. Tap it to see the breakdown." },
-  { target: "settings", icon: "settings", tint: "#EA580C", title: "Settings & help", body: "Profile, change password, calendar defaults, and this tour again — all under the gear." },
-  { target: "tabs", icon: "apps", tint: "#7C3AED", title: "Your main features", body: "Progress, Schedule, Home, Payments and the Store — switch between them down here." },
+  { icon: "hand-left", tint: "#EC2127", title: "Welcome to Advaspire", body: "A quick tour of the main things you can do here. You can skip anytime." },
+  { target: "sessions", icon: "ticket", tint: "#EC2127", title: "Sessions left", body: "Your family's remaining class sessions at a glance. Tap it to see the breakdown." },
+  { target: "settings", icon: "settings", tint: "#EC2127", title: "Settings & help", body: "Profile, change password, calendar defaults, and this tour again — all under the gear." },
+  { target: "tabs", icon: "apps", tint: "#EC2127", title: "Your main features", body: "Progress, Schedule, Home, Payments and the Store — switch between them down here." },
 ];
 
 const PAD = 8; // spotlight padding around the target
@@ -125,19 +125,19 @@ const styles = StyleSheet.create({
   centerBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.6)", alignItems: "center", justifyContent: "center", padding: 24 },
   card: { width: "100%", maxWidth: 380, backgroundColor: "#FFFFFF", borderRadius: 24, padding: 24, alignItems: "center", gap: 12 },
   skip: { position: "absolute", top: 14, right: 16, padding: 6 },
-  skipText: { fontSize: 13, fontWeight: "700", color: "#9CA3AF" },
+  skipText: { fontSize: 13, fontWeight: "700", color: "#999999" },
   iconWrap: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", marginTop: 8 },
-  title: { fontSize: 21, fontWeight: "800", color: "#0F172A", textAlign: "center" },
-  body: { fontSize: 14, color: "#6B7280", textAlign: "center", lineHeight: 21 },
+  title: { fontSize: 21, fontWeight: "800", color: "#2B161B", textAlign: "center" },
+  body: { fontSize: 14, color: "#666666", textAlign: "center", lineHeight: 21 },
   dots: { flexDirection: "row", gap: 6, marginVertical: 4 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#E5E7EB" },
   next: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 24, height: 48, borderRadius: 14, justifyContent: "center", marginTop: 4 },
   nextText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
-  tip: { position: "absolute", left: 16, right: 16, backgroundColor: "#FFFFFF", borderRadius: 18, padding: 16, gap: 10, shadowColor: "#0F172A", shadowOpacity: 0.2, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 12 },
+  tip: { position: "absolute", left: 16, right: 16, backgroundColor: "#FFFFFF", borderRadius: 18, padding: 16, gap: 10, shadowColor: "#2B161B", shadowOpacity: 0.2, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 12 },
   tipRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   tipIcon: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  tipTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: "#0F172A" },
-  tipBody: { fontSize: 14, color: "#4B5563", lineHeight: 20 },
+  tipTitle: { flex: 1, fontSize: 16, fontWeight: "800", color: "#2B161B" },
+  tipBody: { fontSize: 14, color: "#666666", lineHeight: 20 },
   tipFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 2 },
   tipNext: { paddingHorizontal: 22, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
 });

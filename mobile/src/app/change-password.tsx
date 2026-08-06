@@ -28,18 +28,18 @@ export default function ChangePassword() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
-      <Stack.Screen options={{ title: "Change password", headerTintColor: "#615DFA" }} />
+      <Stack.Screen options={{ title: "Change password", headerTintColor: "#EC2127" }} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <Text style={styles.label}>New password</Text>
           <View style={styles.inputWrap}>
-            <TextInput style={styles.input} value={pw} onChangeText={setPw} secureTextEntry={!show} placeholder="At least 6 characters" placeholderTextColor="#9CA3AF" autoCapitalize="none" />
-            <Pressable onPress={() => setShow((s) => !s)} hitSlop={10}><Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={20} color="#9CA3AF" /></Pressable>
+            <TextInput style={styles.input} value={pw} onChangeText={setPw} secureTextEntry={!show} placeholder="At least 6 characters" placeholderTextColor="#999999" autoCapitalize="none" />
+            <Pressable onPress={() => setShow((s) => !s)} hitSlop={10}><Ionicons name={show ? "eye-off-outline" : "eye-outline"} size={20} color="#999999" /></Pressable>
           </View>
 
           <Text style={styles.label}>Confirm new password</Text>
           <View style={styles.inputWrap}>
-            <TextInput style={styles.input} value={confirm} onChangeText={setConfirm} secureTextEntry={!show} placeholder="Re-enter password" placeholderTextColor="#9CA3AF" autoCapitalize="none" />
+            <TextInput style={styles.input} value={confirm} onChangeText={setConfirm} secureTextEntry={!show} placeholder="Re-enter password" placeholderTextColor="#999999" autoCapitalize="none" />
           </View>
 
           {msg ? (
@@ -59,17 +59,17 @@ export default function ChangePassword() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
   flex: { flex: 1 },
   scroll: { padding: 16 },
-  label: { fontSize: 12, fontWeight: "800", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 14, marginBottom: 6 },
+  label: { fontSize: 12, fontWeight: "800", color: "#666666", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 14, marginBottom: 6 },
   inputWrap: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FFFFFF", borderRadius: 12, borderWidth: 1, borderColor: "#E5E7EB", paddingHorizontal: 14, height: 52 },
-  input: { flex: 1, fontSize: 16, color: "#111827" },
+  input: { flex: 1, fontSize: 16, color: "#2B161B" },
   msg: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 10, padding: 12, marginTop: 16 },
   msgOk: { backgroundColor: "#D1FAE5" },
   msgErr: { backgroundColor: "#FEE2E2" },
   msgText: { fontSize: 13, fontWeight: "600", flex: 1 },
-  button: { marginTop: 24, height: 52, borderRadius: 14, backgroundColor: "#615DFA", alignItems: "center", justifyContent: "center" },
+  button: { marginTop: 24, height: 52, borderRadius: 14, backgroundColor: "#EC2127", alignItems: "center", justifyContent: "center" },
   buttonOff: { opacity: 0.5 },
   buttonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
 });

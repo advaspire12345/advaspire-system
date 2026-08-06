@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/contexts/auth";
 import { useSettings } from "@/contexts/settings";
 import { useDrawer } from "@/contexts/drawer";
+import { C } from "@/theme/tech";
 
 type Item = { icon: keyof typeof Ionicons.glyphMap; label: string; action: () => void };
 
@@ -43,6 +44,7 @@ export function SettingsDrawer() {
 
   const nav = (route: string) => go(route as Href);
   const items: Item[] = [
+    { icon: "images-outline", label: "Gallery", action: () => nav("/gallery") },
     { icon: "person-outline", label: "Profile", action: () => nav("/profile") },
     { icon: "lock-closed-outline", label: "Change password", action: () => nav("/change-password") },
     { icon: "calendar-outline", label: "Calendar settings", action: () => nav("/settings/calendar") },
@@ -60,19 +62,19 @@ export function SettingsDrawer() {
       <Animated.View style={[styles.panel, { width: panelW, paddingTop: insets.top + 12, transform: [{ translateX: tx }] }]}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Settings</Text>
-          <Pressable onPress={closeDrawer} hitSlop={8} style={styles.close}><Ionicons name="close" size={20} color="#6B7280" /></Pressable>
+          <Pressable onPress={closeDrawer} hitSlop={8} style={styles.close}><Ionicons name="close" size={20} color={C.textDim} /></Pressable>
         </View>
         <View style={styles.list}>
           {items.map((it) => (
             <Pressable key={it.label} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]} onPress={it.action}>
-              <Ionicons name={it.icon} size={20} color="#615DFA" />
+              <View style={styles.rowIcon}><Ionicons name={it.icon} size={19} color={C.red} /></View>
               <Text style={styles.rowLabel}>{it.label}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
+              <Ionicons name="chevron-forward" size={16} color={C.textMute} />
             </Pressable>
           ))}
         </View>
         <Pressable style={({ pressed }) => [styles.signOut, pressed && styles.rowPressed]} onPress={onSignOut}>
-          <Ionicons name="log-out-outline" size={20} color="#DC2626" />
+          <Ionicons name="log-out-outline" size={20} color={C.red} />
           <Text style={styles.signOutText}>Sign out</Text>
         </Pressable>
       </Animated.View>
@@ -81,15 +83,16 @@ export function SettingsDrawer() {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.4)" },
-  panel: { position: "absolute", top: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF", paddingHorizontal: 8, paddingBottom: 24, shadowColor: "#0F172A", shadowOpacity: 0.2, shadowRadius: 20, shadowOffset: { width: -6, height: 0 }, elevation: 16 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#F1F1F6" },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: "#0F172A" },
-  close: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center" },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(43,22,27,0.4)" },
+  panel: { position: "absolute", top: 0, right: 0, bottom: 0, backgroundColor: C.card, paddingHorizontal: 8, paddingBottom: 24, shadowColor: "#000000", shadowOpacity: 0.18, shadowRadius: 20, shadowOffset: { width: -6, height: 0 }, elevation: 16 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.borderFaint },
+  headerTitle: { fontSize: 20, fontWeight: "600", color: C.ink, letterSpacing: -0.3 },
+  close: { width: 32, height: 32, borderRadius: 16, backgroundColor: C.greyChip, alignItems: "center", justifyContent: "center" },
   list: { flex: 1, paddingTop: 8 },
-  row: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 10, paddingVertical: 15, borderRadius: 12 },
-  rowPressed: { backgroundColor: "#F3F4F6" },
-  rowLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: "#111827" },
-  signOut: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", backgroundColor: "#FEE2E2", borderRadius: 12, paddingVertical: 14, marginHorizontal: 8 },
-  signOutText: { fontSize: 15, fontWeight: "800", color: "#DC2626" },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 10, paddingVertical: 14, borderRadius: 14 },
+  rowIcon: { width: 34, height: 34, borderRadius: 12, backgroundColor: C.redChip, alignItems: "center", justifyContent: "center" },
+  rowPressed: { backgroundColor: C.bg },
+  rowLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: C.ink },
+  signOut: { flexDirection: "row", alignItems: "center", gap: 10, justifyContent: "center", backgroundColor: C.redChip, borderRadius: 14, paddingVertical: 14, marginHorizontal: 8 },
+  signOutText: { fontSize: 15, fontWeight: "700", color: C.red },
 });

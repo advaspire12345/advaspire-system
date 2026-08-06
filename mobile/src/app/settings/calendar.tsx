@@ -23,9 +23,9 @@ export default function CalendarSettings() {
             const on = defaultView === v.key;
             return (
               <Pressable key={v.key} style={[styles.row, i > 0 && styles.rowDivider]} onPress={() => setDefaultView(v.key)}>
-                <Ionicons name={v.icon} size={20} color="#615DFA" />
+                <Ionicons name={v.icon} size={20} color="#EC2127" />
                 <Text style={styles.rowLabel}>{v.label}</Text>
-                <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={20} color={on ? "#615DFA" : "#D1D5DB"} />
+                <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={20} color={on ? "#EC2127" : "#D1D5DB"} />
               </Pressable>
             );
           })}
@@ -35,9 +35,9 @@ export default function CalendarSettings() {
         <Text style={styles.hint}>Show the row of child chips to filter the calendar by child.</Text>
         <View style={styles.card}>
           <View style={styles.row}>
-            <Ionicons name="people-outline" size={20} color="#615DFA" />
+            <Ionicons name="people-outline" size={20} color="#EC2127" />
             <Text style={styles.rowLabel}>Show child filter</Text>
-            <Switch value={showFilter} onValueChange={setShowFilter} trackColor={{ true: "#615DFA" }} />
+            <Switch value={showFilter} onValueChange={setShowFilter} trackColor={{ true: "#EC2127" }} />
           </View>
         </View>
       </ScrollView>
@@ -46,12 +46,12 @@ export default function CalendarSettings() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F6FB" },
+  safe: { flex: 1, backgroundColor: "#F7F3F5" },
   scroll: { padding: 16 },
-  sectionLabel: { fontSize: 12, fontWeight: "800", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.8, marginTop: 12, marginBottom: 4 },
-  hint: { fontSize: 13, color: "#9CA3AF", marginBottom: 10, lineHeight: 18 },
+  sectionLabel: { fontSize: 12, fontWeight: "800", color: "#666666", textTransform: "uppercase", letterSpacing: 0.8, marginTop: 12, marginBottom: 4 },
+  hint: { fontSize: 13, color: "#999999", marginBottom: 10, lineHeight: 18 },
   card: { backgroundColor: "#FFFFFF", borderRadius: 14, paddingHorizontal: 14, marginBottom: 8 },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 15 },
   rowDivider: { borderTopWidth: 1, borderTopColor: "#F3F4F6" },
-  rowLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: "#111827" },
+  rowLabel: { flex: 1, fontSize: 15, fontWeight: "600", color: "#2B161B" },
 });

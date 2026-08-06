@@ -1,11 +1,14 @@
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useRole } from "@/contexts/role";
 import { supabase } from "@/lib/supabase";
 import { TeacherTopBar } from "@/components/TeacherTopBar";
+
+// company_admin and above can add trials + enrol students from this page.
+const ADMIN_ROLES = ["super_admin", "group_admin", "company_admin"];
 
 type TrialStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show" | "converted";
 type Trial = {
@@ -32,9 +35,20 @@ function time12(t: string | null): string {
   const [h, m] = t.split(":").map((n) => parseInt(n, 10));
   return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
+// Prefer WhatsApp (MY numbers: 01x… → 601x…); fall back to SMS if it isn't installed.
+async function contactParent(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  const intl = digits.startsWith("0") ? `6${digits}` : digits;
+  const wa = `whatsapp://send?phone=${intl}`;
+  const canWa = await Linking.canOpenURL(wa).catch(() => false);
+  if (canWa) { Linking.openURL(wa); return; }
+  Linking.openURL(`sms:${phone}`).catch(() => Alert.alert("No app", "Couldn't open WhatsApp or Messages."));
+}
 
 export default function TeacherTrial() {
   const { staff } = useRole();
+  const router = useRouter();
+  const isAdmin = ADMIN_ROLES.includes(staff?.role ?? "");
   const [trials, setTrials] = useState<Trial[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -94,8 +108,8 @@ export default function TeacherTrial() {
           <Ionicons name="calendar-outline" size={14} color="#6B7280" />
           <Text style={styles.metaText}>{fmtDate(t.date)}{t.time ? ` · ${time12(t.time)}` : ""}</Text>
         </View>
-        <Pressable style={styles.metaRow} onPress={() => t.parentPhone && Linking.openURL(`tel:${t.parentPhone}`)}>
-          <Ionicons name="call-outline" size={14} color="#0D9488" />
+        <Pressable style={styles.metaRow} onPress={() => t.parentPhone && contactParent(t.parentPhone)}>
+          <Ionicons name="logo-whatsapp" size={14} color={t.parentPhone ? "#25D366" : "#9CA3AF"} />
           <Text style={[styles.metaText, t.parentPhone && styles.link]}>{t.parentName}{t.parentPhone ? ` · ${t.parentPhone}` : ""}</Text>
         </Pressable>
         {t.message ? <Text style={styles.message} numberOfLines={3}>💬 {t.message}</Text> : null}
@@ -116,7 +130,17 @@ export default function TeacherTrial() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <TeacherTopBar />
-      <View style={styles.header}><Text style={styles.title}>Trials</Text><Text style={styles.subtitle}>Trial classes at your branch — record how each went.</Text></View>
+      <View style={styles.header}>
+        <Text style={styles.title}>Trials</Text>
+        <Text style={styles.subtitle}>Trial classes at your branch — record how each went.</Text>
+        {isAdmin ? (
+          <View style={styles.addRow}>
+            <Pressable style={[styles.addBtn, styles.addTrial]} onPress={() => router.push("/(teacher)/add-trial" as Href)}>
+              <Ionicons name="sparkles" size={16} color="#B45309" /><Text style={styles.addTrialText}>Add trial</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
       {loading ? <View style={styles.center}><ActivityIndicator color="#0D9488" /></View> : (
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
           {trials.length === 0 ? <Text style={styles.empty}>No trials booked at your branch.</Text> : (
@@ -140,6 +164,10 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, gap: 4 },
   title: { fontSize: 24, fontWeight: "800", color: "#0F172A" },
   subtitle: { fontSize: 13, color: "#6B7280" },
+  addRow: { flexDirection: "row", gap: 8, marginTop: 10 },
+  addBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 11, borderRadius: 12 },
+  addTrial: { backgroundColor: "#FEF3C7" },
+  addTrialText: { fontSize: 14, fontWeight: "800", color: "#B45309" },
   list: { padding: 12 },
   empty: { textAlign: "center", color: "#9CA3AF", fontSize: 14, marginTop: 30 },
   groupLabel: { fontSize: 12, fontWeight: "800", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, marginLeft: 2 },

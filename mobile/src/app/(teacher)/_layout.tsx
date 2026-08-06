@@ -26,6 +26,8 @@ export default function TeacherLayout() {
       <Tabs.Screen name="messages" options={{ href: null }} />
       <Tabs.Screen name="profile" options={{ href: null }} />
       <Tabs.Screen name="notifications" options={{ href: null }} />
+      <Tabs.Screen name="add-trial" options={{ href: null }} />
+      <Tabs.Screen name="add-event" options={{ href: null }} />
     </Tabs>
   );
 }

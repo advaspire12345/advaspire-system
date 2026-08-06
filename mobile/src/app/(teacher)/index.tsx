@@ -6,7 +6,7 @@ import { useRole } from "@/contexts/role";
 
 // BUILD MARKER (teacher) — rotate on every shipped teacher-app fix so staff can
 // confirm the OTA loaded. History: … → sky → lime → magenta.
-const TEACHER_BUILD_COLOR = "#0891B2"; // cyan
+const TEACHER_BUILD_COLOR = "#0EA5E9"; // sky (fix: recorded attendance on expired enrollments no longer vanishes)
 
 type Feature = { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; route: string; tint: string };
 const FEATURES: Feature[] = [

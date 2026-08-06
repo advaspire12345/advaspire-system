@@ -47,6 +47,6 @@ export default function LegalDoc() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#FFFFFF" },
   scroll: { padding: 20 },
-  title: { fontSize: 22, fontWeight: "800", color: "#0F172A", marginBottom: 12 },
+  title: { fontSize: 22, fontWeight: "800", color: "#2B161B", marginBottom: 12 },
   body: { fontSize: 14, color: "#374151", lineHeight: 22 },
 });

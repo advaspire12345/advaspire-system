@@ -29,6 +29,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // PKCE so native OAuth (Google) can exchange the redirect `code` for a
+    // session via exchangeCodeForSession. Password sign-in works either way.
+    flowType: "pkce",
   },
 });
 

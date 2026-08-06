@@ -5,13 +5,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRole } from "@/contexts/role";
 import { supabase } from "@/lib/supabase";
 import { TeacherTopBar } from "@/components/TeacherTopBar";
+import { SwipeBackView } from "@/components/SwipeBackView";
 
 const ROBOTICS = new Set(["ev3", "microbit", "advasbot"]);
 const done = (s: string | null | undefined) => !!s && s !== "not_done";
 const CAPWORD = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ") : s);
+// A lesson title's coordinate = its first token when it looks like "EV3-1"; else
+// it's a free-typed ("own write") lesson with no catalog coordinate.
+const coordOf = (title: string): string | null => { const t = (title || "").trim().split(/\s+/)[0]; return /^\w+-[\w-]+$/.test(t) ? t : null; };
+// The single highest thing the student achieved on a lesson (M3>M2>M1>Challenge>
+// Homework); null when they only "learnt" it — we don't show a plain "Learnt" badge.
+function topBadge(l: { m3: boolean; m2: boolean; m1: boolean; challenge: boolean; homework: boolean }): string | null {
+  return l.m3 ? "M3" : l.m2 ? "M2" : l.m1 ? "M1" : l.challenge ? "Challenge" : l.homework ? "Homework" : null;
+}
 
 type Student = { id: string; name: string; code: string | null; photo: string | null; level: number | null };
-type LessonCell = { coordinate: string; title: string; level: number | null; learnt: boolean; m1: boolean; m2: boolean; m3: boolean; challenge: boolean; homework: boolean; remark: string | null };
+type LessonCell = { coordinate: string; title: string; level: number | null; learnt: boolean; m1: boolean; m2: boolean; m3: boolean; challenge: boolean; homework: boolean; remark: string | null; sessionNotes: string[]; date: string | null };
+type ActRow = { date: string | null; notes: string | null; activities: { lesson?: string; learnt?: boolean; m1?: boolean; m2?: boolean; m3?: boolean }[] | null };
 type LevelGroup = { level: number | null; lessons: LessonCell[] };
 type CourseProgress = { name: string; catalog: string; robotics: boolean; sessions: number; levels: LevelGroup[]; learnt: number; total: number };
 type Cert = { id: string; course: string; grade: string | null; code: string | null; date: string | null };
@@ -21,6 +31,46 @@ type Progress = { courses: CourseProgress[]; certs: Cert[]; exams: Exam[]; total
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
   try { return new Date(iso).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" }); } catch { return iso; }
+}
+// Compact date beside a lesson (attendance YYYY-MM-DD → "5 Jul '26").
+function fmtShort(ymd: string | null): string {
+  if (!ymd) return "";
+  try { const d = new Date(ymd + "T00:00:00"); return `${d.getDate()} ${d.toLocaleDateString("en-MY", { month: "short" })} '${String(d.getFullYear()).slice(-2)}`; } catch { return ymd; }
+}
+
+// From attendance rows: attendance comments keyed to the catalog lesson taught that
+// session, plus free-typed ("own write") lessons with their ticks + comments.
+function buildFromAttendance(attRows: ActRow[], catalogCoords: Set<string>) {
+  const notesByCoord = new Map<string, string[]>();
+  const dateByCoord = new Map<string, string>(); // latest attendance date the lesson was taught
+  const typed = new Map<string, { learnt: boolean; m1: boolean; m2: boolean; m3: boolean; notes: string[]; date: string | null }>();
+  const later = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b);
+  for (const a of attRows ?? []) {
+    const note = (a.notes ?? "").trim();
+    const d = a.date ?? null;
+    for (const act of a.activities ?? []) {
+      const title = act.lesson; if (!title) continue;
+      const coord = coordOf(title);
+      if (coord && catalogCoords.has(coord)) {
+        if (note) { const arr = notesByCoord.get(coord) ?? []; if (!arr.includes(note)) arr.push(note); notesByCoord.set(coord, arr); }
+        if (d) { const cur = dateByCoord.get(coord) ?? null; const best = later(cur, d); if (best) dateByCoord.set(coord, best); }
+      } else {
+        const cur = typed.get(title) ?? { learnt: false, m1: false, m2: false, m3: false, notes: [], date: null };
+        cur.learnt = cur.learnt || (act.learnt === undefined ? true : !!act.learnt);
+        cur.m1 = cur.m1 || !!act.m1; cur.m2 = cur.m2 || !!act.m2; cur.m3 = cur.m3 || !!act.m3;
+        if (note && !cur.notes.includes(note)) cur.notes.push(note);
+        cur.date = later(cur.date, d);
+        typed.set(title, cur);
+      }
+    }
+  }
+  const cells: LessonCell[] = [...typed.entries()].map(([title, t]) => ({
+    coordinate: `typed:${title}`, title, level: null, learnt: t.learnt, m1: t.m1, m2: t.m2, m3: t.m3, challenge: false, homework: false, remark: null, sessionNotes: t.notes, date: t.date,
+  }));
+  const typedCourse: CourseProgress | null = cells.length
+    ? { name: "Own-written lessons", catalog: "__typed__", robotics: true, sessions: 0, levels: [{ level: null, lessons: cells }], learnt: cells.filter((c) => c.learnt).length, total: cells.length }
+    : null;
+  return { notesByCoord, dateByCoord, typedCourse };
 }
 
 export default function TeacherProgress() {
@@ -33,6 +83,7 @@ export default function TeacherProgress() {
   const [err, setErr] = useState<string | null>(null);
   const [lessonQuery, setLessonQuery] = useState("");
   const [tab, setTab] = useState<"all" | "done">("all");
+  const backToList = () => { setSelected(null); setProgress(null); };
 
   useEffect(() => {
     if (!staff?.branchId) return;
@@ -46,19 +97,43 @@ export default function TeacherProgress() {
     setSelected(s); setProgress(null); setErr(null); setLoading(true); setLessonQuery("");
     try {
       const { data: enrs } = await supabase
-        .from("enrollments").select("sessions_remaining, course:courses(name, lesson_catalog)")
+        .from("enrollments").select("id, student_id, sessions_remaining, pool_id, pool:shared_session_pools(sessions_remaining), course:courses(name, lesson_catalog)")
         .eq("student_id", s.id).is("deleted_at", null);
+      const enrollmentIds = (enrs ?? []).map((e) => (e as { id: string }).id);
+      // Pooled enrollments show the student's equal-split share, like the web.
+      const poolIds = [...new Set((enrs ?? []).map((e) => (e as { pool_id?: string | null }).pool_id).filter(Boolean) as string[])];
+      const order = new Map<string, string[]>();
+      if (poolIds.length) {
+        const { data: members } = await supabase.from("pool_students").select("pool_id, student_id, joined_at").in("pool_id", poolIds).order("joined_at", { ascending: true });
+        for (const m of members ?? []) { const pid = m.pool_id as string; const arr = order.get(pid) ?? []; arr.push(m.student_id as string); order.set(pid, arr); }
+      }
+      const share = (e: { sessions_remaining?: number | null; pool_id?: string | null; pool?: { sessions_remaining?: number } | null }): number => {
+        if (!e.pool_id || !e.pool) return Number(e.sessions_remaining ?? 0);
+        const o = order.get(e.pool_id) ?? []; const cnt = o.length || 2; const rem = Number(e.pool.sessions_remaining ?? 0);
+        const pos = o.indexOf(s.id); const r = rem >= 0 ? rem % cnt : 0;
+        return Math.floor(rem / cnt) + (pos >= 0 && pos < r ? 1 : 0);
+      };
       const catInfo = new Map<string, { name: string; sessions: number }>();
       for (const e of enrs ?? []) {
         const c = e.course as unknown as { name: string; lesson_catalog: string | null } | null;
         const cat = c?.lesson_catalog;
         if (!cat) continue;
         const cur = catInfo.get(cat) ?? { name: c?.name ?? cat, sessions: 0 };
-        cur.sessions += Number(e.sessions_remaining ?? 0);
+        cur.sessions += share(e as unknown as { sessions_remaining?: number; pool_id?: string | null; pool?: { sessions_remaining?: number } | null });
         catInfo.set(cat, cur);
       }
+      // Attendance log (present/absent notes + free-typed lessons) — independent of catalog.
+      const { data: attRows } = enrollmentIds.length
+        ? await supabase.from("attendance").select("date, status, notes, activities").in("enrollment_id", enrollmentIds).order("date", { ascending: false }).limit(120)
+        : { data: [] as { date: string | null; status: string; notes: string | null; activities: { lesson?: string }[] | null }[] };
+
       const catalogs = [...catInfo.keys()];
-      if (catalogs.length === 0) { setProgress({ courses: [], certs: [], exams: [], totalLessons: 0, totalLearnt: 0 }); setLoading(false); return; }
+      if (catalogs.length === 0) {
+        // No curriculum, but still surface any typed ("own write") lessons + comments.
+        const { typedCourse } = buildFromAttendance((attRows ?? []) as ActRow[], new Set());
+        setProgress({ courses: typedCourse ? [typedCourse] : [], certs: [], exams: [], totalLessons: 0, totalLearnt: 0 });
+        setLoading(false); return;
+      }
 
       const [{ data: lessons }, { data: lp }, { data: remarks }, { data: certs }, { data: attempts }] = await Promise.all([
         supabase.from("lessons").select("course_code, coordinate, title, level, position").in("course_code", catalogs).order("level", { ascending: true, nullsFirst: false }).order("position", { ascending: true, nullsFirst: false }),
@@ -70,6 +145,8 @@ export default function TeacherProgress() {
 
       const lpMap = new Map((lp ?? []).map((r) => [r.lesson_coordinate as string, r]));
       const rmMap = new Map((remarks ?? []).map((r) => [r.lesson_coordinate as string, (r.note as string | null) ?? null]));
+      const catalogCoords = new Set((lessons ?? []).map((l) => l.coordinate as string));
+      const { notesByCoord, dateByCoord, typedCourse } = buildFromAttendance((attRows ?? []) as ActRow[], catalogCoords);
 
       const byCatalog = new Map<string, LessonCell[]>();
       for (const l of lessons ?? []) {
@@ -81,6 +158,8 @@ export default function TeacherProgress() {
           learnt: done(p?.learnt_status as string | null), m1: done(p?.mission1_status as string | null), m2: done(p?.mission2_status as string | null), m3: done(p?.mission3_status as string | null),
           challenge: done(p?.challenge_status as string | null), homework: done(p?.homework_status as string | null),
           remark: rmMap.get(l.coordinate as string) ?? null,
+          sessionNotes: notesByCoord.get(l.coordinate as string) ?? [],
+          date: dateByCoord.get(l.coordinate as string) ?? null,
         };
         const arr = byCatalog.get(l.course_code as string) ?? [];
         arr.push(cell);
@@ -116,8 +195,11 @@ export default function TeacherProgress() {
         return { id: a.id as string, title, status: (a.status as string) ?? "", score, result, date };
       }).sort((x, y) => (y.date ?? "").localeCompare(x.date ?? ""));
 
+      // Own-written lessons (with their ticks + attendance comments) show as their own course.
+      const allCourses = typedCourse ? [...courses, typedCourse] : courses;
+
       setProgress({
-        courses,
+        courses: allCourses,
         certs: (certs ?? []).map((c) => ({ id: c.id as string, course: (c.course_name as string) ?? "Certificate", grade: (c.grade as string | null) ?? null, code: (c.code as string | null) ?? null, date: (c.date_issued as string | null) ?? null })),
         exams,
         totalLessons, totalLearnt,
@@ -163,9 +245,10 @@ export default function TeacherProgress() {
   const pct = progress && progress.totalLessons > 0 ? Math.round((progress.totalLearnt / progress.totalLessons) * 100) : 0;
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
+      <SwipeBackView onBack={backToList} style={styles.safe}>
       <TeacherTopBar />
       <View style={styles.detailHead}>
-        <Pressable hitSlop={8} onPress={() => { setSelected(null); setProgress(null); }} style={styles.backBtn}><Ionicons name="chevron-back" size={22} color="#0D9488" /></Pressable>
+        <Pressable hitSlop={8} onPress={backToList} style={styles.backBtn}><Ionicons name="chevron-back" size={22} color="#0D9488" /></Pressable>
         <Avatar name={selected.name} photo={selected.photo} />
         <View style={styles.flex}>
           <Text style={styles.detailName} numberOfLines={1}>{selected.name}</Text>
@@ -203,9 +286,40 @@ export default function TeacherProgress() {
               <Text style={styles.pctText}>{pct}% complete</Text>
             </View>
 
-            {(() => {
+            {tab === "done" ? (() => {
+              // Flat list of learnt lessons across all courses, latest → oldest, each
+              // showing only its highest badge. No course / level titles.
               const lq = lessonQuery.trim().toLowerCase();
-              const keep = (l: LessonCell) => (tab === "done" ? l.learnt : true) && (!lq || l.title.toLowerCase().includes(lq));
+              const items = progress.courses
+                .flatMap((c) => c.levels.flatMap((lv) => lv.lessons))
+                .filter((l) => l.learnt && (!lq || l.title.toLowerCase().includes(lq)))
+                .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+              if (progress.courses.length === 0) return <Text style={styles.empty}>No curriculum linked to this student's classes.</Text>;
+              if (items.length === 0) return <Text style={styles.empty}>{lq ? `No lesson matches “${lessonQuery.trim()}”.` : "No lessons done yet."}</Text>;
+              return (
+                <View style={styles.courseCard}>
+                  {items.map((l) => {
+                    const badge = topBadge(l);
+                    return (
+                      <View key={l.coordinate} style={styles.lessonRow}>
+                        <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
+                        <View style={styles.flex}>
+                          <View style={styles.lessonTitleRow}>
+                            <Text style={[styles.lessonTitle, styles.flex]} numberOfLines={2}>{l.title}</Text>
+                            {l.date ? <Text style={styles.lessonDate}>{fmtShort(l.date)}</Text> : null}
+                          </View>
+                          {badge ? <View style={styles.pillRow}><Pill label={badge} on /></View> : null}
+                          {l.remark ? <Text style={styles.remark} numberOfLines={2}>📝 {l.remark}</Text> : null}
+                          {l.sessionNotes.map((n, ni) => <Text key={ni} style={styles.logNote} numberOfLines={4}>💬 {n}</Text>)}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+            })() : (() => {
+              const lq = lessonQuery.trim().toLowerCase();
+              const keep = (l: LessonCell) => (!lq || l.title.toLowerCase().includes(lq));
               const courses = progress.courses
                 .map((c) => ({ ...c, levels: c.levels.map((lv) => ({ ...lv, lessons: lv.lessons.filter(keep) })).filter((lv) => lv.lessons.length) }))
                 .filter((c) => c.levels.length);
@@ -214,7 +328,7 @@ export default function TeacherProgress() {
               return courses.map((c) => (
               <View key={c.catalog} style={styles.courseCard}>
                 <View style={styles.courseHead}>
-                  <Text style={styles.courseName} numberOfLines={1}>{c.robotics ? "🤖 " : ""}{c.name}</Text>
+                  <Text style={styles.courseName} numberOfLines={1}>{c.catalog === "__typed__" ? "✏️ " : c.robotics ? "🤖 " : ""}{c.name}</Text>
                   <Text style={styles.courseMeta}>{c.learnt}/{c.total} · {c.sessions} left</Text>
                 </View>
                 {c.levels.map((lv) => (
@@ -224,13 +338,17 @@ export default function TeacherProgress() {
                       <View key={l.coordinate} style={styles.lessonRow}>
                         <Ionicons name={l.learnt ? "checkmark-circle" : "ellipse-outline"} size={18} color={l.learnt ? "#16A34A" : "#D1D5DB"} />
                         <View style={styles.flex}>
-                          <Text style={[styles.lessonTitle, !l.learnt && styles.lessonTitleMuted]} numberOfLines={2}>{l.title}</Text>
+                          <View style={styles.lessonTitleRow}>
+                            <Text style={[styles.lessonTitle, styles.flex, !l.learnt && styles.lessonTitleMuted]} numberOfLines={2}>{l.title}</Text>
+                            {l.date ? <Text style={styles.lessonDate}>{fmtShort(l.date)}</Text> : null}
+                          </View>
                           <View style={styles.pillRow}>
                             {c.robotics ? (["M1", "M2", "M3"] as const).map((m, i) => <Pill key={m} label={m} on={[l.m1, l.m2, l.m3][i]} />) : null}
                             <Pill label="Challenge" on={l.challenge} />
                             <Pill label="Homework" on={l.homework} />
                           </View>
                           {l.remark ? <Text style={styles.remark} numberOfLines={2}>📝 {l.remark}</Text> : null}
+                          {l.sessionNotes.map((n, ni) => <Text key={ni} style={styles.logNote} numberOfLines={4}>💬 {n}</Text>)}
                         </View>
                       </View>
                     ))}
@@ -255,7 +373,7 @@ export default function TeacherProgress() {
               </View>
             ) : null}
 
-            {progress.certs.length ? (
+            {tab === "done" && progress.certs.length ? (
               <View style={styles.courseCard}>
                 <Text style={styles.courseName}>🏆 Certificates</Text>
                 {progress.certs.map((ct) => (
@@ -272,6 +390,7 @@ export default function TeacherProgress() {
             <View style={{ height: 30 }} />
           </ScrollView>
         )}
+      </SwipeBackView>
     </SafeAreaView>
   );
 }
@@ -335,8 +454,10 @@ const styles = StyleSheet.create({
   levelBlock: { gap: 8 },
   levelLabel: { fontSize: 12, fontWeight: "800", color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.5 },
   lessonRow: { flexDirection: "row", gap: 10, paddingVertical: 4 },
+  lessonTitleRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   lessonTitle: { fontSize: 13, fontWeight: "700", color: "#111827", lineHeight: 18 },
   lessonTitleMuted: { color: "#6B7280", fontWeight: "600" },
+  lessonDate: { fontSize: 11, fontWeight: "700", color: "#0D9488", marginTop: 1 },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 5 },
   pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   pillOn: { backgroundColor: "#D1FAE5" },
@@ -347,6 +468,12 @@ const styles = StyleSheet.create({
   remark: { fontSize: 12, color: "#6B7280", marginTop: 4, fontStyle: "italic" },
   certRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#F3F4F6" },
   certCourse: { fontSize: 14, fontWeight: "700", color: "#111827" },
+  logHint: { fontSize: 12, color: "#9CA3AF", marginTop: -4 },
+  logDot: { width: 8, height: 8, borderRadius: 4, alignSelf: "flex-start", marginTop: 6 },
+  tagOkDot: { backgroundColor: "#16A34A" },
+  tagBadDot: { backgroundColor: "#DC2626" },
+  logLesson: { fontSize: 13, fontWeight: "700", color: "#111827", marginTop: 3 },
+  logNote: { fontSize: 13, color: "#374151", marginTop: 3, fontStyle: "italic" },
   gradeTag: { backgroundColor: "#FEF3C7", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   gradeText: { fontSize: 12, fontWeight: "800", color: "#92400E" },
 });
