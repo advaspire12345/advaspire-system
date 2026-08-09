@@ -13,7 +13,10 @@ import { supabase } from "@/lib/supabase";
 import { C, cardShadow, cardShadowLg } from "@/theme/tech";
 
 type ParentRow = { id: string; name: string };
-type ProgramInfo = { name: string; remaining: number; nextClass: string | null; startTime: string | null };
+type ProgramInfo = { enrollmentId: string; name: string; remaining: number; nextClass: string | null; startTime: string | null };
+// One NEXT CLASS card per distinct start time — siblings sharing a time collapse
+// into a single card, siblings on different times get a card each.
+type NextGroup = { date: string; time: string | null; when: string; lines: string[]; target: { enrollmentId: string; studentId: string; courseName: string } | null };
 type ChildSummary = { studentId: string; studentName: string; photo: string | null; level: number; programs: ProgramInfo[] };
 type AcademyNotice = { id: string; title: string; description: string | null; date: string; type: string };
 type HomeData = {
@@ -104,16 +107,55 @@ export default function HomeScreen() {
 
     const { data: links, error: linksErr } = await supabase
       .from("parent_students")
-      .select(`student:students!inner(id, name, photo, level, deleted_at, enrollments(status, sessions_remaining, day_of_week, start_time, schedule, created_at, deleted_at, course:courses(name)))`)
+      .select(`student:students!inner(id, name, photo, level, deleted_at, enrollments(id, status, sessions_remaining, pool_id, pool:shared_session_pools(sessions_remaining), day_of_week, start_time, schedule, created_at, deleted_at, course:courses(name)))`)
       .eq("parent_id", parentRow.id);
     if (linksErr) throw linksErr;
 
-    const rows: ChildSummary[] = (links ?? [])
+    type Enr = { id: string; status: string; sessions_remaining: number; pool_id: string | null; pool: { sessions_remaining: number } | null; day_of_week: string | null; start_time: string | null; schedule: string | null; created_at: string; deleted_at: string | null; course: { name: string } | null };
+    const students = (links ?? [])
       .map((l) => l.student as unknown as {
-        id: string; name: string; photo: string | null; level: number; deleted_at: string | null;
-        enrollments: Array<{ status: string; sessions_remaining: number; day_of_week: string | null; start_time: string | null; schedule: string | null; created_at: string; deleted_at: string | null; course: { name: string } | null }>;
+        id: string; name: string; photo: string | null; level: number; deleted_at: string | null; enrollments: Enr[];
       })
-      .filter((s) => s && !s.deleted_at)
+      .filter((s) => s && !s.deleted_at);
+
+    // Pooled siblings share ONE balance and each carry 0 on their own enrolment, so
+    // reading sessions_remaining alone reports 0 for the whole family. Each child
+    // shows their equal split of the pool — the same number the teacher portal shows.
+    const poolIds = [...new Set(students.flatMap((s) => (s.enrollments ?? []).map((e) => e.pool_id).filter(Boolean) as string[]))];
+    const poolOrder = new Map<string, string[]>(); // poolId → studentIds by joined_at
+    if (poolIds.length) {
+      const { data: members } = await supabase
+        .from("pool_students").select("pool_id, student_id, joined_at").in("pool_id", poolIds).order("joined_at", { ascending: true });
+      for (const m of members ?? []) {
+        const pid = m.pool_id as string;
+        poolOrder.set(pid, [...(poolOrder.get(pid) ?? []), m.student_id as string]);
+      }
+    }
+    // A moved session must retarget the "next class" date, otherwise Home keeps
+    // advertising the original day the parent already cancelled.
+    const sids = students.map((s) => s.id);
+    const { data: resched } = sids.length
+      ? await supabase.from("session_reschedules").select("enrollment_id, original_date, new_date, new_slot_time").in("student_id", sids)
+      : { data: [] as { enrollment_id: string; original_date: string; new_date: string; new_slot_time: string | null }[] };
+    const movedMap = new Map<string, { date: string; time: string | null }>();
+    for (const r of resched ?? []) {
+      movedMap.set(`${r.enrollment_id}|${r.original_date}`, { date: r.new_date as string, time: (r.new_slot_time as string | null) ?? null });
+    }
+
+    const sessionsFor = (e: Enr, studentId: string): number => {
+      const pool = (Array.isArray(e.pool) ? e.pool[0] : e.pool) ?? null;
+      if (!e.pool_id || !pool) return Number(e.sessions_remaining ?? 0);
+      const order = poolOrder.get(e.pool_id) ?? [];
+      const cnt = order.length || 2;
+      const poolRemaining = Number(pool.sessions_remaining ?? 0);
+      const per = Math.floor(poolRemaining / cnt);
+      const pos = order.indexOf(studentId);
+      // Leftovers only spread on a positive balance; debt splits evenly.
+      const remainder = poolRemaining >= 0 ? poolRemaining % cnt : 0;
+      return per + (pos >= 0 && pos < remainder ? 1 : 0);
+    };
+
+    const rows: ChildSummary[] = students
       .map((s) => {
         const actives = (s.enrollments ?? []).filter((e) => !e.deleted_at && e.status === "active").sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
         const seen = new Set<string>();
@@ -123,7 +165,11 @@ export default function HomeScreen() {
           if (seen.has(name)) continue;
           seen.add(name);
           const { days, time } = parseScheduleDays(e.schedule, e.day_of_week);
-          programs.push({ name, remaining: Number(e.sessions_remaining ?? 0), nextClass: nextClassDate(days), startTime: e.start_time ?? time });
+          let nextDate = nextClassDate(days);
+          let startAt = e.start_time ?? time;
+          const moved = nextDate ? movedMap.get(`${e.id}|${nextDate}`) : null;
+          if (moved) { nextDate = moved.date; startAt = moved.time ?? startAt; }
+          programs.push({ enrollmentId: e.id, name, remaining: sessionsFor(e, s.id), nextClass: nextDate, startTime: startAt });
         }
         return { studentId: s.id, studentName: s.name, photo: s.photo, level: s.level, programs };
       });
@@ -136,8 +182,10 @@ export default function HomeScreen() {
     let galleryCount = 0;
     if (studentIds.length) {
       const { data: pays } = await supabase
-        .from("payments").select("id, amount, status, student_id, created_at")
-        .in("student_id", studentIds).eq("status", "pending").order("created_at", { ascending: false });
+        .from("payments").select("id, amount, status, student_id, payment_type, created_at")
+        .in("student_id", studentIds).eq("status", "pending")
+        .neq("payment_type", "combined") // wrapper row, not an extra debt
+        .order("created_at", { ascending: false });
       const seen = new Set<string>();
       for (const p of pays ?? []) {
         const id = p.id as string;
@@ -205,20 +253,46 @@ export default function HomeScreen() {
   const firstName = parent?.name?.split(" ")[0] ?? "";
   const errorMessage = error && !data ? "Couldn't load your dashboard. Pull down to refresh." : null;
 
-  // Soonest upcoming class across every child/program → the NEXT CLASS panel.
-  const nextClass = useMemo(() => {
-    let best: { when: string; what: string; date: string } | null = null;
+  // Soonest upcoming date across the family, then ONE card per start time on that
+  // date: siblings sharing a time collapse into a single card (listing each program
+  // when they differ), siblings on different times get a card each.
+  const nextGroups = useMemo<NextGroup[]>(() => {
+    type Entry = { date: string; time: string | null; child: string; program: string; enrollmentId: string; studentId: string };
+    const entries: Entry[] = [];
     for (const c of children) {
       const nm = nick.raw(c.studentId) ?? c.studentName;
       for (const pr of c.programs) {
         if (!pr.nextClass) continue;
-        if (!best || pr.nextClass < best.date || (pr.nextClass === best.date && (pr.startTime ?? "") < (best.when))) {
-          best = { when: classLong(pr.nextClass, pr.startTime), what: `${nm} · ${pr.name}`, date: pr.nextClass };
-        }
+        entries.push({ date: pr.nextClass, time: pr.startTime, child: nm, program: pr.name, enrollmentId: pr.enrollmentId, studentId: c.studentId });
       }
     }
-    return best;
+    if (!entries.length) return [];
+    // Every program gets its own next occurrence — a child with Robotics on Saturday
+    // and Coding on Wednesday needs both, not just the sooner one. Entries sharing a
+    // date AND time still collapse into one card.
+    const bySlot = new Map<string, Entry[]>();
+    for (const e of entries) {
+      const k = `${e.date}|${e.time ?? ""}`;
+      bySlot.set(k, [...(bySlot.get(k) ?? []), e]);
+    }
+    return [...bySlot.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(0, 3).map(([key, list]) => {
+      const [, time] = key.split("|");
+      const soonest = list[0].date;
+      const onlyOneProgram = new Set(list.map((e) => e.program)).size === 1;
+      return {
+        date: soonest,
+        time: time || null,
+        when: classLong(soonest, time || null),
+        // Same program → "Ali & Sara · Robotics". Different → one line each.
+        lines: onlyOneProgram
+          ? [`${[...new Set(list.map((e) => e.child))].join(" & ")} · ${list[0].program}`]
+          : list.map((e) => `${e.child} · ${e.program}`),
+        // Only deep-link the reschedule screen when the card is unambiguous.
+        target: list.length === 1 ? { enrollmentId: list[0].enrollmentId, studentId: list[0].studentId, courseName: list[0].program } : null,
+      };
+    });
   }, [children, nick]);
+  const nextClass = nextGroups[0] ?? null;
 
   const strap = useMemo(() => {
     if (children.length === 0) return "Welcome to Advaspire.";
@@ -227,7 +301,7 @@ export default function HomeScreen() {
     return `${children.length === 1 ? "One child" : `${children.length} children`} in class this week.`;
   }, [children.length, unpaidCount, nextClass]);
 
-  const goPay = () => router.push(unpaidCount > 0 && latestUnpaidId ? (`/payment/${latestUnpaidId}` as Href) : "/(tabs)/payment");
+  const goPay = () => router.push("/(tabs)/payment");
   const goProgressSkills = () => {
     const first = children[0];
     router.push({ pathname: "/(tabs)/progress", params: first ? { studentId: first.studentId, section: "skills" } : { section: "skills" } });
@@ -271,7 +345,9 @@ export default function HomeScreen() {
             <TourTarget name="sessions" style={styles.flex}>
               <View style={styles.statCard}>
                 <Text style={styles.statLabel}>SESSIONS LEFT</Text>
-                <Text style={styles.statNum}>{totalSessions}</Text>
+                {/* Never clamped: a child who attended past their paid sessions shows a
+                    real negative, because that is what is owed. Zero shows as 0. */}
+                <Text style={[styles.statNum, totalSessions < 0 && { color: C.red }]}>{totalSessions}</Text>
                 <Text style={styles.statSub}>across {children.length} {children.length === 1 ? "child" : "children"}</Text>
               </View>
             </TourTarget>
@@ -282,7 +358,7 @@ export default function HomeScreen() {
                     <Text style={styles.statLabelDark}>UNPAID</Text>
                     <Ionicons name="chevron-forward" size={13} color={C.ink} />
                   </View>
-                  <Text style={[styles.statNum, styles.statNumDark]}>{formatRM(unpaidAmount)}</Text>
+                  <Text style={[styles.statNum, styles.statNumDark]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{formatRM(unpaidAmount)}</Text>
                   <Text style={styles.statSubYellow}>Tap to pay now</Text>
                 </View>
               ) : (
@@ -300,16 +376,24 @@ export default function HomeScreen() {
         ) : null}
 
         {/* NEXT CLASS maroon panel */}
-        {nextClass ? (
-          <View style={styles.nextPanel}>
+        {nextGroups.map((g, gi) => (
+          <View key={`${g.date}-${g.time ?? "any"}`} style={styles.nextPanel}>
             <View style={styles.payHead}>
               <View style={styles.payDot} />
-              <Text style={styles.payHeadText}>NEXT CLASS</Text>
+              <Text style={styles.payHeadText}>{gi === 0 ? "NEXT CLASS" : "THEN"}</Text>
             </View>
-            <Text style={styles.nextWhen}>{nextClass.when}</Text>
-            <Text style={styles.nextWhat}>{nextClass.what}</Text>
+            <Text style={styles.nextWhen}>{g.when}</Text>
+            {g.lines.map((line) => <Text key={line} style={styles.nextWhat}>{line}</Text>)}
             <View style={styles.nextBtns}>
-              <Pressable style={({ pressed }) => [styles.nextGhost, pressed && styles.pressed]} onPress={() => router.push("/reschedule" as Href)}>
+              <Pressable
+                style={({ pressed }) => [styles.nextGhost, pressed && styles.pressed]}
+                onPress={() => router.push(
+                  // Siblings share this card → let the reschedule screen ask which child.
+                  g.target
+                    ? ({ pathname: "/reschedule", params: { enrollmentId: g.target.enrollmentId, studentId: g.target.studentId, courseName: g.target.courseName, originalDate: g.date } } as unknown as Href)
+                    : ("/reschedule" as Href),
+                )}
+              >
                 <Text style={styles.nextGhostText}>CAN&apos;T MAKE IT</Text>
               </Pressable>
               <Pressable style={({ pressed }) => [styles.nextYellow, pressed && styles.pressed]} onPress={() => router.push("/(tabs)/schedule")}>
@@ -317,7 +401,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
           </View>
-        ) : null}
+        ))}
 
         {!parent && !errorMessage ? (
           <View style={styles.emptyCard}>
@@ -369,7 +453,9 @@ export default function HomeScreen() {
                         <View style={[styles.progDot, { backgroundColor: i % 2 === 1 ? C.blue : C.red }]} />
                         <Text style={styles.progName} numberOfLines={1}>{pr.name}</Text>
                         <View style={[styles.leftPill, ok ? styles.leftPillOk : styles.leftPillLow]}>
-                          <Text style={[styles.leftPillText, { color: ok ? C.green : C.red }]}>{pr.remaining} left</Text>
+                          <Text style={[styles.leftPillText, { color: ok ? C.green : C.red }]}>
+                            {pr.remaining < 0 ? `${pr.remaining} owed` : `${pr.remaining} left`}
+                          </Text>
                         </View>
                       </View>
                       <Text style={styles.progNext}>{pr.nextClass ? `Next class ${classLong(pr.nextClass, pr.startTime)}` : "No upcoming class"}</Text>
@@ -402,7 +488,7 @@ export default function HomeScreen() {
         {/* Gallery + Skills quick tiles */}
         {children.length > 0 ? (
           <View style={styles.tileRow}>
-            <Pressable style={({ pressed }) => [styles.tile, pressed && styles.pressed]} onPress={() => router.push("/gallery" as Href)}>
+            <Pressable style={({ pressed }) => [styles.tile, pressed && styles.pressed]} onPress={() => router.push({ pathname: "/(tabs)/progress", params: { ...(children[0] ? { studentId: children[0].studentId } : {}), section: "gallery" } })}>
               <Ionicons name="images-outline" size={20} color={C.blue} />
               <Text style={styles.tileTitle}>Gallery</Text>
               <Text style={styles.tileSub}>{galleryCount > 0 ? `${galleryCount} photos & builds` : "Photos & builds"}</Text>
@@ -410,7 +496,7 @@ export default function HomeScreen() {
             <Pressable style={({ pressed }) => [styles.tile, pressed && styles.pressed]} onPress={goProgressSkills}>
               <Ionicons name="ribbon-outline" size={20} color={C.red} />
               <Text style={styles.tileTitle}>Skills</Text>
-              <Text style={styles.tileSub}>Levels & badges</Text>
+              <Text style={styles.tileSub}>Levels & ratings</Text>
             </Pressable>
           </View>
         ) : null}
@@ -463,7 +549,9 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 9, fontWeight: "700", color: C.textDim, letterSpacing: 1.8 },
   statLabelDark: { fontSize: 9, fontWeight: "700", color: C.ink, letterSpacing: 1.8 },
   statNum: { fontSize: 30, fontWeight: "800", color: C.ink, letterSpacing: -1, marginTop: 8 },
-  statNumDark: { fontSize: 24, color: C.ink },
+  // Same size as SESSIONS LEFT so the two stat cards read as a matched pair; the
+  // amount shrinks to fit rather than dropping to a smaller fixed size.
+  statNumDark: { color: C.ink },
   statSub: { fontSize: 11, color: C.textDim, marginTop: 5 },
   statSubYellow: { fontSize: 11, color: C.yellowText, marginTop: 5 },
 

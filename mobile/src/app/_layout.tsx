@@ -111,7 +111,10 @@ export default function RootLayout() {
           <NicknameProvider>
           <ThemeProvider value={scheme === "dark" ? DarkTheme : DefaultTheme}>
             <AuthGate>
-              <Stack screenOptions={{ headerShown: false, headerStyle: { backgroundColor: "#FFFFFF" }, headerTitleStyle: { color: "#2B161B", fontWeight: "600" }, headerShadowVisible: false, headerTintColor: "#EC2127" }}>
+              {/* headerBackTitle is set explicitly: iOS otherwise labels the back button
+                  with the PREVIOUS route's name, which for the tab group is the literal
+                  "(tabs)". "Back" reads correctly from every parent route. */}
+              <Stack screenOptions={{ headerShown: false, headerStyle: { backgroundColor: "#FFFFFF" }, headerTitleStyle: { color: "#2B161B", fontWeight: "600" }, headerShadowVisible: false, headerTintColor: "#EC2127", headerBackTitle: "Back" }}>
                 <Stack.Screen name="(auth)" />
                 <Stack.Screen name="reset-password" options={{ headerShown: false }} />
                 <Stack.Screen name="(tabs)" />

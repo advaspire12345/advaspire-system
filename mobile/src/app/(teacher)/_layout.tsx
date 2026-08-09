@@ -11,7 +11,8 @@ export default function TeacherLayout() {
         headerShown: false,
         tabBarActiveTintColor: "#0D9488",
         tabBarInactiveTintColor: "#9CA3AF",
-        tabBarStyle: { height: 60, paddingBottom: 8, paddingTop: 6 },
+        // Taller bar with more bottom inset — the old 60px sat too low to hit reliably.
+        tabBarStyle: { height: 96, paddingBottom: 32, paddingTop: 12 },
         tabBarLabelStyle: { fontSize: 11, fontWeight: "700" },
       }}
     >

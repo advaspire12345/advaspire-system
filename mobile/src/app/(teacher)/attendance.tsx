@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRole } from "@/contexts/role";
 import { supabase } from "@/lib/supabase";
+import { polishComment } from "@/lib/api";
 import { mobileApi } from "@/lib/api";
 import { streamUploadToStorage } from "@/lib/uploadFile";
 import { MediaGallery, type MediaItem } from "@/components/MediaGallery";
@@ -50,6 +51,10 @@ type Row = {
   effort: number;
   knowledge: number;
   behaviour: number;
+  // Set when a parent moved this session: movedFrom marks a makeup landing on this
+  // date, movedTo marks the original date the class left (kept visible, not markable).
+  movedFrom?: string | null;
+  movedTo?: string | null;
 };
 type WeekItem = { date: string; label: string; time: string | null; courseName: string; status: string | null };
 type WeekGroup = { studentId: string; studentName: string; items: WeekItem[] };
@@ -318,6 +323,29 @@ export default function TeacherAttendance() {
     return out;
   };
   const openGallery = (r: Row, url: string) => { const items = rowMedia(r); const idx = Math.max(0, items.findIndex((m) => m.url === url)); setGallery({ items, index: idx }); };
+
+  // Drop a mis-uploaded photo/video off an ALREADY SAVED attendance. Rewrites the
+  // activities JSON in place — the storage object is left alone (harmless, and other
+  // rows may reference the same URL).
+  const removeSavedMedia = (r: Row, actIdx: number, url: string, kind: "photo" | "video") => {
+    if (!r.attendanceId) return;
+    Alert.alert(
+      kind === "video" ? "Remove video" : "Remove photo",
+      kind === "video" ? "Remove this video from the lesson? The parent will no longer see it." : "Remove this photo from the lesson?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: async () => {
+          const next = r.savedActivities.map((a, i) =>
+            i !== actIdx ? a : kind === "video" ? { ...a, video: null } : { ...a, photos: a.photos.filter((p) => p !== url) });
+          const { error } = await supabase.from("attendance")
+            .update({ activities: next.map((a) => ({ lesson: a.lesson, mission: "", photos: a.photos, video: a.video, learnt: a.learnt, m1: a.m1, m2: a.m2, m3: a.m3 })), updated_at: new Date().toISOString() })
+            .eq("id", r.attendanceId as string);
+          if (error) { Alert.alert("Couldn't remove", error.message); return; }
+          setRows((prev) => prev.map((x) => (x.rowId === r.rowId ? { ...x, savedActivities: next } : x)));
+        } },
+      ],
+    );
+  };
   const [picker, setPicker] = useState<{ rowId: string; courseId: string } | null>(null);
   const [pickerList, setPickerList] = useState<Lesson[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -385,6 +413,20 @@ export default function TeacherAttendance() {
     (att ?? []).forEach((a) => { const k = `${a.enrollment_id}|${a.date}`; if (!attByKey.has(k)) attByKey.set(k, a); });
     const usedAttIds = new Set<string>();
 
+    // Parent-initiated moves touching this week. The class leaves its original date and
+    // lands on the new one, so the grid must follow it or the teacher marks the wrong day.
+    const { data: resch } = ids.length ? await supabase.from("session_reschedules")
+      .select("enrollment_id, original_date, original_slot_time, new_date, new_slot_time")
+      .in("enrollment_id", enrList.map((e) => e.id as string))
+      .or(`and(original_date.gte.${week.strs[0]},original_date.lte.${week.strs[6]}),and(new_date.gte.${week.strs[0]},new_date.lte.${week.strs[6]})`)
+      : { data: [] as any[] };
+    const movedOut = new Map<string, string>();                       // enrollmentId|originalDate → newDate
+    const movedIn = new Map<string, { time: string; from: string }>(); // enrollmentId|newDate → new time + origin
+    for (const r of resch ?? []) {
+      movedOut.set(`${r.enrollment_id}|${r.original_date}`, r.new_date as string);
+      movedIn.set(`${r.enrollment_id}|${r.new_date}`, { time: String(r.new_slot_time ?? "").slice(0, 5), from: r.original_date as string });
+    }
+
     const built: Row[] = [];
     for (let di = 0; di < 7; di++) {
       const dstrLocal = week.strs[di];
@@ -392,7 +434,26 @@ export default function TeacherAttendance() {
       for (const e of enrList) {
         const slots = parseSchedule(e.schedule as string | null, e.day_of_week as string | null, e.start_time as string | null);
         const slot = slots.find((s) => s.day === weekday);
+        const landing = movedIn.get(`${e.id}|${dstrLocal}`);
+        // A makeup lands on a day this enrolment normally has no slot — synthesise one.
+        if (!slot && landing) {
+          const meta = enrMeta.get(e.id as string)!;
+          const rec = attByKey.get(`${e.id}|${dstrLocal}`);
+          if (rec) usedAttIds.add(rec.id as string);
+          built.push({
+            rowId: `${e.id}:${dstrLocal}`, date: dstrLocal, enrollmentId: e.id as string, studentId: meta.studentId,
+            studentName: nameById.get(meta.studentId) ?? "Student", courseId: meta.courseId, courseName: meta.courseName, robotics: meta.robotics,
+            slotDay: CAP(weekday), slotTime: landing.time || null, sessions: meta.sessions,
+            extra: false, marked: (rec?.status as Status) ?? null, attendanceId: (rec?.id as string) ?? null,
+            savedLessonTitles: [], savedActivities: [], savedNote: (rec?.notes as string | null) ?? "", savedPhotos: (rec?.project_photos as string[] | null) ?? [],
+            choice: null, editing: false, lessons: [], note: "", photos: [], saving: false, effort: 0, knowledge: 0, behaviour: 0,
+            movedFrom: landing.from,
+          });
+          continue;
+        }
         if (!slot) continue;
+        // Moved away from this day — only the makeup row below is rendered.
+        if (movedOut.has(`${e.id}|${dstrLocal}`)) continue;
         const meta = enrMeta.get(e.id as string)!;
         const rec = attByKey.get(`${e.id}|${dstrLocal}`);
         if (rec) usedAttIds.add(rec.id as string);
@@ -405,6 +466,10 @@ export default function TeacherAttendance() {
           extra: false, marked: (rec?.status as Status) ?? null, attendanceId: (rec?.id as string) ?? null,
           savedLessonTitles: savedActs.map((a) => a.lesson), savedActivities: savedActs, savedNote: (rec?.notes as string | null) ?? "", savedPhotos: (rec?.project_photos as string[] | null) ?? [],
           choice: null, editing: false, lessons: [], note: "", photos: [], saving: false, effort: 0, knowledge: 0, behaviour: 0,
+          // Origin day of a moved session stays listed so the teacher knows why the
+          // student is absent, but it carries a badge instead of reading as a no-show.
+          movedTo: movedOut.get(`${e.id}|${dstrLocal}`) ?? null,
+          movedFrom: landing?.from ?? null,
         });
       }
     }
@@ -886,8 +951,23 @@ export default function TeacherAttendance() {
   };
 
   // Pages: [prev-week sentinel] [Mon..Sun = pages 1..7] [next-week sentinel]. Day i → x=(i+1)*width.
-  const goDay = (i: number) => { setDayIndex(i); pagerRef.current?.scrollTo({ x: (i + 1) * width, animated: true }); };
+  // iOS (and only iOS) applies ScrollView's `contentOffset` PROP on every update, so a
+  // dayIndex-derived contentOffset used to snap the pager mid-flight while the animated
+  // scrollTo below was still running. onMomentumScrollEnd then sampled a half-way offset,
+  // rounded it to a neighbouring page and "corrected" dayIndex to the wrong day — or to a
+  // sentinel page, which silently flipped the week. Position is now driven imperatively
+  // only (see the pager's onLayout), and momentum-end is ignored while we drive it.
+  const progScroll = useRef(false);
+  const goDay = (i: number) => {
+    setDayIndex(i);
+    progScroll.current = true;
+    pagerRef.current?.scrollTo({ x: (i + 1) * width, animated: true });
+    // iOS doesn't reliably emit onMomentumScrollEnd for a programmatic scroll, and a stuck
+    // flag would swallow the user's next real swipe — so always release it on a timer.
+    setTimeout(() => { progScroll.current = false; }, 500);
+  };
   const onPagerScrollEnd = (e: { nativeEvent: { contentOffset: { x: number } } }) => {
+    if (progScroll.current) { progScroll.current = false; return; } // our own scroll, not the user's
     const page = Math.round(e.nativeEvent.contentOffset.x / width);
     if (page === 0) {
       // Swiped before Monday → previous week, land on its Sunday.
@@ -906,6 +986,23 @@ export default function TeacherAttendance() {
   const q = search.trim().toLowerCase();
   const searching = searchOpen && !!q;
   const editRow = rows.find((r) => r.editing) ?? null;
+  const [blanksOnly, setBlanksOnly] = useState(false);
+  // AI comment rewrite. The suggestion is always reviewed before it replaces the
+  // teacher's words — a parent reads this, so nothing is swapped silently.
+  const [polishing, setPolishing] = useState<string | null>(null);
+  const [polishFor, setPolishFor] = useState<{ rowId: string; original: string; polished: string } | null>(null);
+
+  const runPolish = async (r: Row) => {
+    const original = r.note.trim();
+    if (!original) { Alert.alert("Nothing to rewrite", "Type your comment first, then tap the sparkle."); return; }
+    setPolishing(r.rowId);
+    const res = await polishComment(original, r.studentName);
+    setPolishing(null);
+    if (!res.ok) { Alert.alert("Couldn't rewrite", res.error); return; }
+    const polished = res.data.polished.trim();
+    if (!polished || polished === original) { Alert.alert("No change needed", "That comment already reads well."); return; }
+    setPolishFor({ rowId: r.rowId, original, polished });
+  };
   const dayRows = rows.filter((r) => r.date === dstr);
   const pendingCount = dayRows.filter((r) => r.choice && !r.editing).length;
   const todayStr = ymd(new Date());
@@ -985,7 +1082,13 @@ export default function TeacherAttendance() {
             <RatingRow label="Knowledge" value={r.knowledge} onChange={(v) => patch(r.rowId, { knowledge: v })} />
             <RatingRow label="Behaviour" value={r.behaviour} onChange={(v) => patch(r.rowId, { behaviour: v })} />
           </View>
-          <TextInput ref={(el) => { if (!r.editing) noteRefs.current[r.rowId] = el; }} style={styles.note} value={r.note} onChangeText={(t) => patch(r.rowId, { note: t })} onFocus={() => { if (!r.editing) scrollNoteIntoView(r.rowId); }} placeholder="Comment for the parent (optional)" placeholderTextColor="#9CA3AF" multiline />
+          <View>
+            <TextInput ref={(el) => { if (!r.editing) noteRefs.current[r.rowId] = el; }} style={[styles.note, styles.noteWithAi]} value={r.note} onChangeText={(t) => patch(r.rowId, { note: t })} onFocus={() => { if (!r.editing) scrollNoteIntoView(r.rowId); }} placeholder="Comment for the parent (optional)" placeholderTextColor="#9CA3AF" multiline />
+            {/* Sparkle sits inside the field, right-hand side. */}
+            <Pressable style={styles.aiBtn} onPress={() => runPolish(r)} disabled={polishing === r.rowId} hitSlop={6}>
+              {polishing === r.rowId ? <ActivityIndicator size="small" color="#7C3AED" /> : <Ionicons name="sparkles" size={16} color="#7C3AED" />}
+            </Pressable>
+          </View>
         </>
       ) : r.choice === "absent" ? (
         <TextInput ref={(el) => { if (!r.editing) noteRefs.current[r.rowId] = el; }} style={styles.note} value={r.note} onChangeText={(t) => patch(r.rowId, { note: t })} onFocus={() => { if (!r.editing) scrollNoteIntoView(r.rowId); }} placeholder="Reason for absence (optional)" placeholderTextColor="#9CA3AF" multiline />
@@ -999,7 +1102,8 @@ export default function TeacherAttendance() {
       <>
         <View style={styles.cardTop}>
           <View style={styles.flex}>
-            <View style={styles.nameRow}><Text style={styles.name} numberOfLines={1}>{r.studentName}</Text>{r.extra ? <View style={styles.extraTag}><Text style={styles.extraTagText}>Extra</Text></View> : null}</View>
+            <View style={styles.nameRow}><Text style={styles.name} numberOfLines={1}>{r.studentName}</Text>{r.extra ? <View style={styles.extraTag}><Text style={styles.extraTagText}>Extra</Text></View> : null}
+                            {r.movedFrom ? <View style={styles.makeupTag}><Text style={styles.makeupTagText}>MAKEUP FROM {r.movedFrom.slice(8)}/{r.movedFrom.slice(5, 7)}</Text></View> : null}</View>
             <Text style={styles.sub} numberOfLines={1}>🤖 {r.courseName} · {time12(r.slotTime)} · {r.sessions} left{r.extra ? " · extra deducts a session" : ""}</Text>
           </View>
           {r.saving ? <ActivityIndicator color="#0D9488" />
@@ -1016,8 +1120,19 @@ export default function TeacherAttendance() {
                   <Text style={styles.recordedLine} numberOfLines={2}>📘 {a.lesson}</Text>
                   {a.photos.length || a.video ? (
                     <View style={styles.photoRow}>
-                      {a.photos.map((u) => <Pressable key={u} onPress={() => openGallery(r, u)}><Image source={{ uri: u }} style={styles.thumb} /></Pressable>)}
-                      {a.video ? <Pressable style={styles.videoThumb} onPress={() => a.video && openGallery(r, a.video)}><Ionicons name="play-circle" size={24} color="#FFFFFF" /><Text style={styles.videoThumbText}>Video</Text></Pressable> : null}
+                      {a.photos.map((u) => (
+                        <View key={u}>
+                          <Pressable onPress={() => openGallery(r, u)}><Image source={{ uri: u }} style={styles.thumb} /></Pressable>
+                          {canEdit ? <Pressable style={styles.thumbX} onPress={() => removeSavedMedia(r, i, u, "photo")}><Ionicons name="close" size={12} color="#FFFFFF" /></Pressable> : null}
+                        </View>
+                      ))}
+                      {a.video ? (
+                        <View>
+                          <Pressable style={styles.videoThumb} onPress={() => a.video && openGallery(r, a.video)}><Ionicons name="play-circle" size={24} color="#FFFFFF" /><Text style={styles.videoThumbText}>Video</Text></Pressable>
+                          {/* Wrong clip uploaded → remove it without re-opening the editor. */}
+                          {canEdit ? <Pressable style={styles.thumbX} onPress={() => a.video && removeSavedMedia(r, i, a.video, "video")}><Ionicons name="close" size={12} color="#FFFFFF" /></Pressable> : null}
+                        </View>
+                      ) : null}
                     </View>
                   ) : null}
                   {canEdit ? (
@@ -1081,6 +1196,10 @@ export default function TeacherAttendance() {
             <View style={styles.weekHead}>
               <Pressable hitSlop={6} disabled={weekOffset <= MAX_WEEKS_BACK} onPress={() => changeWeek(-1)} style={[styles.wkNav, weekOffset <= MAX_WEEKS_BACK && styles.wkNavOff]}><Ionicons name="chevron-back" size={18} color="#0D9488" /></Pressable>
               <Text style={styles.weekHeadText}>{weekLabel}</Text>
+              {/* Sits with the week label; hides students already marked. */}
+              <Pressable style={[styles.blankChip, blanksOnly && styles.blankChipOn]} onPress={() => setBlanksOnly((v) => !v)}>
+                <Text style={[styles.blankChipText, blanksOnly && styles.blankChipTextOn]}>Show blank</Text>
+              </Pressable>
               <Pressable hitSlop={6} disabled={weekOffset >= 0} onPress={() => changeWeek(1)} style={[styles.wkNav, weekOffset >= 0 && styles.wkNavOff]}><Ionicons name="chevron-forward" size={18} color="#0D9488" /></Pressable>
               <View style={styles.flex} />
               <Pressable style={styles.todayBtn} onPress={() => { if (weekOffset !== 0) setWeekOffset(0); else goDay(week.todayIndex); }}><Ionicons name="today-outline" size={13} color="#0D9488" /><Text style={styles.todayBtnText}>Today</Text></Pressable>
@@ -1159,18 +1278,22 @@ export default function TeacherAttendance() {
         : err ? <View style={styles.center}><Text style={styles.err}>{err}</Text></View>
         : (
           <View ref={pagerAreaRef} collapsable={false} style={styles.flex}>
-          <ScrollView ref={pagerRef} horizontal pagingEnabled showsHorizontalScrollIndicator={false} onMomentumScrollEnd={onPagerScrollEnd} contentOffset={{ x: (dayIndex + 1) * width, y: 0 }} onLayout={() => pagerRef.current?.scrollTo({ x: (dayIndex + 1) * width, animated: false })} style={styles.flex}>
+          <ScrollView ref={pagerRef} horizontal pagingEnabled showsHorizontalScrollIndicator={false} onMomentumScrollEnd={onPagerScrollEnd} onLayout={() => pagerRef.current?.scrollTo({ x: (dayIndex + 1) * width, animated: false })} style={styles.flex}>
             {/* Leading sentinel — swipe onto it to cross into the previous week. */}
             <View style={[styles.sentinel, { width }]}>
               {weekOffset > MAX_WEEKS_BACK ? <><Ionicons name="arrow-back-circle-outline" size={30} color="#CBD5E1" /><Text style={styles.sentinelText}>Previous week</Text></> : <Text style={styles.sentinelText}>Earliest week</Text>}
             </View>
             {week.dates.map((d, i) => {
-              const pageRows = rows.filter((r) => r.date === week.strs[i]);
+              const allDayRows = rows.filter((r) => r.date === week.strs[i]);
+              // Marked rows drop out under the filter; a day with nothing left is done.
+              const pageRows = blanksOnly ? allDayRows.filter((r) => !r.marked) : allDayRows;
+              const allMarked = allDayRows.length > 0 && pageRows.length === 0;
               return (
                 <View key={i} style={{ width }}>
                   <ScrollView ref={(r) => { dayScrollRefs.current[i] = r; }} onScroll={(e) => { dayScrollY.current[i] = e.nativeEvent.contentOffset.y; }} scrollEventThrottle={16} contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
                     {canEdit ? <Pressable style={styles.extraBtn} onPress={() => { setExtraOpen(true); setExtraStudent(null); setExtraQuery(""); }}><Ionicons name="add-circle" size={18} color="#0D9488" /><Text style={styles.extraBtnText}>Extra class attendance</Text></Pressable> : null}
-                    {pageRows.length === 0 ? <Text style={styles.empty}>No classes scheduled on {d.toLocaleDateString("en-MY", { weekday: "long" })}.</Text> : (
+                    {allMarked ? <Text style={styles.empty}>All {allDayRows.length} student{allDayRows.length === 1 ? "" : "s"} marked on {d.toLocaleDateString("en-MY", { weekday: "long" })}. Nothing left to do.</Text>
+                     : pageRows.length === 0 ? <Text style={styles.empty}>No classes scheduled on {d.toLocaleDateString("en-MY", { weekday: "long" })}.</Text> : (
                       <>
                         {groupByTime(pageRows).map((g, gi) => (
                           <View key={gi}>
@@ -1284,6 +1407,37 @@ export default function TeacherAttendance() {
       </Modal>
 
       <MediaGallery key={gallery ? `${gallery.index}:${gallery.items[gallery.index]?.url ?? ""}` : "closed"} items={gallery?.items ?? null} index={gallery?.index ?? 0} onClose={() => setGallery(null)} />
+
+      {/* Review before saving — the teacher decides, never the model. */}
+      <Modal visible={!!polishFor} transparent animationType="fade" onRequestClose={() => setPolishFor(null)}>
+        <Pressable style={styles.aiBackdrop} onPress={() => setPolishFor(null)} />
+        <View style={styles.aiSheet}>
+          {polishFor ? (
+            <ScrollView contentContainerStyle={styles.aiScroll} keyboardShouldPersistTaps="handled">
+              <View style={styles.aiHead}>
+                <Ionicons name="sparkles" size={16} color="#7C3AED" />
+                <Text style={styles.aiTitle}>Suggested rewrite</Text>
+              </View>
+              <Text style={styles.aiLabel}>YOUR WORDS</Text>
+              <Text style={styles.aiOriginal}>{polishFor.original}</Text>
+              <Text style={styles.aiLabel}>SUGGESTED</Text>
+              <Text style={styles.aiPolished}>{polishFor.polished}</Text>
+              <Text style={styles.aiNote}>Same facts, gentler wording. Nothing is saved until you tap Save on the card.</Text>
+              <View style={styles.aiBtns}>
+                <Pressable style={[styles.aiAction, styles.aiGhost]} onPress={() => setPolishFor(null)}>
+                  <Text style={styles.aiGhostText}>Keep mine</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.aiAction, styles.aiPrimary]}
+                  onPress={() => { patch(polishFor.rowId, { note: polishFor.polished }); setPolishFor(null); }}
+                >
+                  <Text style={styles.aiPrimaryText}>Use this</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1375,6 +1529,31 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: "800", color: "#111827" },
   extraTag: { backgroundColor: "#E0F2FE", paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
   extraTagText: { fontSize: 10, fontWeight: "800", color: "#0369A1" },
+  blankChip: { marginLeft: 10, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: "#0D9488", backgroundColor: "#FFFFFF" },
+  blankChipOn: { backgroundColor: "#0D9488" },
+  blankChipText: { fontSize: 12, fontWeight: "700", color: "#0D9488" },
+  blankChipTextOn: { color: "#FFFFFF" },
+  noteWithAi: { paddingRight: 38 },
+  aiBtn: { position: "absolute", right: 8, top: 8, width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "#F3E8FF" },
+  aiBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)" },
+  aiSheet: { position: "absolute", left: 16, right: 16, top: "14%", maxHeight: "72%", backgroundColor: "#FFFFFF", borderRadius: 20 },
+  aiScroll: { padding: 20 },
+  aiHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
+  aiTitle: { fontSize: 17, fontWeight: "800", color: "#0F172A" },
+  aiLabel: { fontSize: 9, fontWeight: "800", letterSpacing: 1.4, color: "#9CA3AF", marginTop: 6, marginBottom: 6 },
+  aiOriginal: { fontSize: 14, color: "#6B7280", lineHeight: 21 },
+  aiPolished: { fontSize: 15, color: "#0F172A", lineHeight: 23, backgroundColor: "#F5F3FF", borderRadius: 12, padding: 13 },
+  aiNote: { fontSize: 11, color: "#9CA3AF", marginTop: 14, lineHeight: 16 },
+  aiBtns: { flexDirection: "row", gap: 10, marginTop: 18 },
+  aiAction: { flex: 1, minHeight: 46, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  aiGhost: { borderWidth: 1, borderColor: "#E5E7EB" },
+  aiGhostText: { fontSize: 15, fontWeight: "700", color: "#374151" },
+  aiPrimary: { backgroundColor: "#7C3AED" },
+  aiPrimaryText: { fontSize: 15, fontWeight: "800", color: "#FFFFFF" },
+  movedTag: { backgroundColor: "#FEF3C7", paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  movedTagText: { fontSize: 9, fontWeight: "800", color: "#92400E", letterSpacing: 0.5 },
+  makeupTag: { backgroundColor: "#E1F2FB", paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 },
+  makeupTagText: { fontSize: 9, fontWeight: "800", color: "#0187C0", letterSpacing: 0.5 },
   sub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   markedTag: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
   tagOk: { backgroundColor: "#D1FAE5" },

@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Alert, Animated, Modal, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, type Href } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -39,7 +39,7 @@ function weekDays(anchor: Date): Date[] { const s = addDays(anchor, -anchor.getD
 
 type ClassSlot = { weekday: string; time: string | null; courseName: string; count: number };
 type EventEntry = {
-  id: string; title: string; eventType: string; date: string; endDate: string | null; startTime: string | null; endTime: string | null;
+  id: string; title: string; description: string | null; eventType: string; date: string; endDate: string | null; startTime: string | null; endTime: string | null;
   color: string; icon: string | null; audience: string; isRecurring: boolean; isBounded: boolean; recurringDays: string[]; recurringStartDate: string | null; recurringEndDate: string | null; occurrences: string[];
 };
 
@@ -80,10 +80,50 @@ function parseSchedule(scheduleRaw: string | null, dayOfWeekRaw: string | null, 
   return out;
 }
 
+// "Repeats" told the teacher nothing — name the days it actually runs.
+const DOW_LABEL: Record<string, string> = { monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu", friday: "Fri", saturday: "Sat", sunday: "Sun" };
+function recurLabel(e: { isRecurring?: boolean; recurringDays?: string[] }): string {
+  if (!e.isRecurring) return "";
+  const days = (e.recurringDays ?? []).map((d) => DOW_LABEL[d]).filter(Boolean);
+  return days.length ? ` · Every ${days.join(", ")}` : " · Repeats";
+}
+
 export default function TeacherCalendar() {
   const { staff } = useRole();
   const router = useRouter();
   const isAdmin = ADMIN_ROLES.includes(staff?.role ?? "");
+  // Full-detail sheet for a calendar entry — read for everyone, editable by admins.
+  const [detail, setDetail] = useState<EventEntry | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftDesc, setDraftDesc] = useState("");
+  const [savingDetail, setSavingDetail] = useState(false);
+
+  const saveDetail = async () => {
+    if (!detail || !draftTitle.trim()) { Alert.alert("Name needed", "The event needs a title."); return; }
+    setSavingDetail(true);
+    const { error } = await supabase.from("events")
+      .update({ title: draftTitle.trim(), description: draftDesc.trim() || null, updated_at: new Date().toISOString() })
+      .eq("id", detail.id);
+    setSavingDetail(false);
+    if (error) { Alert.alert("Couldn't save", error.message); return; }
+    setDetail({ ...detail, title: draftTitle.trim(), description: draftDesc.trim() || null });
+    setEditing(false);
+    load();
+  };
+
+  const deleteDetail = () => {
+    if (!detail) return;
+    Alert.alert("Delete event", `Remove "${detail.title}" from the calendar?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+        const { error } = await supabase.from("events").update({ deleted_at: new Date().toISOString() }).eq("id", detail.id);
+        if (error) { Alert.alert("Couldn't delete", error.message); return; }
+        setDetail(null);
+        load();
+      } },
+    ]);
+  };
   const [month, setMonth] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
   const [selected, setSelected] = useState(() => ymd(new Date()));
   const [slots, setSlots] = useState<ClassSlot[]>([]);
@@ -131,10 +171,12 @@ export default function TeacherCalendar() {
 
     const { data: evs } = await supabase
       .from("events")
-      .select("id, title, event_type, date, end_date, start_time, end_time, color, icon, audience, is_recurring, is_bounded, recurring_days, recurring_start_date, recurring_end_date, branch_id, occurrences:event_occurrences(date)")
-      .is("deleted_at", null).neq("status", "rejected").or(`branch_id.eq.${staff.branchId},branch_id.is.null`);
+      .select("id, title, description, event_type, date, end_date, start_time, end_time, color, icon, audience, is_recurring, is_bounded, recurring_days, recurring_start_date, recurring_end_date, branch_id, occurrences:event_occurrences(date)")
+      .is("deleted_at", null).neq("status", "rejected")
+      .is("created_by_parent_id", null) // parent reschedules live on the attendance grid
+      .or(`branch_id.eq.${staff.branchId},branch_id.is.null`);
     setEvents((evs ?? []).map((e) => ({
-      id: e.id as string, title: (e.title as string) ?? "", eventType: (e.event_type as string) ?? "own_schedule", date: e.date as string, endDate: (e.end_date as string | null) ?? null,
+      id: e.id as string, title: (e.title as string) ?? "", description: (e.description as string | null) ?? null, eventType: (e.event_type as string) ?? "own_schedule", date: e.date as string, endDate: (e.end_date as string | null) ?? null,
       startTime: (e.start_time as string | null) ?? null, endTime: (e.end_time as string | null) ?? null, color: (e.color as string) ?? "#615DFA",
       icon: (e.icon as string | null) ?? null, audience: (e.audience as string) ?? "everyone",
       isRecurring: !!e.is_recurring, isBounded: !!e.is_bounded, recurringDays: ((e.recurring_days as string[] | null) ?? []).map((d) => String(d).toLowerCase()),
@@ -258,7 +300,7 @@ export default function TeacherCalendar() {
                   <View style={[styles.itemBar, { backgroundColor: e.color || meta.color }]} />
                   <View style={styles.flex}>
                     <Text style={styles.itemTitle} numberOfLines={1}>{e.icon ? `${e.icon} ` : ""}{e.title}</Text>
-                    <Text style={styles.itemSub}>{meta.label} · {new Date(e.date + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" })}{e.isRecurring ? " · Repeats" : ""}</Text>
+                    <Text style={styles.itemSub}>{meta.label} · {new Date(e.date + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" })}{recurLabel(e)}</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
                 </Pressable>
@@ -291,13 +333,14 @@ export default function TeacherCalendar() {
           {dayEvents.map((e) => {
             const meta = EVENT_TYPE_META[e.eventType] ?? { label: "Event", color: e.color };
             return (
-              <View key={e.id} style={styles.itemCard}>
+              <Pressable key={e.id} style={styles.itemCard} onPress={() => { setDetail(e); setEditing(false); setDraftTitle(e.title); setDraftDesc(e.description ?? ""); }}>
                 <View style={[styles.itemBar, { backgroundColor: e.color || meta.color }]} />
                 <View style={styles.flex}>
                   <Text style={styles.itemTitle} numberOfLines={2}>{e.icon ? `${e.icon} ` : ""}{e.title}</Text>
-                  <Text style={styles.itemSub}>{meta.label}{e.startTime ? ` · ${fmt12(e.startTime)}${e.endTime ? `–${fmt12(e.endTime)}` : ""}` : " · All day"}{e.audience === "staff_only" ? " · Staff only" : ""}{e.isRecurring ? " · Repeats" : ""}</Text>
+                  <Text style={styles.itemSub}>{meta.label}{e.startTime ? ` · ${fmt12(e.startTime)}${e.endTime ? `–${fmt12(e.endTime)}` : ""}` : " · All day"}{e.audience === "staff_only" ? " · Staff only" : ""}{recurLabel(e)}</Text>
                 </View>
-              </View>
+                <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+              </Pressable>
             );
           })}
           {dayClasses.map((c, i) => (
@@ -314,6 +357,62 @@ export default function TeacherCalendar() {
           </ScrollView>
         </View>
       )}
+
+      {/* Full event detail — read-only for instructors, editable for admins. */}
+      <Modal visible={!!detail} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
+        <Pressable style={styles.dBackdrop} onPress={() => setDetail(null)} />
+        <View style={styles.dSheet}>
+          {detail ? (
+            <ScrollView contentContainerStyle={styles.dScroll} keyboardShouldPersistTaps="handled">
+              <View style={styles.dGrab} />
+              <View style={[styles.dSwatch, { backgroundColor: detail.color || "#615DFA" }]} />
+              {editing ? (
+                <>
+                  <Text style={styles.dLabel}>TITLE</Text>
+                  <TextInput style={styles.dInput} value={draftTitle} onChangeText={setDraftTitle} placeholder="Event name" placeholderTextColor="#9CA3AF" />
+                  <Text style={styles.dLabel}>DESCRIPTION</Text>
+                  <TextInput style={[styles.dInput, styles.dInputMulti]} value={draftDesc} onChangeText={setDraftDesc} multiline placeholder="What is this event about?" placeholderTextColor="#9CA3AF" />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.dTitle}>{detail.icon ? `${detail.icon} ` : ""}{detail.title}</Text>
+                  <Text style={styles.dMeta}>
+                    {(EVENT_TYPE_META[detail.eventType] ?? { label: "Event" }).label}
+                    {" · "}{new Date(detail.date + "T00:00:00").toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                    {detail.endDate && detail.endDate !== detail.date ? ` → ${new Date(detail.endDate + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short" })}` : ""}
+                  </Text>
+                  <Text style={styles.dMeta}>
+                    {detail.startTime ? `${fmt12(detail.startTime)}${detail.endTime ? `–${fmt12(detail.endTime)}` : ""}` : "All day"}
+                    {detail.audience === "staff_only" ? " · Staff only" : " · Everyone"}
+                    {recurLabel(detail)}
+                  </Text>
+                  <Text style={styles.dBody}>{detail.description?.trim() || "No description was added for this event."}</Text>
+                </>
+              )}
+
+              <View style={styles.dBtns}>
+                {isAdmin ? (
+                  editing ? (
+                    <>
+                      <Pressable style={[styles.dBtn, styles.dBtnGhost]} onPress={() => setEditing(false)}><Text style={styles.dBtnGhostText}>Cancel</Text></Pressable>
+                      <Pressable style={[styles.dBtn, styles.dBtnPrimary]} onPress={saveDetail} disabled={savingDetail}>
+                        {savingDetail ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.dBtnPrimaryText}>Save</Text>}
+                      </Pressable>
+                    </>
+                  ) : (
+                    <>
+                      <Pressable style={[styles.dBtn, styles.dBtnDanger]} onPress={deleteDetail}><Text style={styles.dBtnDangerText}>Delete</Text></Pressable>
+                      <Pressable style={[styles.dBtn, styles.dBtnPrimary]} onPress={() => { const id = detail.id; setDetail(null); router.push(`/(teacher)/add-event?eventId=${id}` as Href); }}><Text style={styles.dBtnPrimaryText}>Edit</Text></Pressable>
+                    </>
+                  )
+                ) : (
+                  <Pressable style={[styles.dBtn, styles.dBtnGhost]} onPress={() => setDetail(null)}><Text style={styles.dBtnGhostText}>Close</Text></Pressable>
+                )}
+              </View>
+            </ScrollView>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -434,6 +533,25 @@ const styles = StyleSheet.create({
   itemCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#F8FAFC", borderRadius: 12, padding: 12, marginHorizontal: 4, marginBottom: 8, borderWidth: 1, borderColor: "#EEF0F6", gap: 10, overflow: "hidden" },
   itemBar: { width: 4, borderRadius: 2, alignSelf: "stretch" },
   itemTitle: { fontSize: 14, fontWeight: "800", color: "#111827" },
+  dBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)" },
+  dSheet: { position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "78%", backgroundColor: "#FFFFFF", borderTopLeftRadius: 22, borderTopRightRadius: 22 },
+  dScroll: { padding: 20, paddingBottom: 34 },
+  dGrab: { alignSelf: "center", width: 38, height: 4, borderRadius: 2, backgroundColor: "#E5E7EB", marginBottom: 16 },
+  dSwatch: { width: 40, height: 5, borderRadius: 3, marginBottom: 14 },
+  dTitle: { fontSize: 22, fontWeight: "800", color: "#0F172A", letterSpacing: -0.4 },
+  dMeta: { fontSize: 13, color: "#6B7280", marginTop: 7, lineHeight: 19 },
+  dBody: { fontSize: 14, color: "#374151", marginTop: 16, lineHeight: 22 },
+  dLabel: { fontSize: 10, fontWeight: "800", letterSpacing: 1.4, color: "#6B7280", marginTop: 12, marginBottom: 6 },
+  dInput: { borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: "#0F172A", backgroundColor: "#F9FAFB" },
+  dInputMulti: { minHeight: 96, textAlignVertical: "top" },
+  dBtns: { flexDirection: "row", gap: 10, marginTop: 22 },
+  dBtn: { flex: 1, minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  dBtnPrimary: { backgroundColor: "#0D9488" },
+  dBtnPrimaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+  dBtnGhost: { borderWidth: 1, borderColor: "#E5E7EB" },
+  dBtnGhostText: { color: "#374151", fontSize: 15, fontWeight: "700" },
+  dBtnDanger: { backgroundColor: "#FEE2E2" },
+  dBtnDangerText: { color: "#B91C1C", fontSize: 15, fontWeight: "800" },
   itemSub: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   empty: { textAlign: "center", color: "#9CA3AF", fontSize: 14, marginTop: 20 },
 });
