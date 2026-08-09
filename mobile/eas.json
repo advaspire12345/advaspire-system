@@ -65,6 +65,11 @@
     "production": {
       "android": {
         "track": "internal"
+      },
+      "ios": {
+        "appleId": "advaspire@gmail.com",
+        "ascAppId": "6798494556",
+        "appleTeamId": "2S5M348YWG"
       }
     },
     "testflight": {

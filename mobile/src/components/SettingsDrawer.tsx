@@ -44,7 +44,9 @@ export function SettingsDrawer() {
 
   const nav = (route: string) => go(route as Href);
   const items: Item[] = [
-    { icon: "images-outline", label: "Gallery", action: () => nav("/gallery") },
+    // Points at Progress' GALLERY sub-tab, not the standalone /gallery screen, so
+    // there is only one gallery implementation to keep in step.
+    { icon: "images-outline", label: "Gallery", action: () => nav("/(tabs)/progress?section=gallery") },
     { icon: "person-outline", label: "Profile", action: () => nav("/profile") },
     { icon: "lock-closed-outline", label: "Change password", action: () => nav("/change-password") },
     { icon: "calendar-outline", label: "Calendar settings", action: () => nav("/settings/calendar") },

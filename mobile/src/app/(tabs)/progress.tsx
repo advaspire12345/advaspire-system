@@ -43,6 +43,7 @@ type AttendanceRow = {
   date: string;
   status: "present" | "absent" | "late" | "excused";
   lastActivity: string | null;
+  notes: string | null; // trainer's written feedback — absent for most sessions
   activities: Activity[] | null;
   instructorName: string | null;
   adcoin: number;
@@ -132,6 +133,14 @@ export default function ProgressScreen() {
   const [section, setSection] = useState<Section>(
     (["lessons", "results", "skills", "gallery"] as const).includes(paramSection as Section) ? (paramSection as Section) : "lessons",
   );
+  // Progress stays mounted as a tab, so the initial useState above only runs once.
+  // Home's Gallery tile and the settings drawer both deep-link here with
+  // ?section=gallery, which must switch the sub-tab on every arrival.
+  useEffect(() => {
+    if ((["lessons", "results", "skills", "gallery"] as const).includes(paramSection as Section)) {
+      setSection(paramSection as Section);
+    }
+  }, [paramSection]);
   const [gallery, setGallery] = useState<{ items: MediaItem[]; index: number } | null>(null);
   const [certPreview, setCertPreview] = useState<Certification | null>(null);
 
@@ -185,6 +194,7 @@ export default function ProgressScreen() {
           activities,
           instructor_name,
           adcoin,
+          notes,
           project_photos,
           enrollment:enrollments!inner(student_id, course:courses(name))
         `)
@@ -240,6 +250,7 @@ export default function ProgressScreen() {
         date: a.date as string,
         status: (a.status as AttendanceRow["status"]) ?? "absent",
         lastActivity: (a.last_activity as string | null) ?? null,
+        notes: (a.notes as string | null) ?? null,
         activities: (a.activities as Activity[] | null) ?? null,
         instructorName: (a.instructor_name as string | null) ?? null,
         adcoin: Number(a.adcoin ?? 0),
@@ -430,7 +441,7 @@ export default function ProgressScreen() {
         ) : section === "results" ? (
           <ResultsTab assessment={assessment} certifications={certifications} onCert={setCertPreview} />
         ) : section === "skills" ? (
-          <SkillsPanel skills={skills} attended={attStats.present} certs={certifications.length} />
+          <SkillsPanel skills={skills} />
         ) : (
           <GalleryTab present={presentLessons} onOpenMedia={(items, i) => setGallery({ items, index: i })} />
         )}
@@ -596,21 +607,14 @@ function AttendanceCard({ row, index, onOpenMedia }: { row: AttendanceRow; index
   );
 }
 
-// Skills sub-tab — bars derived from lesson_ratings averages + auto-awarded badges.
-function SkillsPanel({ skills, attended, certs }: { skills: Skills; attended: number; certs: number }) {
+// Skills sub-tab — bars derived from lesson_ratings averages.
+// Badges deliberately live in the STUDENT app, not here: they're the child's own
+// reward to collect, so the parent view shows measured skill levels instead.
+function SkillsPanel({ skills }: { skills: Skills }) {
   const bars: { label: string; value: number; color: string }[] = [
     { label: "Problem solving", value: skills.problem, color: C.red },
     { label: "Logical thinking", value: skills.logical, color: C.blue },
     { label: "Teamwork", value: skills.teamwork, color: C.yellow },
-  ];
-  // Auto badges (no teacher entry): simple, transparent rules.
-  const badges: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; earned: boolean }[] = [
-    { key: "first", label: "First build", icon: "cube", color: C.red, earned: attended > 0 },
-    { key: "loop", label: "Loop master", icon: "repeat", color: C.blue, earned: skills.logical >= 4 },
-    { key: "cert", label: "Certified", icon: "ribbon", color: C.yellow, earned: certs > 0 },
-    { key: "regular", label: "Regular", icon: "calendar", color: C.green, earned: attended >= 8 },
-    { key: "maze", label: "Maze solver", icon: "git-branch", color: C.blue, earned: attended >= 12 },
-    { key: "allstar", label: "All-star", icon: "star", color: C.yellow, earned: skills.problem >= 4 && skills.logical >= 4 && skills.teamwork >= 4 },
   ];
   return (
     <View>
@@ -636,20 +640,6 @@ function SkillsPanel({ skills, attended, certs }: { skills: Skills; attended: nu
         )}
       </View>
 
-      <View style={t3.badgeHead}>
-        <Text style={t3.badgeHeadText}>BADGES EARNED</Text>
-        <View style={t3.badgeHeadLine} />
-      </View>
-      <View style={t3.badgeGrid}>
-        {badges.map((bd) => (
-          <View key={bd.key} style={[t3.badgeCard, !bd.earned && t3.badgeCardOff]}>
-            <View style={[t3.badgeIcon, { backgroundColor: bd.earned ? bd.color : "#DDDDDD" }]}>
-              <Ionicons name={bd.icon} size={18} color="#FFFFFF" />
-            </View>
-            <Text style={[t3.badgeLabel, !bd.earned && t3.badgeLabelOff]}>{bd.label}</Text>
-          </View>
-        ))}
-      </View>
     </View>
   );
 }
@@ -692,8 +682,11 @@ function LessonFeedCard({ row, childName, onFeedback, onOpenMedia }: { row: Atte
   const mission = acts[0]?.mission ?? "";
   const media = row.media ?? [];
   const photoCount = media.filter((m) => m.type === "photo").length;
+  // Most sessions carry no written feedback. Rather than open an empty screen,
+  // the card is inert and the "READ FEEDBACK" affordance is hidden entirely.
+  const hasFeedback = !!row.notes?.trim();
   return (
-    <Pressable style={({ pressed }) => [t3.lfCard, pressed && t3.pressedCard]} onPress={() => onFeedback(row)}>
+    <Pressable style={({ pressed }) => [t3.lfCard, pressed && hasFeedback && t3.pressedCard]} onPress={() => onFeedback(row)} disabled={!hasFeedback}>
       <View style={t3.attTop}>
         <Text style={t3.attDate}>{longDay(row.date)}</Text>
         {row.adcoin > 0 ? <View style={t3.coinTag}><Text style={t3.coinTagText}>+{row.adcoin}</Text></View> : null}
@@ -712,7 +705,7 @@ function LessonFeedCard({ row, childName, onFeedback, onOpenMedia }: { row: Atte
             <Text style={t3.lfMediaText}>{photoCount || media.length} {photoCount === 1 ? "photo" : "photos"}</Text>
           </Pressable>
         ) : <View />}
-        <Text style={t3.lfReadFeedback}>READ FEEDBACK ›</Text>
+        {hasFeedback ? <Text style={t3.lfReadFeedback}>READ FEEDBACK ›</Text> : null}
       </View>
     </Pressable>
   );

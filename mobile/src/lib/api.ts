@@ -61,3 +61,23 @@ export async function mobileApi<T = unknown>(path: string, body: unknown): Promi
     return { ok: false, error: e instanceof Error ? e.message : "Network error — check your connection." };
   }
 }
+
+// Ask the server to soften a teacher's comment before a parent reads it. The
+// Anthropic key lives on the web app — never in this bundle — so the rewrite is
+// a round trip. The teacher reviews the result before anything is saved.
+export async function polishComment(
+  comment: string,
+  studentName: string | null,
+): Promise<ApiResult<{ polished: string }>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return { ok: false, error: "You're signed out. Sign in again to use this." };
+  try {
+    const res = await post("/api/mobile/comment/polish", { comment, studentName }, token);
+    const json = await res.json().catch(() => ({} as Record<string, unknown>));
+    if (!res.ok) return { ok: false, error: (json as { error?: string })?.error || `Request failed (${res.status})` };
+    return { ok: true, data: json as { polished: string } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error — check your connection." };
+  }
+}

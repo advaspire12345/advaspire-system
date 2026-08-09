@@ -60,6 +60,8 @@ type PaymentDetail = {
   courseId: string | null;
   courseName: string | null;
   invoiceNumber: string | null;
+  // Combined bills carry their line items here: one entry per invoice covered.
+  combinedLines: { student_name: string; course_name: string; amount: number; invoice_number: string | null }[] | null;
   receiptNumber: string | null;
   isShared: boolean;
   packageName: string | null;
@@ -146,6 +148,7 @@ export default function PaymentDetailScreen() {
         invoice_number,
         receipt_number,
         discount_amount,
+        invoice_snapshot,
         is_shared_package,
         shared_with,
         custom_sessions,
@@ -171,7 +174,14 @@ export default function PaymentDetailScreen() {
     if (shared && data.shared_with) {
       try { sharedWith = JSON.parse(data.shared_with as string) as string[]; } catch { /* ignore */ }
     }
-    const studentIds = sharedWith.length ? sharedWith : [data.student_id as string];
+    // A combined bill's student_id is only the FIRST child — the real coverage lives in
+    // the snapshot's line items, so "Student"/"Bill to" must come from there or the
+    // screen names one child while charging for several.
+    const snapForIds = data.invoice_snapshot as { kind?: string; lines?: { student_id?: string }[] } | null;
+    const combinedIds = snapForIds?.kind === "combined"
+      ? [...new Set((snapForIds.lines ?? []).map((l) => String(l.student_id ?? "")).filter(Boolean))]
+      : [];
+    const studentIds = combinedIds.length ? combinedIds : sharedWith.length ? sharedWith : [data.student_id as string];
     const { data: studs } = await supabase.from("students").select("id, name").in("id", studentIds);
     const nameById = new Map<string, string>((studs ?? []).map((s) => [s.id as string, s.name as string]));
     const childList = studentIds.map((sid) => ({ id: sid, name: nameById.get(sid) ?? "Child" }));
@@ -189,6 +199,10 @@ export default function PaymentDetailScreen() {
       courseId: (data.course_id as string | null) ?? null,
       courseName: c?.name ?? null,
       invoiceNumber: (data.invoice_number as string | null) ?? null,
+      combinedLines: (() => {
+        const snap = data.invoice_snapshot as { kind?: string; lines?: unknown } | null;
+        return snap?.kind === "combined" && Array.isArray(snap.lines) ? (snap.lines as PaymentDetailData["payment"]["combinedLines"]) : null;
+      })(),
       receiptNumber: (data.receipt_number as string | null) ?? null,
       isShared: shared,
       packageName: pkg?.description ?? null,
@@ -246,6 +260,10 @@ export default function PaymentDetailScreen() {
       ]);
       packages = (pr ?? [])
         .filter((x) => !x.deleted_at)
+        // Only packages that actually clear the outstanding amount. course_pricing is
+        // already scoped to this enrolment's course, so the list is the child's own
+        // program. If nothing covers it, fall back below rather than show an empty list.
+        .filter((x) => Number(x.price ?? 0) >= Number(p.amount ?? 0))
         .map((x) => ({
           id: x.id as string,
           type: (x.package_type as string) ?? "Package",
@@ -260,6 +278,8 @@ export default function PaymentDetailScreen() {
       if (sum < 0) debt = -sum;
     }
 
+    // No package reaches the outstanding amount: rather than offer one that leaves the
+    // parent still in debt, the screen falls back to an exact-balance payment.
     return { payment: p, coveredSessions, packages, debt };
   };
 
@@ -440,6 +460,28 @@ export default function PaymentDetailScreen() {
           </View>
         </View>
 
+        {/* Combined bill: spell out exactly which invoice each ringgit settles. */}
+        {payment.combinedLines?.length ? (
+          <View style={styles.detailCard}>
+            <Text style={styles.combinedHead}>THIS PAYMENT COVERS</Text>
+            {payment.combinedLines.map((l, i) => (
+              <View key={`${l.invoice_number ?? i}`} style={styles.combinedLine}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.combinedWho} numberOfLines={1}>Bill to {l.student_name}</Text>
+                  <Text style={styles.combinedWhat} numberOfLines={1}>
+                    {l.course_name}{l.invoice_number ? ` · ${l.invoice_number}` : ""}
+                  </Text>
+                </View>
+                <Text style={styles.combinedAmt}>{formatRM(Number(l.amount ?? 0))}</Text>
+              </View>
+            ))}
+            <View style={styles.combinedTotal}>
+              <Text style={styles.combinedTotalLabel}>TOTAL</Text>
+              <Text style={styles.combinedTotalValue}>{formatRM(payment.amount)}</Text>
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.detailCard}>
           <Row label={displayNames.length > 1 ? "Children" : "Student"} value={joinNames(displayNames)} />
           {payment.courseName ? <Row label="Program" value={payment.courseName} /> : null}
@@ -614,6 +656,17 @@ export default function PaymentDetailScreen() {
           </View>
         ) : null}
 
+        {/* Nothing on the price list clears the balance — pay the exact amount owed. */}
+        {isPending && packages.length === 0 ? (
+          <View style={styles.detailCard}>
+            <Text style={styles.exactHead}>OUTSTANDING BALANCE</Text>
+            <Text style={styles.exactAmount}>{formatRM(payment.amount)}</Text>
+            <Text style={styles.exactNote}>
+              No package on this program covers the full amount, so this settles the exact balance owed.
+            </Text>
+          </View>
+        ) : null}
+
         {isPending && packages.length > 0 ? (
           <View style={styles.detailCard}>
             <Text style={styles.coveredHeader}>Choose a package</Text>
@@ -742,6 +795,17 @@ const styles = StyleSheet.create({
   amountDue: { color: "#FFFFFF" },
   statusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, marginTop: 4 },
   statusText: { fontSize: 12, fontWeight: "700" },
+  combinedHead: { fontSize: 9, fontWeight: "700", letterSpacing: 2, color: "#8A8085", marginBottom: 4 },
+  combinedLine: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#F0EAEC" },
+  combinedWho: { fontSize: 14, fontWeight: "600", color: "#2B161B" },
+  combinedWhat: { fontSize: 11, color: "#666666", marginTop: 2 },
+  combinedAmt: { fontSize: 14, fontWeight: "700", color: "#2B161B" },
+  combinedTotal: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 12 },
+  combinedTotalLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 1.8, color: "#666666" },
+  combinedTotalValue: { fontSize: 18, fontWeight: "800", color: "#EC2127" },
+  exactHead: { fontSize: 9, fontWeight: "700", letterSpacing: 2, color: "#8A8085" },
+  exactAmount: { fontSize: 26, fontWeight: "800", color: "#EC2127", letterSpacing: -0.8, marginTop: 8 },
+  exactNote: { fontSize: 12, color: "#666666", marginTop: 8, lineHeight: 18 },
   detailCard: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16 },
   docCard: { backgroundColor: "#FFFFFF", padding: 16, borderRadius: 16, borderWidth: 1, borderColor: "#EAF7FD" },
   receiptCard: { borderColor: "#D1FAE5", backgroundColor: "#F0FDF4" },

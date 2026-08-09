@@ -96,7 +96,8 @@ async function resolveCompanyId(branchId: string): Promise<string | null> {
 export default function AddEvent() {
   const { staff } = useRole();
   const router = useRouter();
-  const { date: dateParam } = useLocalSearchParams<{ date?: string }>();
+  const { date: dateParam, eventId } = useLocalSearchParams<{ date?: string; eventId?: string }>();
+  const isEdit = typeof eventId === "string" && !!eventId;
   const initialDate = typeof dateParam === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : ymd(new Date());
   const backToCalendar = () => router.navigate(CALENDAR);
 
@@ -117,11 +118,44 @@ export default function AddEvent() {
   const [saving, setSaving] = useState(false);
   const [dateFocus, setDateFocus] = useState(0);
 
+  // Edit mode reuses this whole screen rather than duplicating the scheduling rules
+  // in a modal: load the row once and hydrate every control from it.
+  useEffect(() => {
+    if (!isEdit) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from("events")
+        .select("title, event_type, color, icon, date, end_date, start_time, end_time, audience, is_recurring, recurring_days, recurring_end_date")
+        .eq("id", eventId).maybeSingle();
+      if (cancelled || !data) return;
+      const local = (Object.keys(DB_TYPE) as EventType[]).find((k) => DB_TYPE[k] === data.event_type) ?? "event";
+      setType(local);
+      setTitle((data.title as string) ?? "");
+      setColor((data.color as string) ?? TYPES[0].color);
+      setIcon((data.icon as string | null) ?? null);
+      setDate((data.date as string) ?? ymd(new Date()));
+      const ed = data.end_date as string | null;
+      setMulti(!!ed); setEndDate(ed);
+      const st = data.start_time as string | null;
+      setAllDay(!st);
+      if (st) setStartTime(String(st).slice(0, 5));
+      const et = data.end_time as string | null;
+      if (et) setEndTime(String(et).slice(0, 5));
+      setAudience((data.audience as string) === "staff_only" ? "staff_only" : "everyone");
+      setRepeats(!!data.is_recurring);
+      setRepeatDays(((data.recurring_days as string[] | null) ?? []).map((d) => String(d).toLowerCase()));
+      setUntil((data.recurring_end_date as string | null) ?? null);
+      setDateFocus((k) => k + 1);
+    })();
+    return () => { cancelled = true; };
+  }, [isEdit, eventId]);
+
   // The screen stays mounted in the tab navigator, so re-opening it from a NEW
   // calendar day only changes the param — resync the date + re-centre the strip.
   useEffect(() => {
+    if (isEdit) return; // editing: the row supplies the date, not the tapped day
     if (typeof dateParam === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) { setDate(dateParam); setEndDate(null); setMulti(false); setDateFocus((k) => k + 1); }
-  }, [dateParam]);
+  }, [dateParam, isEdit]);
 
   const pickType = (t: typeof TYPES[number]) => { setType(t.key); setColor(t.color); setIcon(t.icon); if (t.key === "holiday") setAllDay(true); };
   const toggleDay = (k: string) => setRepeatDays((d) => (d.includes(k) ? d.filter((x) => x !== k) : [...d, k]));
@@ -152,7 +186,7 @@ export default function AddEvent() {
     const meta = TYPES.find((t) => t.key === type)!;
     const finalColor = canCustomise(type) ? color : meta.color;
     const finalIcon = canCustomise(type) ? icon : meta.icon;
-    const { error } = await supabase.from("events").insert({
+    const payload = {
       title: title.trim(), event_type: DB_TYPE[type], scope: "branch", status: "published",
       audience: canAudience(type) ? audience : "everyone",
       color: finalColor, icon: finalIcon || null,
@@ -163,11 +197,14 @@ export default function AddEvent() {
       recurring_days: doRepeat ? repeatDays : null,
       recurring_start_date: doRepeat ? date : null, recurring_end_date: doRepeat && until ? until : null,
       recurring_start_time: doRepeat && !allDay ? `${startTime}:00` : null, recurring_end_time: doRepeat && !allDay ? `${endTime}:00` : null,
-    });
+    };
+    const { error } = isEdit
+      ? await supabase.from("events").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", eventId)
+      : await supabase.from("events").insert(payload);
     setSaving(false);
     if (error) { Alert.alert("Couldn't save", error.message); return; }
     const label = TYPES.find((t) => t.key === type)?.label ?? "Event";
-    Alert.alert(`${label} added 🎉`, `${title.trim()} is on the calendar.`, [{ text: "Done", onPress: backToCalendar }]);
+    Alert.alert(isEdit ? `${label} updated` : `${label} added 🎉`, `${title.trim()} is on the calendar.`, [{ text: "Done", onPress: backToCalendar }]);
   };
 
   return (
@@ -175,7 +212,7 @@ export default function AddEvent() {
       <SwipeBackView onBack={backToCalendar} style={styles.safe}>
       <View style={styles.header}>
         <Pressable hitSlop={8} onPress={backToCalendar} style={styles.back}><Ionicons name="chevron-back" size={22} color="#615DFA" /></Pressable>
-        <Text style={styles.title}>Add to Calendar</Text>
+        <Text style={styles.title}>{isEdit ? "Edit Event" : "Add to Calendar"}</Text>
       </View>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Text style={styles.label}>Type</Text>

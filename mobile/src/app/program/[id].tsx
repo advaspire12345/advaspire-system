@@ -132,11 +132,24 @@ export default function ProgramDetailScreen() {
       if (!byBranch[b]) byBranch[b] = [];
       byBranch[b].push({ day: String(s.day ?? "").toLowerCase(), time: String(s.time ?? ""), duration: Number(s.duration ?? 0) });
     }
+    // Occupancy needs service-role reach (RLS hides other families' enrolments), so it
+    // comes from an RPC. A class already at its student limit is dropped from the
+    // Store rather than advertised to a parent who could never join it.
+    const { data: capRaw } = await supabase.rpc("course_slot_capacity", { p_course_name: name });
+    const capSlots = (capRaw as { slots?: { branch_id: string; day: string; time: string; seats_left: number }[] } | null)?.slots ?? [];
+    const fullKeys = new Set(
+      capSlots.filter((c) => Number(c.seats_left ?? 0) <= 0)
+        .map((c) => `${c.branch_id}|${String(c.day).toLowerCase()}|${String(c.time).slice(0, 5)}`),
+    );
+
     const branches: BranchSchedule[] = Object.entries(byBranch).map(([bId, sl]) => ({
       branchId: bId,
       branchName: branchMap[bId] ?? "Centre",
-      slots: sl.sort((a, b) => (WEEKDAY_ORDER[a.day] ?? 8) - (WEEKDAY_ORDER[b.day] ?? 8) || a.time.localeCompare(b.time)),
-    })).sort((a, b) => a.branchName.localeCompare(b.branchName));
+      slots: sl
+        .filter((s) => !fullKeys.has(`${bId}|${s.day}|${s.time.slice(0, 5)}`))
+        .sort((a, b) => (WEEKDAY_ORDER[a.day] ?? 8) - (WEEKDAY_ORDER[b.day] ?? 8) || a.time.localeCompare(b.time)),
+    })).filter((b) => b.slots.length > 0)
+      .sort((a, b) => a.branchName.localeCompare(b.branchName));
 
     // Curriculum — sections + lessons (lesson thumbnails double as the gallery).
     const sectionRows = sections.data ?? [];
@@ -290,10 +303,17 @@ export default function ProgramDetailScreen() {
                   </View>
                   {b.slots.length ? (
                     <View style={styles.slotWrap}>
-                      {b.slots.map((s, i) => (
-                        <View key={i} style={styles.slotChip}>
-                          <Text style={styles.slotDay}>{cap(s.day).slice(0, 3)}</Text>
-                          <Text style={styles.slotTime}>{s.time ? time12(s.time) : ""}</Text>
+                      {/* One row per day: the day is a light-grey label tag, every time
+                          that day runs sits beside it. Slots arrive day-then-time sorted. */}
+                      {Array.from(
+                        b.slots.reduce((m, s) => {
+                          m.set(s.day, [...(m.get(s.day) ?? []), s.time ? time12(s.time) : ""].filter(Boolean));
+                          return m;
+                        }, new Map<string, string[]>()),
+                      ).map(([day, times]) => (
+                        <View key={day} style={styles.slotRow}>
+                          <View style={styles.slotDayTag}><Text style={styles.slotDayTagText}>{cap(day).slice(0, 3).toUpperCase()}</Text></View>
+                          <Text style={styles.slotTime} numberOfLines={2}>{times.join("  ·  ")}</Text>
                         </View>
                       ))}
                     </View>
@@ -396,10 +416,12 @@ const styles = StyleSheet.create({
   branchBlock: { backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#F0F0F6" },
   branchHead: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
   branchName: { fontSize: 14, fontWeight: "800", color: "#2B161B" },
-  slotWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  slotChip: { alignItems: "center", backgroundColor: "#F3F4F6", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, minWidth: 74 },
-  slotDay: { fontSize: 12, fontWeight: "800", color: "#EC2127" },
-  slotTime: { fontSize: 12, color: "#374151", marginTop: 2, fontWeight: "600" },
+  slotWrap: { gap: 8 },
+  slotRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  // Light-grey pill matching the "PROGRAMS" tag on the Home child cards.
+  slotDayTag: { backgroundColor: "#F5F5F5", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, minWidth: 46, alignItems: "center" },
+  slotDayTagText: { fontSize: 9, fontWeight: "700", letterSpacing: 1.2, color: "#666666" },
+  slotTime: { flex: 1, fontSize: 12, color: "#374151", fontWeight: "600" },
   currSection: { backgroundColor: "#FFFFFF", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#F0F0F6" },
   currTitle: { fontSize: 14, fontWeight: "800", color: "#2B161B" },
   currDesc: { fontSize: 12, color: "#666666", marginTop: 3, lineHeight: 17 },

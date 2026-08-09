@@ -13,7 +13,7 @@ import { C } from "@/theme/tech";
 // ── BUILD MARKER ──────────────────────────────────────────────────────────────
 // Rotate on EVERY shipped fix (small dot, top-right of the tab bar) so the user
 // can confirm the OTA loaded. History: … → cyan → red → blue → yellow → green.
-const BUILD_COLOR = "#DB2777"; // pink (reset code accepts up to 10 digits — matches 8-digit OTP)
+const BUILD_COLOR = "#0284C7"; // blue (combined bill names every child)
 
 type TabDef = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap };
 

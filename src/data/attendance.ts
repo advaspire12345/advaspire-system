@@ -622,7 +622,9 @@ export async function deleteAttendance(attendanceId: string): Promise<boolean> {
  * Reverse a session deduction when attendance is deleted
  * Adds 1 session back and removes pending payment if sessions become positive
  */
-async function reverseSessionDeduction(enrollmentId: string): Promise<void> {
+// Exported so the mobile attendance-mark route can undo a deduction the same way
+// the dashboard does; also called internally when attendance is deleted.
+export async function reverseSessionDeduction(enrollmentId: string): Promise<void> {
   // Get enrollment with package info and pool_id
   const { data: enrollment, error: enrollmentError } = await supabaseAdmin
     .from('enrollments')
